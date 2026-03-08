@@ -6,8 +6,10 @@ dist/
 build/
 .venv/
 venv/
+.claude/
 
 # Env
+.env.example
 .env
 
 # macOS
