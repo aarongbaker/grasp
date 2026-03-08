@@ -54,12 +54,14 @@ async def lifespan(app: FastAPI):
         from core.settings import get_settings
         settings = get_settings()
 
-        checkpointer = await AsyncPostgresSaver.from_conn_string(
+        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(
             settings.langgraph_checkpoint_url
-        ).__aenter__()
+        )
+        checkpointer = await _checkpointer_cm.__aenter__()
         await checkpointer.setup()
         _graph = build_grasp_graph(checkpointer)
         app.state.graph = _graph
+        app.state._checkpointer_cm = _checkpointer_cm  # prevent GC
 
     except Exception as e:
         print(f"Warning: LangGraph init failed ({e}). Using MemorySaver fallback.")
@@ -71,6 +73,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
+    if hasattr(app.state, '_checkpointer_cm'):
+        await app.state._checkpointer_cm.__aexit__(None, None, None)
     from db.session import engine
     await engine.dispose()
 

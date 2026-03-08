@@ -157,7 +157,7 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
 
             job.status = IngestionStatus.COMPLETE
             job.completed = 1
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         except Exception as e:
             job.status = IngestionStatus.FAILED

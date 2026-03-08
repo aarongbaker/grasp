@@ -45,6 +45,7 @@ async def test_run1_happy_path_complete(
     unique_session_id,
     base_initial_state,
     test_db_session,
+    test_user_id,
 ):
     """
     Full pipeline: all 6 mock nodes succeed.
@@ -54,16 +55,14 @@ async def test_run1_happy_path_complete(
     import models.session as session_model
     from models.session import Session
     from models.enums import SessionStatus
-    import uuid as uuid_lib
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
     initial_state = {**base_initial_state, "test_mode": None}
 
     # Create a dummy session row in the test DB
-    user_id = uuid_lib.uuid4()
     session_row = Session(
         session_id=unique_session_id,
-        user_id=user_id,
+        user_id=test_user_id,
         status=SessionStatus.GENERATING,
         concept_json=initial_state["concept"],
     )
@@ -144,6 +143,7 @@ async def test_run2_recoverable_error_partial(
     unique_session_id,
     base_initial_state,
     test_db_session,
+    test_user_id,
 ):
     """
     mock_enricher drops fondant (RAG_FAILURE, recoverable=True).
@@ -151,12 +151,10 @@ async def test_run2_recoverable_error_partial(
     """
     from core.status import finalise_session
     from models.session import Session
-    import uuid as uuid_lib
 
-    user_id = uuid_lib.uuid4()
     session_row = Session(
         session_id=unique_session_id,
-        user_id=user_id,
+        user_id=test_user_id,
         status=SessionStatus.GENERATING,
         concept_json=base_initial_state["concept"],
     )
@@ -221,6 +219,7 @@ async def test_run3_fatal_error_failed(
     unique_session_id,
     base_initial_state,
     test_db_session,
+    test_user_id,
 ):
     """
     mock_dag_merger raises RESOURCE_CONFLICT (recoverable=False).
@@ -229,12 +228,10 @@ async def test_run3_fatal_error_failed(
     """
     from core.status import finalise_session
     from models.session import Session
-    import uuid as uuid_lib
 
-    user_id = uuid_lib.uuid4()
     session_row = Session(
         session_id=unique_session_id,
-        user_id=user_id,
+        user_id=test_user_id,
         status=SessionStatus.GENERATING,
         concept_json=base_initial_state["concept"],
     )
@@ -291,6 +288,7 @@ async def test_run4_checkpoint_resume(
     unique_session_id,
     base_initial_state,
     test_db_session,
+    test_user_id,
     monkeypatch,
 ):
     """
@@ -305,12 +303,10 @@ async def test_run4_checkpoint_resume(
     """
     from core.status import finalise_session
     from models.session import Session
-    import uuid as uuid_lib
 
-    user_id = uuid_lib.uuid4()
     session_row = Session(
         session_id=unique_session_id,
-        user_id=user_id,
+        user_id=test_user_id,
         status=SessionStatus.GENERATING,
         concept_json=base_initial_state["concept"],
     )
@@ -334,9 +330,10 @@ async def test_run4_checkpoint_resume(
     monkeypatch.delenv("SIMULATE_INTERRUPT")
 
     # ── Second invoke: resume from checkpoint ────────────────────────────────
-    # Pass None as state — LangGraph resumes from the saved checkpoint.
-    # The checkpoint has generator/enricher/validator outputs already.
-    final_state = await compiled_graph.ainvoke(None, config=config)
+    # Pass initial_state again — LangGraph resumes from the saved checkpoint
+    # using the same thread_id. The checkpoint has generator/enricher/validator
+    # outputs already; only nodes after the checkpoint re-run.
+    final_state = await compiled_graph.ainvoke(initial_state, config=config)
 
     # ── Assert COMPLETE on second invoke ──────────────────────────────────────
     assert final_state is not None, "Second invoke should return final state"

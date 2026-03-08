@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     langgraph_checkpoint_url: str = "postgresql://grasp:grasp@localhost:5432/grasp"
 
     # Test databases
-    test_database_url: str = "postgresql+asyncpg://grasp:grasp@localhost:5433/grasp_test"
-    test_langgraph_checkpoint_url: str = "postgresql://grasp:grasp@localhost:5433/grasp_test"
+    test_database_url: str = "postgresql+asyncpg://grasp:grasp@localhost:5432/grasp_test"
+    test_langgraph_checkpoint_url: str = "postgresql://grasp:grasp@localhost:5432/grasp_test"
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"

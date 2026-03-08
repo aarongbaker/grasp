@@ -40,6 +40,8 @@ class Session(SQLModel, table=True):
     error_summary: Optional[str] = None          # populated on PARTIAL outcome
 
     # Timing
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

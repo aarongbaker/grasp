@@ -25,7 +25,7 @@ import os
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
 from core.settings import get_settings
@@ -80,7 +80,7 @@ async def compiled_graph(test_checkpointer):
 @pytest_asyncio.fixture(scope="session")
 async def test_db_engine():
     """Session-scoped test DB engine. Creates all SQLModel tables once."""
-    engine = create_async_engine(settings.test_database_url, echo=False)
+    engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
     # Import all SQLModel table models to register metadata
     import models.user       # noqa: F401
@@ -99,14 +99,33 @@ async def test_db_engine():
 
 @pytest_asyncio.fixture
 async def test_db_session(test_db_engine):
-    """Function-scoped DB session. Fresh per test."""
-    TestSessionLocal = sessionmaker(
-        bind=test_db_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+    """Function-scoped DB session. Fresh engine per test to avoid asyncpg
+    connection reuse issues ('another operation is in progress')."""
+    engine = create_async_engine(
+        settings.test_database_url, echo=False, poolclass=NullPool,
     )
-    async with TestSessionLocal() as session:
+    session = AsyncSession(engine, expire_on_commit=False)
+    try:
         yield session
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def test_user_id(test_db_session):
+    """Creates a UserProfile in the test DB and returns the user_id.
+    Required because sessions.user_id has a FK to user_profiles."""
+    from models.user import UserProfile
+    user_id = uuid.uuid4()
+    user = UserProfile(
+        user_id=user_id,
+        name="Test Chef",
+        email=f"chef-{user_id}@test.com",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+    return user_id
 
 
 @pytest.fixture

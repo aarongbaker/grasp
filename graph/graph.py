@@ -36,21 +36,21 @@ from graph.nodes.mock_renderer import schedule_renderer_node    # Phase 7: swap
 
 async def handle_fatal_error_node(state: GRASPState) -> dict:
     """
-    Terminal node for unrecoverable failures. Writes nothing to state —
-    just a named endpoint so the graph can route to END cleanly.
+    Terminal node for unrecoverable failures.
     The errors list already contains the fatal NodeError that triggered this.
+    Returns empty errors list — operator.add makes this a no-op.
     """
-    return {}
+    return {"errors": []}
 
 
 async def mark_complete_node(state: GRASPState) -> dict:
     """Terminal node — pipeline completed with no errors."""
-    return {}
+    return {"errors": []}
 
 
 async def mark_partial_node(state: GRASPState) -> dict:
     """Terminal node — pipeline completed with recoverable errors."""
-    return {}
+    return {"errors": []}
 
 
 def build_grasp_graph(checkpointer) -> StateGraph:

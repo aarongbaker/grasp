@@ -64,7 +64,7 @@ async def finalise_session(
         ]
         result.error_summary = "; ".join(error_messages)
 
-    result.completed_at = datetime.now(timezone.utc)
+    result.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.add(result)
     await db.commit()
 

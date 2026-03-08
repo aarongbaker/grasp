@@ -82,7 +82,7 @@ async def run_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Curre
 
     # Direct DB write — the one exception to the checkpoint-derived rule
     session.status = SessionStatus.GENERATING
-    session.started_at = datetime.now(timezone.utc)
+    session.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.add(session)
     await db.commit()
 

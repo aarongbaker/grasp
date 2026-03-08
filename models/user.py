@@ -55,7 +55,9 @@ class UserProfile(SQLModel, table=True):
     )
     # Merged into every DinnerConcept at session creation
     dietary_defaults: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
+    )
 
     kitchen_config: Optional[KitchenConfig] = Relationship(back_populates="user")
     equipment: list[Equipment] = Relationship(back_populates="user")

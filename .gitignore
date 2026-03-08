@@ -9,7 +9,7 @@ venv/
 .claude/
 
 # Env
-.env.example
+.env*
 .env
 
 # macOS
