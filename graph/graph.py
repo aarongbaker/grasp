@@ -25,7 +25,7 @@ from models.pipeline import GRASPState
 from graph.router import error_router, final_router
 
 # ── Node Imports (swap here in Phases 4-7) ───────────────────────────────────
-from graph.nodes.mock_generator import recipe_generator_node    # Phase 4: swap
+from graph.nodes.generator import recipe_generator_node         # Phase 4: real
 from graph.nodes.mock_enricher import rag_enricher_node         # Phase 5: swap
 from graph.nodes.mock_validator import validator_node            # Phase 5: swap (real Pydantic)
 from graph.nodes.mock_dag_builder import dag_builder_node       # Phase 6: swap

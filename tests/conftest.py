@@ -71,10 +71,36 @@ async def test_checkpointer():
 
 @pytest_asyncio.fixture(scope="session")
 async def compiled_graph(test_checkpointer):
-    """Session-scoped compiled LangGraph graph. Shared across all Phase 3 tests."""
-    from graph.graph import build_grasp_graph
-    graph = build_grasp_graph(test_checkpointer)
-    return graph
+    """
+    Session-scoped compiled LangGraph graph. Shared across all Phase 3 tests.
+
+    Phase 4: patches _create_llm in the real generator to return fixture recipes
+    instead of calling Claude. The patch stays active for the entire test session.
+    All generator node logic (prompt building, result formatting) still runs for
+    real — only the LLM call is bypassed.
+    """
+    from unittest.mock import patch, MagicMock, AsyncMock
+    from graph.nodes.generator import RecipeGenerationOutput
+    from tests.fixtures.recipes import (
+        RAW_SHORT_RIBS,
+        RAW_POMMES_PUREE,
+        RAW_CHOCOLATE_FONDANT,
+    )
+
+    # Build mock chain that returns fixture recipes
+    mock_output = RecipeGenerationOutput(
+        recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT]
+    )
+    mock_chain = AsyncMock()
+    mock_chain.ainvoke.return_value = mock_output
+
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_chain
+
+    with patch("graph.nodes.generator._create_llm", return_value=mock_llm):
+        from graph.graph import build_grasp_graph
+        graph = build_grasp_graph(test_checkpointer)
+        yield graph
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -161,6 +187,7 @@ def base_initial_state() -> dict:
             "max_oven_racks": 2,
             "has_second_oven": False,
         },
+        "equipment": [],
         "raw_recipes": [],
         "enriched_recipes": [],
         "validated_recipes": [],

@@ -34,7 +34,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
     from graph.graph import build_grasp_graph
     from core.status import finalise_session
     from models.session import Session
-    from models.user import UserProfile, KitchenConfig
+    from models.user import UserProfile, KitchenConfig, Equipment
     from models.pipeline import DinnerConcept
     from models.enums import SessionStatus
 
@@ -58,11 +58,19 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
             kitchen = await db.get(KitchenConfig, user.kitchen_config_id)
 
+            # Load equipment for this user (one-to-many)
+            from sqlmodel import select
+            equipment_result = await db.execute(
+                select(Equipment).where(Equipment.user_id == uuid.UUID(user_id))
+            )
+            equipment_rows = equipment_result.scalars().all()
+
             concept = DinnerConcept.model_validate(session.concept_json)
 
             initial_state = {
                 "concept": concept.model_dump(),
                 "kitchen_config": kitchen.model_dump() if kitchen else {},
+                "equipment": [e.model_dump() for e in equipment_rows],
                 "raw_recipes": [],
                 "enriched_recipes": [],
                 "validated_recipes": [],
