@@ -1,29 +1,25 @@
 """
-graph/nodes/mock_validator.py
-THE CRITICAL MOCK — this is NOT a stub.
+graph/nodes/validator.py
+Real validator — Phase 5. Promoted from mock_validator.py.
 
-mock_validator.py runs REAL Pydantic validators against the enriched recipes
-in state. It instantiates actual EnrichedRecipe models from the state dicts,
+This is NOT a new implementation. The mock already ran REAL Pydantic
+validation against EnrichedRecipe. The code is identical — only the
+file location and import path changed.
+
+Runs EnrichedRecipe.model_validate() on each recipe dict in state,
 which triggers:
   - RecipeStep.duration_minutes > 0 (field_validator)
-  - EnrichedRecipe.depends_on consistency (model_validator)
   - RecipeStep.duration_max >= duration_minutes (field_validator)
-
-This means fixture data is validated against the same schema the real
-pipeline will use. Any fixture inconsistency is caught here in Phase 3,
-not discovered in Phase 5 when real data flows through.
+  - depends_on consistency — all referenced step_ids exist (model_validator)
 
 Per-recipe failure handling:
-  If one recipe's EnrichedRecipe fails validation:
+  If one recipe fails validation:
     → append VALIDATION_FAILURE NodeError (recoverable=True)
     → exclude that recipe from validated_recipes
     → continue (error_router sees recoverable=True)
   If ALL recipes fail validation:
     → append VALIDATION_FAILURE NodeError (recoverable=False)
     → error_router routes to handle_fatal_error
-
-Deleted in Phase 5 and replaced by the real validator (which does the
-same thing — the mock already IS the real validator logic).
 """
 
 from datetime import datetime, timezone
@@ -40,7 +36,6 @@ async def validator_node(state: GRASPState) -> dict:
     for recipe_dict in enriched_dicts:
         recipe_name = recipe_dict.get("source", {}).get("name", "unknown")
         try:
-            # THIS IS THE REAL VALIDATOR. Not a stub.
             enriched = EnrichedRecipe.model_validate(recipe_dict)
 
             validated_recipe = ValidatedRecipe(
@@ -63,7 +58,6 @@ async def validator_node(state: GRASPState) -> dict:
 
     if not validated:
         # All recipes failed — fatal
-        # Replace any per-recipe recoverable errors with a single fatal error
         return {
             "validated_recipes": [],
             "errors": [{

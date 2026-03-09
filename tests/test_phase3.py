@@ -144,10 +144,13 @@ async def test_run2_recoverable_error_partial(
     base_initial_state,
     test_db_session,
     test_user_id,
+    enricher_fail_fondant,
 ):
     """
-    mock_enricher drops fondant (RAG_FAILURE, recoverable=True).
+    Enricher drops fondant (RAG_FAILURE, recoverable=True).
     Pipeline continues. 2-recipe schedule produced. PARTIAL outcome.
+    Phase 5: enricher_fail_fondant fixture replaces the old test_mode
+    mechanism that lived in mock_enricher.py.
     """
     from core.status import finalise_session
     from models.session import Session

@@ -17,6 +17,12 @@ CRITICAL details:
 Two async session scopes:
   - "session" scope: checkpointer + graph (expensive setup, shared across tests)
   - "function" scope: DB session (fresh per test for isolation)
+
+Mock architecture (Phase 4-5):
+  Generator mock: patches _create_llm → returns 3 fixture RawRecipes.
+  Enricher mock: patches _create_llm + _retrieve_rag_context → returns fixture
+    EnrichedRecipes based on recipe name in the LLM message. Per-test failure
+    control via _enricher_skip_recipes set + enricher_fail_fondant fixture.
 """
 
 import asyncio
@@ -31,6 +37,12 @@ from sqlmodel import SQLModel
 from core.settings import get_settings
 
 settings = get_settings()
+
+
+# ── Enricher mock control ────────────────────────────────────────────────────
+# Module-level set of recipe names that the enricher mock should simulate
+# failure for. Tests add names via the enricher_fail_fondant fixture.
+_enricher_skip_recipes: set[str] = set()
 
 
 @pytest.fixture(scope="session")
@@ -75,32 +87,91 @@ async def compiled_graph(test_checkpointer):
     Session-scoped compiled LangGraph graph. Shared across all Phase 3 tests.
 
     Phase 4: patches _create_llm in the real generator to return fixture recipes
-    instead of calling Claude. The patch stays active for the entire test session.
-    All generator node logic (prompt building, result formatting) still runs for
-    real — only the LLM call is bypassed.
+    instead of calling Claude.
+    Phase 5: patches _create_llm and _retrieve_rag_context in the real enricher
+    to return fixture EnrichedRecipe data without calling Claude or Pinecone.
+    The enricher mock's side_effect inspects the HumanMessage to determine
+    which recipe is being enriched, and checks _enricher_skip_recipes to
+    simulate per-recipe failures for specific tests.
     """
     from unittest.mock import patch, MagicMock, AsyncMock
     from graph.nodes.generator import RecipeGenerationOutput
+    from graph.nodes.enricher import StepEnrichmentOutput
     from tests.fixtures.recipes import (
         RAW_SHORT_RIBS,
         RAW_POMMES_PUREE,
         RAW_CHOCOLATE_FONDANT,
+        ENRICHED_SHORT_RIBS,
+        ENRICHED_POMMES_PUREE,
+        ENRICHED_CHOCOLATE_FONDANT,
     )
 
-    # Build mock chain that returns fixture recipes
-    mock_output = RecipeGenerationOutput(
+    # ── Generator mock (Phase 4) ─────────────────────────────────────────────
+    gen_mock_output = RecipeGenerationOutput(
         recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT]
     )
-    mock_chain = AsyncMock()
-    mock_chain.ainvoke.return_value = mock_output
+    gen_mock_chain = AsyncMock()
+    gen_mock_chain.ainvoke.return_value = gen_mock_output
 
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output.return_value = mock_chain
+    gen_mock_llm = MagicMock()
+    gen_mock_llm.with_structured_output.return_value = gen_mock_chain
 
-    with patch("graph.nodes.generator._create_llm", return_value=mock_llm):
+    # ── Enricher mock (Phase 5) ──────────────────────────────────────────────
+    # Map recipe names to their fixture enrichment outputs
+    _enricher_fixture_map = {
+        "Braised Short Ribs": ENRICHED_SHORT_RIBS,
+        "Pommes Puree": ENRICHED_POMMES_PUREE,
+        "Chocolate Fondant": ENRICHED_CHOCOLATE_FONDANT,
+    }
+
+    async def _enricher_ainvoke_side_effect(messages):
+        """Return fixture StepEnrichmentOutput based on recipe name in message."""
+        human_content = messages[1].content
+
+        # Check if any skip recipe name appears in the message
+        for skip_name in _enricher_skip_recipes:
+            if skip_name in human_content:
+                raise Exception(
+                    f"Simulated enrichment failure for '{skip_name}'"
+                )
+
+        # Match against fixture recipes
+        for recipe_name, enriched in _enricher_fixture_map.items():
+            if recipe_name in human_content:
+                return StepEnrichmentOutput(
+                    steps=enriched.steps,
+                    chef_notes=enriched.chef_notes,
+                    techniques_used=enriched.techniques_used,
+                )
+
+        raise Exception(f"Enricher mock: no fixture match for message: {human_content[:80]}")
+
+    enricher_mock_chain = AsyncMock()
+    enricher_mock_chain.ainvoke = AsyncMock(side_effect=_enricher_ainvoke_side_effect)
+
+    enricher_mock_llm = MagicMock()
+    enricher_mock_llm.with_structured_output.return_value = enricher_mock_chain
+
+    # ── Build graph with all mocks active ────────────────────────────────────
+    with patch("graph.nodes.generator._create_llm", return_value=gen_mock_llm), \
+         patch("graph.nodes.enricher._create_llm", return_value=enricher_mock_llm), \
+         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]):
         from graph.graph import build_grasp_graph
         graph = build_grasp_graph(test_checkpointer)
         yield graph
+
+
+@pytest.fixture
+def enricher_fail_fondant():
+    """
+    Function-scoped fixture that makes the enricher mock raise for Chocolate
+    Fondant. Used by test_run2 (recoverable error) to simulate per-recipe
+    RAG enrichment failure. Replaces the old test_mode="recoverable_error"
+    mechanism that lived in mock_enricher.py.
+    """
+    _enricher_skip_recipes.add("Chocolate Fondant")
+    yield
+    _enricher_skip_recipes.discard("Chocolate Fondant")
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -188,6 +259,7 @@ def base_initial_state() -> dict:
             "has_second_oven": False,
         },
         "equipment": [],
+        "user_id": "",
         "raw_recipes": [],
         "enriched_recipes": [],
         "validated_recipes": [],
