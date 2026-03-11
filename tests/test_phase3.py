@@ -16,7 +16,8 @@ Run 2: Recoverable Error (PARTIAL)
            schedule populated (2 recipes), error_summary written.
 
 Run 3: Fatal Error (FAILED)
-  mock_dag_merger raises RESOURCE_CONFLICT (recoverable=False).
+  Enricher returns cyclic step dependencies for all 3 recipes.
+  DAG builder catches cycles → DEPENDENCY_RESOLUTION (recoverable=False).
   error_router routes to handle_fatal_error. Pipeline halts.
   Asserts: status=FAILED, no schedule, generator/enricher/validator
            each ran exactly once (no retry of earlier nodes).
@@ -223,11 +224,14 @@ async def test_run3_fatal_error_failed(
     base_initial_state,
     test_db_session,
     test_user_id,
+    enricher_return_cyclic,
 ):
     """
-    mock_dag_merger raises RESOURCE_CONFLICT (recoverable=False).
+    Enricher returns cyclic step dependencies for all 3 recipes.
+    Validator passes them (model_validator checks reference existence, not cycles).
+    DAG builder catches cycles → DEPENDENCY_RESOLUTION for each recipe.
+    All 3 fail → fatal error (recoverable=False).
     error_router → handle_fatal_error → END. No schedule produced.
-    Asserts generator/enricher/validator each ran exactly once.
     """
     from core.status import finalise_session
     from models.session import Session
@@ -242,7 +246,7 @@ async def test_run3_fatal_error_failed(
     await test_db_session.commit()
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
-    initial_state = {**base_initial_state, "test_mode": "fatal_error"}
+    initial_state = {**base_initial_state, "test_mode": None}
 
     final_state = await compiled_graph.ainvoke(initial_state, config=config)
 
@@ -258,15 +262,15 @@ async def test_run3_fatal_error_failed(
         None,
     )
     assert fatal_error is not None, "Expected at least one fatal (recoverable=False) error"
-    assert fatal_error["error_type"] == ErrorType.RESOURCE_CONFLICT.value
-    assert fatal_error["node_name"] == "dag_merger"
+    assert fatal_error["error_type"] == ErrorType.DEPENDENCY_RESOLUTION.value
+    assert fatal_error["node_name"] == "dag_builder"
 
     # ── Earlier nodes ran exactly once (no retry) ────────────────────────────
     # raw_recipes populated once by generator
     raw = final_state.get("raw_recipes", [])
     assert len(raw) == 3, f"Generator ran once → 3 raw_recipes, got {len(raw)}"
 
-    # enriched_recipes populated once (no retry)
+    # enriched_recipes populated once (no retry) — all 3 enriched (cyclic data passes validator)
     enriched = final_state.get("enriched_recipes", [])
     assert len(enriched) == 3, f"Enricher ran once → 3 enriched, got {len(enriched)}"
 

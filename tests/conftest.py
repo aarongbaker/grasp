@@ -44,6 +44,10 @@ settings = get_settings()
 # failure for. Tests add names via the enricher_fail_fondant fixture.
 _enricher_skip_recipes: set[str] = set()
 
+# When True, the enricher mock returns cyclic step data for ALL recipes.
+# Used by test_run3 (fatal error) — cycles are caught by the real DAG builder.
+_enricher_cyclic_mode: bool = False
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -104,6 +108,9 @@ async def compiled_graph(test_checkpointer):
         ENRICHED_SHORT_RIBS,
         ENRICHED_POMMES_PUREE,
         ENRICHED_CHOCOLATE_FONDANT,
+        CYCLIC_STEPS_SHORT_RIBS,
+        CYCLIC_STEPS_POMMES_PUREE,
+        CYCLIC_STEPS_FONDANT,
     )
 
     # ── Generator mock (Phase 4) ─────────────────────────────────────────────
@@ -124,6 +131,13 @@ async def compiled_graph(test_checkpointer):
         "Chocolate Fondant": ENRICHED_CHOCOLATE_FONDANT,
     }
 
+    # Map recipe names to cyclic step data (Phase 6 fatal error test)
+    _enricher_cyclic_map = {
+        "Braised Short Ribs": CYCLIC_STEPS_SHORT_RIBS,
+        "Pommes Puree": CYCLIC_STEPS_POMMES_PUREE,
+        "Chocolate Fondant": CYCLIC_STEPS_FONDANT,
+    }
+
     async def _enricher_ainvoke_side_effect(messages):
         """Return fixture StepEnrichmentOutput based on recipe name in message."""
         human_content = messages[1].content
@@ -135,7 +149,17 @@ async def compiled_graph(test_checkpointer):
                     f"Simulated enrichment failure for '{skip_name}'"
                 )
 
-        # Match against fixture recipes
+        # Cyclic mode: return steps with circular dependencies
+        if _enricher_cyclic_mode:
+            for recipe_name, cyclic_steps in _enricher_cyclic_map.items():
+                if recipe_name in human_content:
+                    return StepEnrichmentOutput(
+                        steps=cyclic_steps,
+                        chef_notes="Cyclic fixture",
+                        techniques_used=[],
+                    )
+
+        # Normal mode: match against fixture recipes
         for recipe_name, enriched in _enricher_fixture_map.items():
             if recipe_name in human_content:
                 return StepEnrichmentOutput(
@@ -172,6 +196,20 @@ def enricher_fail_fondant():
     _enricher_skip_recipes.add("Chocolate Fondant")
     yield
     _enricher_skip_recipes.discard("Chocolate Fondant")
+
+
+@pytest.fixture
+def enricher_return_cyclic():
+    """
+    Function-scoped fixture that makes the enricher mock return cyclic step
+    data for ALL recipes. Used by test_run3 (fatal error) — the real DAG
+    builder catches cycles via NetworkX and returns DEPENDENCY_RESOLUTION
+    errors. All recipes fail → fatal (recoverable=False).
+    """
+    global _enricher_cyclic_mode
+    _enricher_cyclic_mode = True
+    yield
+    _enricher_cyclic_mode = False
 
 
 @pytest_asyncio.fixture(scope="session")

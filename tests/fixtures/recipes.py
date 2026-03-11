@@ -263,3 +263,60 @@ ENRICHED_CHOCOLATE_FONDANT = EnrichedRecipe(
     chef_notes="Baking time depends on ramekin material and oven calibration. Test one fondant first.",
     techniques_used=["bain-marie", "folding", "mise en place"],
 )
+
+
+# ── Cyclic fixture data (Phase 6 fatal error test) ──────────────────────────
+# Each recipe has a circular dependency: step_1 → step_2 → step_1.
+# EnrichedRecipe.model_validator allows this (it checks reference existence,
+# NOT acyclicity). The DAG builder catches cycles via NetworkX.
+
+CYCLIC_STEPS_SHORT_RIBS = [
+    RecipeStep(
+        step_id="short_rib_step_1",
+        description="Sear ribs",
+        duration_minutes=20,
+        depends_on=["short_rib_step_2"],  # ← creates cycle
+        resource=Resource.STOVETOP,
+    ),
+    RecipeStep(
+        step_id="short_rib_step_2",
+        description="Braise ribs",
+        duration_minutes=150,
+        depends_on=["short_rib_step_1"],  # ← creates cycle
+        resource=Resource.OVEN,
+    ),
+]
+
+CYCLIC_STEPS_POMMES_PUREE = [
+    RecipeStep(
+        step_id="pommes_puree_step_1",
+        description="Boil potatoes",
+        duration_minutes=30,
+        depends_on=["pommes_puree_step_2"],
+        resource=Resource.STOVETOP,
+    ),
+    RecipeStep(
+        step_id="pommes_puree_step_2",
+        description="Rice potatoes",
+        duration_minutes=10,
+        depends_on=["pommes_puree_step_1"],
+        resource=Resource.HANDS,
+    ),
+]
+
+CYCLIC_STEPS_FONDANT = [
+    RecipeStep(
+        step_id="fondant_step_1",
+        description="Melt chocolate",
+        duration_minutes=10,
+        depends_on=["fondant_step_2"],
+        resource=Resource.STOVETOP,
+    ),
+    RecipeStep(
+        step_id="fondant_step_2",
+        description="Make batter",
+        duration_minutes=15,
+        depends_on=["fondant_step_1"],
+        resource=Resource.HANDS,
+    ),
+]
