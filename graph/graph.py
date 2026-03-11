@@ -30,7 +30,7 @@ from graph.nodes.enricher import rag_enricher_node               # Phase 5: real
 from graph.nodes.validator import validator_node                 # Phase 5: real (Pydantic)
 from graph.nodes.dag_builder import dag_builder_node             # Phase 6: real
 from graph.nodes.dag_merger import dag_merger_node               # Phase 6: real
-from graph.nodes.mock_renderer import schedule_renderer_node    # Phase 7: swap
+from graph.nodes.renderer import schedule_renderer_node          # Phase 7: real
 # ─────────────────────────────────────────────────────────────────────────────
 
 

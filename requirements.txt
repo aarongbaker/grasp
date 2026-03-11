@@ -44,6 +44,9 @@ pytest-asyncio==0.23.7
 pytest-mock==3.14.0
 httpx==0.27.0                   # async test client for FastAPI
 
+# ── Dev UI ───────────────────────────────────────────────────────────────────
+streamlit==1.55.0               # test UI — not required for production
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1
 python-multipart==0.0.9         # FastAPI file upload support

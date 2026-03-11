@@ -101,6 +101,11 @@ async def compiled_graph(test_checkpointer):
     from unittest.mock import patch, MagicMock, AsyncMock
     from graph.nodes.generator import RecipeGenerationOutput
     from graph.nodes.enricher import StepEnrichmentOutput
+    from graph.nodes.renderer import ScheduleSummaryOutput
+    from tests.fixtures.schedules import (
+        NATURAL_LANGUAGE_SCHEDULE_FULL,
+        NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE,
+    )
     from tests.fixtures.recipes import (
         RAW_SHORT_RIBS,
         RAW_POMMES_PUREE,
@@ -176,10 +181,42 @@ async def compiled_graph(test_checkpointer):
     enricher_mock_llm = MagicMock()
     enricher_mock_llm.with_structured_output.return_value = enricher_mock_chain
 
+    # ── Renderer mock (Phase 7) ──────────────────────────────────────────────
+    # The renderer's LLM only generates summary + error_summary.
+    # Timeline construction is deterministic (no LLM). The mock inspects
+    # the HumanMessage step count to decide which fixture summary to return.
+
+    async def _renderer_ainvoke_side_effect(messages):
+        """Return fixture ScheduleSummaryOutput based on step count in message."""
+        human_content = messages[1].content
+        # 12-step = full (3 recipes), 7-step = two-recipe (fondant dropped)
+        if "12-step" in human_content:
+            return ScheduleSummaryOutput(
+                summary=NATURAL_LANGUAGE_SCHEDULE_FULL.summary,
+                error_summary=None,
+            )
+        elif "7-step" in human_content:
+            return ScheduleSummaryOutput(
+                summary=NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE.summary,
+                error_summary=NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE.error_summary,
+            )
+        # Fallback: return a generic summary for any step count
+        return ScheduleSummaryOutput(
+            summary="Mock schedule summary.",
+            error_summary=None,
+        )
+
+    renderer_mock_chain = AsyncMock()
+    renderer_mock_chain.ainvoke = AsyncMock(side_effect=_renderer_ainvoke_side_effect)
+
+    renderer_mock_llm = MagicMock()
+    renderer_mock_llm.with_structured_output.return_value = renderer_mock_chain
+
     # ── Build graph with all mocks active ────────────────────────────────────
     with patch("graph.nodes.generator._create_llm", return_value=gen_mock_llm), \
          patch("graph.nodes.enricher._create_llm", return_value=enricher_mock_llm), \
-         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]), \
+         patch("graph.nodes.renderer._create_llm", return_value=renderer_mock_llm):
         from graph.graph import build_grasp_graph
         graph = build_grasp_graph(test_checkpointer)
         yield graph
