@@ -52,6 +52,7 @@ streamlit==1.55.0               # test UI — not required for production
 
 # ── Auth / Security ─────────────────────────────────────────────────────────
 PyJWT==2.9.0                    # JWT token encoding/decoding
+bcrypt==5.0.0                   # password hashing
 slowapi==0.1.9                  # per-route rate limiting
 
 # ── Observability ────────────────────────────────────────────────────────────

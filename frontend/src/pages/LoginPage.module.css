@@ -1,0 +1,62 @@
+.page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-xl);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--space-2xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: var(--space-xl);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.error {
+  font-size: var(--text-sm);
+  color: var(--cost-negative);
+  text-align: center;
+  padding: var(--space-sm);
+  background: rgba(196, 107, 107, 0.1);
+  border-radius: var(--radius-md);
+}
+
+.switchLink {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: var(--space-md);
+}
+
+.switchLink a {
+  color: var(--accent-primary);
+}
+
+.switchLink a:hover {
+  color: var(--accent-warm);
+}

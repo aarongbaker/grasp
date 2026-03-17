@@ -52,6 +52,7 @@ class UserProfile(SQLModel, table=True):
     user_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str
     email: str = Field(unique=True, index=True)
+    password_hash: str = Field(default="")
     kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
     # Merged into every DinnerConcept at session creation
     dietary_defaults: list[str] = Field(default_factory=list, sa_column=Column(JSON))

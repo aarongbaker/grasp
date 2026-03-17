@@ -1,0 +1,68 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.pending {
+  background: rgba(92, 82, 72, 0.3);
+  color: var(--text-muted);
+}
+
+.pending .dot {
+  background: var(--text-muted);
+}
+
+.generating, .enriching, .validating, .scheduling {
+  background: rgba(201, 129, 58, 0.15);
+  color: var(--accent-warm);
+}
+
+.generating .dot, .enriching .dot, .validating .dot, .scheduling .dot {
+  background: var(--accent-primary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.complete {
+  background: rgba(122, 173, 122, 0.15);
+  color: var(--cost-positive);
+}
+
+.complete .dot {
+  background: var(--cost-positive);
+}
+
+.partial {
+  background: rgba(212, 162, 78, 0.15);
+  color: var(--cost-warning);
+}
+
+.partial .dot {
+  background: var(--cost-warning);
+}
+
+.failed {
+  background: rgba(196, 107, 107, 0.15);
+  color: var(--cost-negative);
+}
+
+.failed .dot {
+  background: var(--cost-negative);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

@@ -1,0 +1,26 @@
+.skeleton {
+  background: var(--bg-raised);
+  border-radius: var(--radius-md);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.text {
+  height: 1em;
+  border-radius: var(--radius-sm);
+}
+
+.heading {
+  height: 1.5em;
+  width: 60%;
+  border-radius: var(--radius-sm);
+}
+
+.card {
+  height: 160px;
+  border-radius: var(--radius-lg);
+}
+
+.timeline {
+  height: 80px;
+  border-radius: var(--radius-md);
+}

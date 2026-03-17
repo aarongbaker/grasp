@@ -1,0 +1,84 @@
+.title {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xl);
+}
+
+.uploadSection {
+  margin-bottom: var(--space-xl);
+}
+
+.jobStatus {
+  margin-top: var(--space-lg);
+  padding: var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.jobHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+}
+
+.jobTitle {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.jobBadge {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-sm);
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.jobBadge.processing {
+  background: rgba(201, 129, 58, 0.15);
+  color: var(--accent-warm);
+}
+
+.jobBadge.complete {
+  background: rgba(122, 173, 122, 0.15);
+  color: var(--cost-positive);
+}
+
+.jobBadge.failed {
+  background: rgba(196, 107, 107, 0.15);
+  color: var(--cost-negative);
+}
+
+.jobBadge.pending {
+  background: rgba(92, 82, 72, 0.3);
+  color: var(--text-muted);
+}
+
+.bookList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.bookItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  padding: var(--space-xs) 0;
+}
+
+.bookError {
+  font-size: var(--text-xs);
+  color: var(--cost-negative);
+}

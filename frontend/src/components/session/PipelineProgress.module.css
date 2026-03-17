@@ -1,0 +1,61 @@
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-lg) 0;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.stageLabel {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.stageLabel.active {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.stageLabel.done {
+  color: var(--text-secondary);
+}
+
+.connector {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 0 var(--space-xs);
+}
+
+.connector.done {
+  background: var(--text-secondary);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.dot.active {
+  background: var(--accent-primary);
+  box-shadow: 0 0 8px rgba(201, 129, 58, 0.5);
+  animation: glow 1.5s ease-in-out infinite;
+}
+
+.dot.done {
+  background: var(--text-secondary);
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(201, 129, 58, 0.5); }
+  50% { box-shadow: 0 0 16px rgba(201, 129, 58, 0.8); }
+}

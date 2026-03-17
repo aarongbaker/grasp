@@ -7,9 +7,10 @@ create_db_and_tables() is called once at startup by the lifespan hook.
 engine is exposed for disposal at shutdown.
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.settings import get_settings
 

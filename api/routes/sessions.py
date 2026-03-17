@@ -124,3 +124,51 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
             return session
 
     return session
+
+
+@router.get("/{session_id}/results")
+async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Returns the full pipeline output (schedule, recipes, errors) for a terminal session.
+    Reads from the LangGraph checkpoint — only callable when session is complete/partial.
+    """
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not session.status.is_terminal:
+        raise HTTPException(status_code=409, detail="Session is not yet complete")
+    if session.status == SessionStatus.FAILED:
+        raise HTTPException(status_code=409, detail="Session failed — no results available")
+
+    from main import get_graph
+
+    graph = get_graph()
+    config = {"configurable": {"thread_id": str(session_id)}}
+
+    try:
+        state_snapshot = await graph.aget_state(config)
+        state = state_snapshot.values if state_snapshot else {}
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not read pipeline state from checkpoint")
+
+    if not state:
+        raise HTTPException(status_code=502, detail="Checkpoint state is empty")
+
+    from models.recipe import ValidatedRecipe
+    from models.scheduling import NaturalLanguageSchedule
+
+    schedule_dict = state.get("schedule")
+    if not schedule_dict:
+        raise HTTPException(status_code=502, detail="No schedule found in pipeline state")
+
+    schedule = NaturalLanguageSchedule.model_validate(schedule_dict)
+    recipes = [ValidatedRecipe.model_validate(r) for r in state.get("validated_recipes", [])]
+    errors = state.get("errors", [])
+
+    return {
+        "schedule": schedule.model_dump(),
+        "recipes": [r.model_dump() for r in recipes],
+        "errors": errors,
+    }
