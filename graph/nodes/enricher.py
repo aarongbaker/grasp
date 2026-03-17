@@ -25,17 +25,19 @@ Mockable seams:
 Tests patch these two functions to bypass external APIs.
 """
 
-import re
 import logging
+import re
+
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from models.pipeline import GRASPState
-from models.recipe import RawRecipe, RecipeStep, EnrichedRecipe
+from core.llm import extract_token_usage, is_timeout_error, llm_retry
+from core.settings import get_settings
 from models.enums import ErrorType, Resource
 from models.errors import NodeError
-from core.settings import get_settings
+from models.pipeline import GRASPState
+from models.recipe import EnrichedRecipe, RawRecipe, RecipeStep
 
 logger = logging.getLogger(__name__)
 
@@ -218,10 +220,11 @@ def _create_llm() -> ChatAnthropic:
 async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
     user_id: str,
-) -> EnrichedRecipe:
+) -> tuple[EnrichedRecipe, dict]:
     """
     Enrich a single RawRecipe: RAG retrieval + LLM structured output.
     Raises on failure — caller handles per-recipe error isolation.
+    Returns (EnrichedRecipe, token_usage_dict).
     """
     slug = _generate_recipe_slug(raw_recipe.name)
 
@@ -232,25 +235,31 @@ async def _enrich_single_recipe(
     # Build prompt
     system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
 
-    # Call Claude with structured output
+    # Call Claude with structured output (with retry on transient errors)
     llm = _create_llm()
     chain = llm.with_structured_output(StepEnrichmentOutput)
 
-    result = await chain.ainvoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"Convert the {len(raw_recipe.steps)} flat steps for '{raw_recipe.name}' into structured RecipeStep objects."),
-    ])
+    @llm_retry
+    async def _invoke_llm():
+        return await chain.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Convert the {len(raw_recipe.steps)} flat steps for '{raw_recipe.name}' into structured RecipeStep objects."),
+        ])
+
+    result = await _invoke_llm()
+    usage = extract_token_usage(result, "rag_enricher")
 
     # Build EnrichedRecipe
     rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
 
-    return EnrichedRecipe(
+    enriched = EnrichedRecipe(
         source=raw_recipe,
         steps=result.steps,
         rag_sources=rag_source_ids,
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,
     )
+    return enriched, usage
 
 
 # ── Node function ────────────────────────────────────────────────────────────
@@ -265,22 +274,28 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     raw_recipe_dicts: list[dict] = state.get("raw_recipes", [])
     user_id: str = state.get("user_id", "")
 
+    logger.info("Enriching %d raw recipes", len(raw_recipe_dicts))
+
     enriched: list[dict] = []
     errors: list[dict] = []
+    token_usages: list[dict] = []
 
     for recipe_dict in raw_recipe_dicts:
         recipe_name = recipe_dict.get("name", "unknown")
         try:
             raw_recipe = RawRecipe.model_validate(recipe_dict)
-            enriched_recipe = await _enrich_single_recipe(raw_recipe, user_id)
+            enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id)
             enriched.append(enriched_recipe.model_dump())
+            token_usages.append(usage)
+            logger.info("Enriched recipe: %s (%d steps, %d RAG sources)", recipe_name, len(enriched_recipe.steps), len(enriched_recipe.rag_sources))
 
         except Exception as exc:
             exc_type = type(exc).__name__
-            if "timeout" in exc_type.lower() or "timeout" in str(exc).lower():
+            if is_timeout_error(exc):
                 error_type = ErrorType.LLM_TIMEOUT
             else:
                 error_type = ErrorType.RAG_FAILURE
+            logger.warning("Enrichment failed for '%s': %s: %s", recipe_name, exc_type, exc)
 
             error = NodeError(
                 node_name="rag_enricher",
@@ -307,4 +322,6 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     update: dict = {"enriched_recipes": enriched}
     if errors:
         update["errors"] = errors
+    if token_usages:
+        update["token_usage"] = token_usages
     return update

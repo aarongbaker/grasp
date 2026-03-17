@@ -1,7 +1,8 @@
 """api/routes/health.py — GET /api/v1/health"""
 from fastapi import APIRouter, Depends
-from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import text
+from sqlmodel.ext.asyncio.session import AsyncSession
+
 from db.session import get_session
 
 router = APIRouter()

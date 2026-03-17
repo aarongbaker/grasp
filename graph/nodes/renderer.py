@@ -20,16 +20,20 @@ import logging
 from typing import Optional
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from models.pipeline import GRASPState, DinnerConcept
-from models.scheduling import (
-    MergedDAG, ScheduledStep, TimelineEntry, NaturalLanguageSchedule,
-)
+from core.llm import extract_token_usage, llm_retry
+from core.settings import get_settings
 from models.enums import ErrorType, Resource
 from models.errors import NodeError
-from core.settings import get_settings
+from models.pipeline import DinnerConcept, GRASPState
+from models.scheduling import (
+    MergedDAG,
+    NaturalLanguageSchedule,
+    ScheduledStep,
+    TimelineEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,16 +244,21 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
         llm = _create_llm()
         chain = llm.with_structured_output(ScheduleSummaryOutput)
 
-        result = await chain.ainvoke([
-            SystemMessage(content=prompt),
-            HumanMessage(
-                content=f"Write a summary for this {len(timeline)}-step "
-                f"cooking schedule ({merged_dag.total_duration_minutes} min total)."
-            ),
-        ])
+        @llm_retry
+        async def _invoke_llm():
+            return await chain.ainvoke([
+                SystemMessage(content=prompt),
+                HumanMessage(
+                    content=f"Write a summary for this {len(timeline)}-step "
+                    f"cooking schedule ({merged_dag.total_duration_minutes} min total)."
+                ),
+            ])
+
+        result = await _invoke_llm()
 
         summary = result.summary
         error_summary = result.error_summary
+        usage = extract_token_usage(result, "schedule_renderer")
 
         logger.info(
             "Rendered schedule: %d timeline entries, %d min total",
@@ -289,4 +298,7 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
         summary=summary,
         error_summary=error_summary,
     )
-    return {"schedule": schedule.model_dump()}
+    return {
+        "schedule": schedule.model_dump(),
+        "token_usage": [usage],
+    }

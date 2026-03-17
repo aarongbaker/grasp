@@ -7,6 +7,7 @@ Chef can always override via UI.
 """
 
 import re
+
 from models.enums import DocumentType
 
 COOKBOOK_SIGNALS = [

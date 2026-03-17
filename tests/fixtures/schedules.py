@@ -39,17 +39,28 @@ Cross-recipe parallelism is enforced by the merger's resource contention rules,
 not by explicit cross-recipe depends_on edges.
 """
 
-from models.scheduling import (
-    RecipeDAG, MergedDAG, ScheduledStep,
-    NaturalLanguageSchedule, TimelineEntry,
-)
 from models.enums import Resource
-from tests.fixtures.recipes import (
-    SR_STEP_1, SR_STEP_2, SR_STEP_3, SR_STEP_4,
-    PP_STEP_1, PP_STEP_2, PP_STEP_3,
-    CF_STEP_1, CF_STEP_2, CF_STEP_3, CF_STEP_4, CF_STEP_5,
+from models.scheduling import (
+    MergedDAG,
+    NaturalLanguageSchedule,
+    RecipeDAG,
+    ScheduledStep,
+    TimelineEntry,
 )
-
+from tests.fixtures.recipes import (
+    CF_STEP_1,
+    CF_STEP_2,
+    CF_STEP_3,
+    CF_STEP_4,
+    CF_STEP_5,
+    PP_STEP_1,
+    PP_STEP_2,
+    PP_STEP_3,
+    SR_STEP_1,
+    SR_STEP_2,
+    SR_STEP_3,
+    SR_STEP_4,
+)
 
 # ── Recipe DAGs ───────────────────────────────────────────────────────────────
 # Slugs match _generate_recipe_slug() output from graph/nodes/dag_builder.py

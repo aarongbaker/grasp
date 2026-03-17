@@ -7,6 +7,7 @@ user_id in every chunk metadata for per-chef RAG isolation.
 import hashlib
 import logging
 import uuid
+
 from core.settings import get_settings
 
 settings = get_settings()
@@ -53,8 +54,9 @@ async def embed_and_upsert_chunks(
     from openai import AsyncOpenAI
     from pinecone import Pinecone
     from sqlmodel import select
-    from models.ingestion import CookbookChunk
+
     from models.enums import ChunkType
+    from models.ingestion import CookbookChunk
 
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     pc = Pinecone(api_key=settings.pinecone_api_key)

@@ -11,8 +11,9 @@ all state lives in Postgres, not in memory.
 
 import asyncio
 import uuid
-from workers.celery_app import celery_app
+
 from core.settings import get_settings
+from workers.celery_app import celery_app
 
 settings = get_settings()
 
@@ -28,15 +29,16 @@ def run_grasp_pipeline(session_id: str, user_id: str):
 
 async def _run_pipeline_async(session_id: str, user_id: str):
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
     from sqlmodel import SQLModel
-    from graph.graph import build_grasp_graph
+
     from core.status import finalise_session
-    from models.session import Session
-    from models.user import UserProfile, KitchenConfig, Equipment
-    from models.pipeline import DinnerConcept
+    from graph.graph import build_grasp_graph
     from models.enums import SessionStatus
+    from models.pipeline import DinnerConcept
+    from models.session import Session
+    from models.user import Equipment, KitchenConfig, UserProfile
 
     # Build per-worker graph + checkpointer
     async with AsyncPostgresSaver.from_conn_string(
@@ -113,16 +115,18 @@ def ingest_cookbook(job_id: str, user_id: str, pdf_bytes_b64: str, filename: str
 
 
 async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: str):
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-    from sqlalchemy.orm import sessionmaker
-    from models.ingestion import IngestionJob, BookRecord
-    from models.enums import IngestionStatus
-    from ingestion.rasteriser import rasterise_and_ocr_pdf
-    from ingestion.classifier import classify_document
-    from ingestion.state_machine import run_state_machine
-    from ingestion.embedder import embed_and_upsert_chunks
     import uuid as uuid_lib
     from datetime import datetime, timezone
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from ingestion.classifier import classify_document
+    from ingestion.embedder import embed_and_upsert_chunks
+    from ingestion.rasteriser import rasterise_and_ocr_pdf
+    from ingestion.state_machine import run_state_machine
+    from models.enums import IngestionStatus
+    from models.ingestion import BookRecord, IngestionJob
 
     engine = create_async_engine(settings.database_url)
     SessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)

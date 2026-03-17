@@ -11,7 +11,11 @@ Keeping them separate avoids driver confusion and connection pool collisions.
 """
 
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_JWT_SECRET_DEFAULT = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -20,6 +24,16 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     log_level: str = "INFO"
+    cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:8501"]
+
+    # Auth
+    jwt_secret_key: str = _JWT_SECRET_DEFAULT
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
+
+    @property
+    def jwt_secret_is_default(self) -> bool:
+        return self.jwt_secret_key == _JWT_SECRET_DEFAULT
 
     # FastAPI / SQLAlchemy (asyncpg driver)
     database_url: str = "postgresql+asyncpg://grasp:grasp@localhost:5432/grasp"

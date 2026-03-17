@@ -25,11 +25,13 @@ status_projection():
 
 import uuid
 from datetime import datetime, timezone
+
 from sqlmodel.ext.asyncio.session import AsyncSession
+
 from models.enums import SessionStatus
-from models.session import Session
-from models.scheduling import NaturalLanguageSchedule
 from models.errors import NodeError
+from models.scheduling import NaturalLanguageSchedule
+from models.session import Session
 
 
 async def finalise_session(
@@ -63,6 +65,17 @@ async def finalise_session(
             for e in errors
         ]
         result.error_summary = "; ".join(error_messages)
+
+    # Persist accumulated LLM token usage for observability
+    token_usage_records = final_state.get("token_usage", [])
+    if token_usage_records:
+        total_input = sum(r.get("input_tokens", 0) for r in token_usage_records)
+        total_output = sum(r.get("output_tokens", 0) for r in token_usage_records)
+        result.token_usage = {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "per_node": token_usage_records,
+        }
 
     result.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.add(result)

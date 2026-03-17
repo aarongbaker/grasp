@@ -6,11 +6,13 @@ raw get_session/get_settings/get_current_user functions.
 """
 
 from typing import Annotated
+
 from fastapi import Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
-from db.session import get_session
-from core.settings import get_settings, Settings
+
 from core.auth import get_current_user
+from core.settings import Settings, get_settings
+from db.session import get_session
 from models.user import UserProfile
 
 DBSession = Annotated[AsyncSession, Depends(get_session)]

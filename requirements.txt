@@ -3,6 +3,7 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.1
 
 # ── ORM / Database ────────────────────────────────────────────────────────────
+alembic==1.15.2                 # database migrations
 sqlmodel==0.0.19
 asyncpg==0.29.0                 # async Postgres driver for SQLAlchemy
 psycopg[binary]==3.1.19         # psycopg3 — required by LangGraph PostgresSaver
@@ -48,6 +49,14 @@ httpx==0.27.0                   # async test client for FastAPI
 
 # ── Dev UI ───────────────────────────────────────────────────────────────────
 streamlit==1.55.0               # test UI — not required for production
+
+# ── Auth / Security ─────────────────────────────────────────────────────────
+PyJWT==2.9.0                    # JWT token encoding/decoding
+slowapi==0.1.9                  # per-route rate limiting
+
+# ── Observability ────────────────────────────────────────────────────────────
+structlog==24.4.0               # structured logging (JSON in prod, pretty in dev)
+tenacity==9.0.0                 # retry with exponential backoff for LLM calls
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1

@@ -10,32 +10,33 @@ no database, no LLM. They verify:
   - Error handling: missing merged_dag, LLM failure (recoverable)
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from models.pipeline import DinnerConcept
-from models.scheduling import (
-    MergedDAG, ScheduledStep, TimelineEntry, NaturalLanguageSchedule,
-)
-from models.enums import Resource, MealType, Occasion, ErrorType
+import pytest
 
 from graph.nodes.renderer import (
-    _build_timeline_entry,
-    _build_timeline,
-    _fallback_summary,
-    _fallback_error_summary,
-    _build_summary_prompt,
     ScheduleSummaryOutput,
+    _build_summary_prompt,
+    _build_timeline,
+    _build_timeline_entry,
+    _fallback_error_summary,
+    _fallback_summary,
     schedule_renderer_node,
 )
-
+from models.enums import ErrorType, MealType, Occasion, Resource
+from models.pipeline import DinnerConcept
+from models.scheduling import (
+    MergedDAG,
+    NaturalLanguageSchedule,
+    ScheduledStep,
+    TimelineEntry,
+)
 from tests.fixtures.schedules import (
     MERGED_DAG_FULL,
     MERGED_DAG_TWO_RECIPE,
     NATURAL_LANGUAGE_SCHEDULE_FULL,
     NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

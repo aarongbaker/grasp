@@ -9,7 +9,9 @@ specific frontend messaging without string parsing.
 """
 
 from typing import Any
+
 from pydantic import BaseModel, Field
+
 from models.enums import ErrorType
 
 

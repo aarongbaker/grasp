@@ -22,16 +22,22 @@ Per-recipe failure handling:
     → error_router routes to handle_fatal_error
 """
 
+import logging
 from datetime import datetime, timezone
+
+from models.enums import ErrorType
 from models.pipeline import GRASPState
 from models.recipe import EnrichedRecipe, ValidatedRecipe
-from models.enums import ErrorType
+
+logger = logging.getLogger(__name__)
 
 
 async def validator_node(state: GRASPState) -> dict:
     enriched_dicts: list[dict] = state.get("enriched_recipes", [])
     validated: list[dict] = []
     errors: list[dict] = []
+
+    logger.info("Validating %d enriched recipes", len(enriched_dicts))
 
     for recipe_dict in enriched_dicts:
         recipe_name = recipe_dict.get("source", {}).get("name", "unknown")
@@ -45,8 +51,10 @@ async def validator_node(state: GRASPState) -> dict:
                 passed=True,
             )
             validated.append(validated_recipe.model_dump())
+            logger.info("Validated recipe: %s", recipe_name)
 
         except Exception as exc:
+            logger.warning("Validation failed for '%s': %s", recipe_name, exc)
             # Per-recipe recoverable failure
             errors.append({
                 "node_name": "validator",
@@ -55,6 +63,8 @@ async def validator_node(state: GRASPState) -> dict:
                 "message": f"Validation failed for '{recipe_name}': {exc}",
                 "metadata": {"recipe_name": recipe_name, "error": str(exc)},
             })
+
+    logger.info("Validation complete: %d/%d passed", len(validated), len(enriched_dicts))
 
     if not validated:
         # All recipes failed — fatal

@@ -10,18 +10,19 @@ Skipped automatically if ANTHROPIC_API_KEY is not set.
 """
 
 import os
+
 import pytest
 import pytest_asyncio
-from models.pipeline import DinnerConcept
-from models.enums import MealType, Occasion
-from models.recipe import RawRecipe
-from graph.nodes.generator import (
-    recipe_generator_node,
-    RecipeGenerationOutput,
-    _derive_recipe_count,
-    _build_system_prompt,
-)
 
+from graph.nodes.generator import (
+    RecipeGenerationOutput,
+    _build_system_prompt,
+    _derive_recipe_count,
+    recipe_generator_node,
+)
+from models.enums import MealType, Occasion
+from models.pipeline import DinnerConcept
+from models.recipe import RawRecipe
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 

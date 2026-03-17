@@ -26,11 +26,12 @@ Mock architecture (Phase 4-5):
 """
 
 import asyncio
-import uuid
 import os
+import uuid
+
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
@@ -68,8 +69,8 @@ async def test_checkpointer():
     This is intentional: LangGraph's PostgresSaver requires psycopg3 directly.
     """
     try:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         import psycopg_pool
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
         async with AsyncPostgresSaver.from_conn_string(
             settings.test_langgraph_checkpoint_url
@@ -98,24 +99,25 @@ async def compiled_graph(test_checkpointer):
     which recipe is being enriched, and checks _enricher_skip_recipes to
     simulate per-recipe failures for specific tests.
     """
-    from unittest.mock import patch, MagicMock, AsyncMock
-    from graph.nodes.generator import RecipeGenerationOutput
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from graph.nodes.enricher import StepEnrichmentOutput
+    from graph.nodes.generator import RecipeGenerationOutput
     from graph.nodes.renderer import ScheduleSummaryOutput
+    from tests.fixtures.recipes import (
+        CYCLIC_STEPS_FONDANT,
+        CYCLIC_STEPS_POMMES_PUREE,
+        CYCLIC_STEPS_SHORT_RIBS,
+        ENRICHED_CHOCOLATE_FONDANT,
+        ENRICHED_POMMES_PUREE,
+        ENRICHED_SHORT_RIBS,
+        RAW_CHOCOLATE_FONDANT,
+        RAW_POMMES_PUREE,
+        RAW_SHORT_RIBS,
+    )
     from tests.fixtures.schedules import (
         NATURAL_LANGUAGE_SCHEDULE_FULL,
         NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE,
-    )
-    from tests.fixtures.recipes import (
-        RAW_SHORT_RIBS,
-        RAW_POMMES_PUREE,
-        RAW_CHOCOLATE_FONDANT,
-        ENRICHED_SHORT_RIBS,
-        ENRICHED_POMMES_PUREE,
-        ENRICHED_CHOCOLATE_FONDANT,
-        CYCLIC_STEPS_SHORT_RIBS,
-        CYCLIC_STEPS_POMMES_PUREE,
-        CYCLIC_STEPS_FONDANT,
     )
 
     # ── Generator mock (Phase 4) ─────────────────────────────────────────────
@@ -255,9 +257,9 @@ async def test_db_engine():
     engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
     # Import all SQLModel table models to register metadata
-    import models.user       # noqa: F401
-    import models.session    # noqa: F401
     import models.ingestion  # noqa: F401
+    import models.session  # noqa: F401
+    import models.user  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -315,8 +317,8 @@ def base_initial_state() -> dict:
     Base GRASPState for all Phase 3 tests. Uses fixture dinner concept.
     Nodes populate raw_recipes, enriched_recipes, etc. from here.
     """
-    from models.pipeline import DinnerConcept
     from models.enums import MealType, Occasion
+    from models.pipeline import DinnerConcept
 
     concept = DinnerConcept(
         free_text="A special dinner party with short ribs, potato puree, and chocolate fondant.",

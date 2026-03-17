@@ -1,17 +1,26 @@
 """api/routes/ingest.py — PDF upload and ingestion job polling."""
-import uuid
 import base64
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from sqlmodel import select
-from core.deps import DBSession, CurrentUser
-from models.ingestion import IngestionJob, BookRecord
-from models.enums import IngestionStatus
+import uuid
 
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from sqlmodel import select
+
+from core.deps import CurrentUser, DBSession
+from models.enums import IngestionStatus
+from models.ingestion import BookRecord, IngestionJob
+
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/ingest")
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 @router.post("", status_code=202)
+@limiter.limit("10/hour")
 async def upload_pdf(
+    request: Request,
     file: UploadFile = File(...),
     db: DBSession = ...,
     current_user: CurrentUser = ...,
@@ -21,6 +30,9 @@ async def upload_pdf(
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
     content = await file.read()
+
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
 
     job = IngestionJob(
         user_id=current_user.user_id,

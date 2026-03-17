@@ -11,34 +11,33 @@ by status_projection(). This is the V1.6 single-source-of-truth contract.
 """
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
-from sqlmodel import select
-from pydantic import BaseModel, field_validator
-from core.deps import DBSession, CurrentUser
-from models.session import Session
-from models.pipeline import DinnerConcept
-from models.enums import SessionStatus, MealType, Occasion
 
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from sqlmodel import select
+
+from core.deps import CurrentUser, DBSession
+from models.enums import MealType, Occasion, SessionStatus
+from models.pipeline import DinnerConcept
+from models.session import Session
+
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
 
 
 class CreateSessionRequest(BaseModel):
-    free_text: str
-    guest_count: int
+    free_text: str = Field(max_length=2000)
+    guest_count: int = Field(ge=1, le=100)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
 
-    @field_validator("guest_count")
-    @classmethod
-    def guest_count_must_be_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError(f"guest_count must be >= 1, got {v}")
-        return v
-
 
 @router.post("", status_code=201)
-async def create_session(body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
+@limiter.limit("30/minute")
+async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
     # Merge chef's dietary_defaults into every session automatically
     merged_restrictions = list(set(
         current_user.dietary_defaults + body.dietary_restrictions
@@ -64,7 +63,8 @@ async def create_session(body: CreateSessionRequest, db: DBSession, current_user
 
 
 @router.post("/{session_id}/run", status_code=202)
-async def run_pipeline(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+@limiter.limit("5/minute")
+async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     """
     Enqueues the LangGraph pipeline as a Celery task.
     Returns 202 immediately — does NOT wait for pipeline completion.

@@ -19,13 +19,15 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
 async def _ensure_dev_user(db) -> uuid.UUID:
     """Create or reuse a default dev user for local ingestion."""
     from sqlmodel import select
-    from models.user import UserProfile, KitchenConfig
+
+    from models.user import KitchenConfig, UserProfile
 
     DEV_EMAIL = "dev@grasp.local"
     result = await db.execute(select(UserProfile).where(UserProfile.email == DEV_EMAIL))
@@ -59,10 +61,11 @@ async def _ingest_one_pdf(
 ) -> dict:
     """Ingest a single PDF. Returns result dict, or None if already ingested."""
     from sqlmodel import select
-    from ingestion.rasteriser import rasterise_and_ocr_pdf
+
     from ingestion.classifier import classify_document
-    from ingestion.state_machine import run_state_machine
     from ingestion.embedder import embed_and_upsert_chunks
+    from ingestion.rasteriser import rasterise_and_ocr_pdf
+    from ingestion.state_machine import run_state_machine
     from models.ingestion import BookRecord
 
     filename = pdf_path.name
@@ -81,7 +84,8 @@ async def _ingest_one_pdf(
     if prev:
         # Incomplete previous run — remove stale record + orphaned children, then re-ingest
         from sqlalchemy import delete as sa_delete
-        from models.ingestion import PageCache, CookbookChunk
+
+        from models.ingestion import CookbookChunk, PageCache
         await db.execute(sa_delete(PageCache).where(PageCache.book_id == prev.book_id))
         await db.execute(sa_delete(CookbookChunk).where(CookbookChunk.book_id == prev.book_id))
         await db.delete(prev)
@@ -130,23 +134,24 @@ async def _ingest_one_pdf(
     db.add(book)
     await db.commit()
 
-    print(f" — done")
+    print(" — done")
     return {"filename": filename, "pages": len(pages), "chunks": count, "type": doc_type.value}
 
 
 async def main(folder: str, user_id_str: str | None):
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
     from sqlmodel import SQLModel
+
     from core.settings import get_settings
 
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
 
     # Ensure tables exist
-    import models.user       # noqa: F401
-    import models.session    # noqa: F401
     import models.ingestion  # noqa: F401
+    import models.session  # noqa: F401
+    import models.user  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -192,7 +197,7 @@ async def main(folder: str, user_id_str: str | None):
 
     # Summary
     print(f"\n{'='*60}")
-    print(f"INGESTION COMPLETE")
+    print("INGESTION COMPLETE")
     print(f"{'='*60}")
     print(f"  Successes: {len(results)}")
     print(f"  Failures:  {len(failures)}")
@@ -203,7 +208,7 @@ async def main(folder: str, user_id_str: str | None):
     print(f"  User ID: {uid}")
 
     if failures:
-        print(f"\nFailed books:")
+        print("\nFailed books:")
         for f in failures:
             print(f"  - {f['filename']}: {f['error']}")
 

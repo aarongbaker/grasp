@@ -9,34 +9,39 @@ no mocks. They verify:
     contention, exact fixture match
 """
 
-import pytest
 from datetime import datetime
 
-from models.recipe import (
-    Ingredient, RawRecipe, RecipeStep, EnrichedRecipe, ValidatedRecipe,
-)
-from models.scheduling import RecipeDAG, MergedDAG, ScheduledStep
-from models.enums import Resource
+import pytest
 
 from graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
 from graph.nodes.dag_merger import (
-    _merge_dags, _compute_critical_paths, _StepInfo, ResourceConflictError,
+    ResourceConflictError,
+    _compute_critical_paths,
+    _merge_dags,
+    _StepInfo,
 )
-
+from models.enums import Resource
+from models.recipe import (
+    EnrichedRecipe,
+    Ingredient,
+    RawRecipe,
+    RecipeStep,
+    ValidatedRecipe,
+)
+from models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
 from tests.fixtures.recipes import (
-    ENRICHED_SHORT_RIBS,
-    ENRICHED_POMMES_PUREE,
-    ENRICHED_CHOCOLATE_FONDANT,
     CYCLIC_STEPS_SHORT_RIBS,
+    ENRICHED_CHOCOLATE_FONDANT,
+    ENRICHED_POMMES_PUREE,
+    ENRICHED_SHORT_RIBS,
 )
 from tests.fixtures.schedules import (
-    RECIPE_DAG_SHORT_RIBS,
-    RECIPE_DAG_POMMES_PUREE,
-    RECIPE_DAG_FONDANT,
     MERGED_DAG_FULL,
     MERGED_DAG_TWO_RECIPE,
+    RECIPE_DAG_FONDANT,
+    RECIPE_DAG_POMMES_PUREE,
+    RECIPE_DAG_SHORT_RIBS,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

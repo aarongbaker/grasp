@@ -19,8 +19,10 @@ every session.
 """
 
 import operator
-from typing import Annotated, Optional, Any
-from pydantic import BaseModel, field_validator
+from typing import Annotated, Any, Optional
+
+from pydantic import BaseModel, Field
+
 from models.enums import MealType, Occasion
 
 
@@ -28,20 +30,13 @@ class DinnerConcept(BaseModel):
     """
     Hybrid input: free_text preserves nuance; typed fields ensure
     safety-critical constraints (dietary_restrictions, meal_type) are
-    never ambiguous. guest_count >= 1 enforced; no upper ceiling in V1.
+    never ambiguous. guest_count bounded [1, 100].
     """
-    free_text: str
-    guest_count: int
+    free_text: str = Field(max_length=2000)
+    guest_count: int = Field(ge=1, le=100)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
-
-    @field_validator("guest_count")
-    @classmethod
-    def guest_count_must_be_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError(f"guest_count must be >= 1, got {v}")
-        return v
 
 
 # ── GRASPState ────────────────────────────────────────────────────────────────
@@ -58,6 +53,7 @@ class DinnerConcept(BaseModel):
 
 from typing import TypedDict
 
+
 class GRASPState(TypedDict, total=False):
     concept: dict                                           # DinnerConcept.model_dump()
     kitchen_config: dict                                    # KitchenConfig fields
@@ -70,4 +66,5 @@ class GRASPState(TypedDict, total=False):
     merged_dag: Optional[dict]                              # MergedDAG.model_dump() | None
     schedule: Optional[dict]                                # NaturalLanguageSchedule.model_dump() | None
     errors: Annotated[list[dict], operator.add]             # ACCUMULATOR — NodeError.model_dump()
+    token_usage: Annotated[list[dict], operator.add]        # ACCUMULATOR — per-node LLM token counts
     test_mode: Optional[str]                                # Phase 3 only. None in production.

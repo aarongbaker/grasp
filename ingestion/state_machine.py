@@ -17,6 +17,7 @@ Chunking philosophy:
 
 import re
 from enum import Enum
+
 from models.enums import ChunkType
 
 # Max words for non-recipe chunks (narrative, technique asides).

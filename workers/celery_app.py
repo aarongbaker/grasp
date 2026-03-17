@@ -6,6 +6,7 @@ Automatic retries could amplify LLM costs on systematic failures.
 """
 
 from celery import Celery
+
 from core.settings import get_settings
 
 settings = get_settings()

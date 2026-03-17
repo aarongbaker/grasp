@@ -17,12 +17,13 @@ state machine crashes, the OCR output is safe in Postgres. Reprocessing
 is free — re-running OCR is not.
 """
 
-import sys
-import hashlib
 import asyncio
+import hashlib
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
+
 import fitz  # pymupdf
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,8 @@ def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
     """
     try:
         import objc
-        from Vision import VNRecognizeTextRequest, VNImageRequestHandler
         import Quartz
+        from Vision import VNImageRequestHandler, VNRecognizeTextRequest
 
         # Convert bytes → CGImage
         data = objc.lookUpClass("NSData").dataWithBytes_length_(image_bytes, len(image_bytes))
@@ -91,8 +92,9 @@ async def rasterise_and_ocr_pdf(
     pdf_source: file path (str/Path) preferred — pymupdf memory-maps it.
                 bytes still accepted for backwards compatibility.
     """
-    from models.ingestion import PageCache
     import uuid
+
+    from models.ingestion import PageCache
 
     if isinstance(pdf_source, (str, Path)):
         doc = fitz.open(str(pdf_source))

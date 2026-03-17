@@ -19,9 +19,11 @@ must be in the chunk metadata envelope for per-chef RAG isolation to work.
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-from sqlmodel import SQLModel, Field, Column
+
 from sqlalchemy import JSON
-from models.enums import DocumentType, ChunkType, IngestionStatus
+from sqlmodel import Column, Field, SQLModel
+
+from models.enums import ChunkType, DocumentType, IngestionStatus
 
 
 class BookRecord(SQLModel, table=True):

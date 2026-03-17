@@ -20,17 +20,19 @@ The three lines after "# ── Node Imports (swap here in Phases 4-7) ──" a
 the ONLY lines that change across all subsequent phases.
 """
 
-from langgraph.graph import StateGraph, END
-from models.pipeline import GRASPState
-from graph.router import error_router, final_router
+from langgraph.graph import END, StateGraph
+
+from graph.nodes.dag_builder import dag_builder_node  # Phase 6: real
+from graph.nodes.dag_merger import dag_merger_node  # Phase 6: real
+from graph.nodes.enricher import rag_enricher_node  # Phase 5: real
 
 # ── Node Imports (swap here in Phases 4-7) ───────────────────────────────────
-from graph.nodes.generator import recipe_generator_node         # Phase 4: real
-from graph.nodes.enricher import rag_enricher_node               # Phase 5: real
-from graph.nodes.validator import validator_node                 # Phase 5: real (Pydantic)
-from graph.nodes.dag_builder import dag_builder_node             # Phase 6: real
-from graph.nodes.dag_merger import dag_merger_node               # Phase 6: real
-from graph.nodes.renderer import schedule_renderer_node          # Phase 7: real
+from graph.nodes.generator import recipe_generator_node  # Phase 4: real
+from graph.nodes.renderer import schedule_renderer_node  # Phase 7: real
+from graph.nodes.validator import validator_node  # Phase 5: real (Pydantic)
+from graph.router import error_router, final_router
+from models.pipeline import GRASPState
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 

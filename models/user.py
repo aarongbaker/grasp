@@ -12,9 +12,11 @@ config change mid-run cannot corrupt an in-progress schedule.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, TYPE_CHECKING
-from sqlmodel import SQLModel, Field, Relationship, Column
+from typing import TYPE_CHECKING, Optional
+
 from sqlalchemy import JSON
+from sqlmodel import Column, Field, Relationship, SQLModel
+
 from models.enums import EquipmentCategory
 
 

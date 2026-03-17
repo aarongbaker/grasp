@@ -29,12 +29,13 @@ Run 4: Checkpoint Resume (COMPLETE on 2nd invoke)
            (not 6 — proves generator ran once, not twice).
 """
 
-import uuid
 import os
+import uuid
+
 import pytest
 import pytest_asyncio
-from models.enums import SessionStatus, ErrorType
 
+from models.enums import ErrorType, SessionStatus
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Run 1: Happy Path
@@ -52,10 +53,10 @@ async def test_run1_happy_path_complete(
     Full pipeline: all 6 mock nodes succeed.
     Expected outcome: COMPLETE, 3 recipes scheduled, no errors.
     """
-    from core.status import finalise_session
     import models.session as session_model
-    from models.session import Session
+    from core.status import finalise_session
     from models.enums import SessionStatus
+    from models.session import Session
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
     initial_state = {**base_initial_state, "test_mode": None}
@@ -396,4 +397,4 @@ async def test_status_projection_derives_enriching(
         f"Empty checkpoint should project GENERATING, got {status}"
     )
 
-    print(f"\n✓ status_projection returns GENERATING for empty checkpoint")
+    print("\n✓ status_projection returns GENERATING for empty checkpoint")

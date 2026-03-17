@@ -14,14 +14,15 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import streamlit as st
 from langgraph.checkpoint.memory import MemorySaver
+
 from graph.graph import build_grasp_graph
 from models.enums import MealType, Occasion, Resource
 from models.scheduling import NaturalLanguageSchedule
-
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="GRASP Test UI", page_icon="🍽️", layout="wide")
@@ -33,6 +34,7 @@ def _resolve_dev_user_id() -> str:
     """Look up the dev user UUID from Postgres. Cached for the session."""
     try:
         from sqlalchemy import create_engine, text
+
         from core.settings import get_settings
         settings = get_settings()
         # Convert async URL to sync for this one-shot query
@@ -199,7 +201,7 @@ with tab_pipeline:
         st.stop()
 
     schedule = NaturalLanguageSchedule.model_validate(schedule_dict)
-    from models.recipe import RawRecipe, EnrichedRecipe, ValidatedRecipe
+    from models.recipe import EnrichedRecipe, RawRecipe, ValidatedRecipe
 
     # ── Tabs: Schedule | Recipes | Debug ──────────────────────────────────────
     tab_schedule, tab_recipes, tab_debug = st.tabs(["Schedule", "Recipes", "Debug"])
@@ -430,17 +432,18 @@ with tab_ingest:
     # ── DB connection helper ─────────────────────────────────────────────────
     async def _get_db_session():
         """Create a standalone async DB session for ingestion."""
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
         from sqlalchemy.orm import sessionmaker
         from sqlmodel import SQLModel
+
         from core.settings import get_settings
 
         settings = get_settings()
         engine = create_async_engine(settings.database_url, echo=False)
 
-        import models.user       # noqa: F401
-        import models.session    # noqa: F401
         import models.ingestion  # noqa: F401
+        import models.session  # noqa: F401
+        import models.user  # noqa: F401
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -450,7 +453,8 @@ with tab_ingest:
     async def _ensure_dev_user(db) -> uuid.UUID:
         """Create or reuse a default dev user."""
         from sqlmodel import select
-        from models.user import UserProfile, KitchenConfig
+
+        from models.user import KitchenConfig, UserProfile
 
         DEV_EMAIL = "dev@grasp.local"
         result = await db.execute(select(UserProfile).where(UserProfile.email == DEV_EMAIL))
@@ -470,10 +474,10 @@ with tab_ingest:
 
     async def _ingest_pdf(pdf_bytes: bytes, filename: str, user_id: uuid.UUID, db) -> dict:
         """Ingest a single PDF through the full pipeline."""
-        from ingestion.rasteriser import rasterise_and_ocr_pdf
         from ingestion.classifier import classify_document
-        from ingestion.state_machine import run_state_machine
         from ingestion.embedder import embed_and_upsert_chunks
+        from ingestion.rasteriser import rasterise_and_ocr_pdf
+        from ingestion.state_machine import run_state_machine
         from models.ingestion import BookRecord
 
         book_id = str(uuid.uuid4())

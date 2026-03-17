@@ -18,7 +18,9 @@ heads_up cues use duration_max as the buffer ceiling.
 
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, field_validator, model_validator
+
 from models.enums import Resource
 
 

@@ -12,19 +12,20 @@ Run separately:
 """
 
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from models.pipeline import DinnerConcept
-from models.enums import MealType, Occasion, Resource, ErrorType
-from models.recipe import RawRecipe, Ingredient, RecipeStep, EnrichedRecipe
+
 from graph.nodes.enricher import (
-    rag_enricher_node,
     StepEnrichmentOutput,
-    _generate_recipe_slug,
     _build_enrichment_prompt,
     _format_rag_context,
+    _generate_recipe_slug,
+    rag_enricher_node,
 )
-
+from models.enums import ErrorType, MealType, Occasion, Resource
+from models.pipeline import DinnerConcept
+from models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 
@@ -134,7 +135,7 @@ def test_build_enrichment_prompt_resource_types(sample_raw_recipe):
 @pytest.mark.asyncio
 async def test_enricher_per_recipe_error_keeps_survivors():
     """If one recipe fails enrichment, the others should still be returned."""
-    from tests.fixtures.recipes import RAW_SHORT_RIBS, RAW_POMMES_PUREE, ENRICHED_SHORT_RIBS
+    from tests.fixtures.recipes import ENRICHED_SHORT_RIBS, RAW_POMMES_PUREE, RAW_SHORT_RIBS
 
     call_count = 0
 

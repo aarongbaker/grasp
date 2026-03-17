@@ -9,7 +9,9 @@ source of time savings in multi-course schedules.
 """
 
 from typing import Optional
-from pydantic import BaseModel
+
+from pydantic import BaseModel, Field
+
 from models.enums import Resource
 from models.recipe import RecipeStep
 
@@ -58,7 +60,7 @@ class MergedDAG(BaseModel):
 
 class TimelineEntry(BaseModel):
     """Single entry in the chef-facing schedule. T+0, T+15, T+30..."""
-    time_offset_minutes: int
+    time_offset_minutes: int = Field(ge=0)
     label: str                      # e.g. "T+30"
     step_id: str
     recipe_name: str

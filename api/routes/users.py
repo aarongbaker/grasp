@@ -1,11 +1,13 @@
 """api/routes/users.py — User profile CRUD"""
 import uuid
+
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from sqlmodel import select
-from pydantic import BaseModel
-from core.deps import DBSession, CurrentUser
-from models.user import UserProfile, KitchenConfig, Equipment
+
+from core.deps import CurrentUser, DBSession
 from models.enums import EquipmentCategory
+from models.user import Equipment, KitchenConfig, UserProfile
 
 router = APIRouter(prefix="/users")
 
@@ -13,8 +15,8 @@ router = APIRouter(prefix="/users")
 class CreateUserRequest(BaseModel):
     name: str
     email: str
-    max_burners: int = 4
-    max_oven_racks: int = 2
+    max_burners: int = Field(default=4, ge=1, le=10)
+    max_oven_racks: int = Field(default=2, ge=1, le=6)
     has_second_oven: bool = False
     dietary_defaults: list[str] = []
 

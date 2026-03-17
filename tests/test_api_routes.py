@@ -16,14 +16,13 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
-from models.user import UserProfile, KitchenConfig
-from models.session import Session
+from models.enums import IngestionStatus, SessionStatus
 from models.ingestion import IngestionJob
-from models.enums import SessionStatus, IngestionStatus
-
+from models.session import Session
+from models.user import KitchenConfig, UserProfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test app + fixtures
@@ -32,9 +31,9 @@ from models.enums import SessionStatus, IngestionStatus
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
     from api.routes.health import router as health_router
-    from api.routes.users import router as users_router
-    from api.routes.sessions import router as sessions_router
     from api.routes.ingest import router as ingest_router
+    from api.routes.sessions import router as sessions_router
+    from api.routes.users import router as users_router
 
     app = FastAPI()
     app.include_router(health_router, prefix="/api/v1")
@@ -104,8 +103,8 @@ def mock_db():
 @pytest.fixture
 def app_with_overrides(mock_db, test_user):
     """App with auth + DB overridden."""
-    from db.session import get_session
     from core.auth import get_current_user
+    from db.session import get_session
 
     app = _create_test_app()
 

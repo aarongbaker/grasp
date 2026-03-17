@@ -16,16 +16,20 @@ Mockable seam: _create_llm() is extracted so tests can patch it to bypass
 the real Claude API while still exercising all node logic.
 """
 
+import logging
+
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from models.pipeline import GRASPState, DinnerConcept
-from models.recipe import RawRecipe
-from models.enums import MealType, Occasion, ErrorType
-from models.errors import NodeError
+from core.llm import extract_token_usage, is_timeout_error, llm_retry
 from core.settings import get_settings
+from models.enums import ErrorType, MealType, Occasion
+from models.errors import NodeError
+from models.pipeline import DinnerConcept, GRASPState
+from models.recipe import RawRecipe
 
+logger = logging.getLogger(__name__)
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
@@ -194,27 +198,37 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         # Build prompt
         system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
 
-        # Call Claude via structured output
+        # Call Claude via structured output (with retry on transient errors)
         llm = _create_llm()
         chain = llm.with_structured_output(RecipeGenerationOutput)
 
-        result = await chain.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."),
-        ])
+        @llm_retry
+        async def _invoke_llm():
+            return await chain.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."),
+            ])
 
+        logger.info("Generating %d recipes for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
+        result = await _invoke_llm()
+
+        logger.info("Generated %d recipes: %s", len(result.recipes), [r.name for r in result.recipes])
         # Return raw_recipes as dicts (replace semantics)
+        usage = extract_token_usage(result, "recipe_generator")
         return {
             "raw_recipes": [r.model_dump() for r in result.recipes],
+            "token_usage": [usage],
         }
 
     except Exception as exc:
         # Classify error type
         exc_type = type(exc).__name__
-        if "timeout" in exc_type.lower() or "timeout" in str(exc).lower():
+        if is_timeout_error(exc):
             error_type = ErrorType.LLM_TIMEOUT
         else:
             error_type = ErrorType.LLM_PARSE_FAILURE
+
+        logger.error("Generator failed: %s: %s", exc_type, exc)
 
         error = NodeError(
             node_name="recipe_generator",

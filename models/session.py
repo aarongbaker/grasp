@@ -19,8 +19,10 @@ Never write in-progress status back to the row.
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-from sqlmodel import SQLModel, Field, Column
+
 from sqlalchemy import JSON
+from sqlmodel import Column, Field, SQLModel
+
 from models.enums import SessionStatus
 
 
@@ -38,6 +40,9 @@ class Session(SQLModel, table=True):
     schedule_summary: Optional[str] = None       # one-paragraph overview for list view
     total_duration_minutes: Optional[int] = None
     error_summary: Optional[str] = None          # populated on PARTIAL outcome
+
+    # LLM token usage (observability — no enforcement in V1)
+    token_usage: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
     # Timing
     created_at: datetime = Field(
