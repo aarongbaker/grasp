@@ -41,9 +41,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
     from models.user import Equipment, KitchenConfig, UserProfile
 
     # Build per-worker graph + checkpointer
-    async with AsyncPostgresSaver.from_conn_string(
-        settings.langgraph_checkpoint_url
-    ) as checkpointer:
+    async with AsyncPostgresSaver.from_conn_string(settings.langgraph_checkpoint_url) as checkpointer:
         graph = build_grasp_graph(checkpointer)
 
         engine = create_async_engine(settings.database_url)
@@ -62,9 +60,8 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
             # Load equipment for this user (one-to-many)
             from sqlmodel import select
-            equipment_result = await db.execute(
-                select(Equipment).where(Equipment.user_id == uuid.UUID(user_id))
-            )
+
+            equipment_result = await db.execute(select(Equipment).where(Equipment.user_id == uuid.UUID(user_id)))
             equipment_rows = equipment_result.scalars().all()
 
             concept = DinnerConcept.model_validate(session.concept_json)
@@ -92,13 +89,15 @@ async def _run_pipeline_async(session_id: str, user_id: str):
                 # Unhandled exception — write FAILED status
                 final_state = {
                     **initial_state,
-                    "errors": [{
-                        "node_name": "celery_task",
-                        "error_type": "unknown",
-                        "recoverable": False,
-                        "message": str(exc),
-                        "metadata": {"exception_type": type(exc).__name__},
-                    }],
+                    "errors": [
+                        {
+                            "node_name": "celery_task",
+                            "error_type": "unknown",
+                            "recoverable": False,
+                            "message": str(exc),
+                            "metadata": {"exception_type": type(exc).__name__},
+                        }
+                    ],
                 }
 
             await finalise_session(uuid.UUID(session_id), final_state, db)
@@ -110,6 +109,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 def ingest_cookbook(job_id: str, user_id: str, pdf_bytes_b64: str, filename: str):
     """Ingestion pipeline task. pdf_bytes_b64 is base64-encoded (JSON-safe)."""
     import base64
+
     pdf_bytes = base64.b64decode(pdf_bytes_b64)
     asyncio.run(_ingest_async(job_id, user_id, pdf_bytes, filename))
 

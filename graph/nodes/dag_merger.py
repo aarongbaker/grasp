@@ -39,12 +39,14 @@ logger = logging.getLogger(__name__)
 
 class ResourceConflictError(Exception):
     """Raised when the scheduler cannot find a valid time slot."""
+
     pass
 
 
 @dataclass
 class _StepInfo:
     """Internal representation joining DAG edges with step details."""
+
     step_id: str
     recipe_name: str
     recipe_slug: str
@@ -95,10 +97,7 @@ def _count_overlapping(
     window_end: int,
 ) -> int:
     """Count how many intervals overlap with [window_start, window_end)."""
-    return sum(
-        1 for (a, b) in intervals
-        if a < window_end and b > window_start
-    )
+    return sum(1 for (a, b) in intervals if a < window_end and b > window_start)
 
 
 def _find_earliest_start(
@@ -127,18 +126,12 @@ def _find_earliest_start(
             return candidate
 
         # Advance past the earliest-ending overlapping interval
-        overlapping_ends = [
-            b for (a, b) in intervals
-            if a < window_end and b > candidate
-        ]
+        overlapping_ends = [b for (a, b) in intervals if a < window_end and b > candidate]
         if not overlapping_ends:
             return candidate  # shouldn't happen, but be safe
         candidate = min(overlapping_ends)
 
-    raise ResourceConflictError(
-        f"Cannot schedule step: resource {resource.value} exhausted "
-        f"after 10,000 iterations"
-    )
+    raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
 
 
 def _merge_dags(
@@ -173,9 +166,7 @@ def _merge_dags(
     for dag in recipe_dags:
         vr = vr_by_name.get(dag.recipe_name)
         if vr is None:
-            raise ResourceConflictError(
-                f"No validated recipe found for '{dag.recipe_name}'"
-            )
+            raise ResourceConflictError(f"No validated recipe found for '{dag.recipe_name}'")
 
         for step in vr.source.steps:
             info = _StepInfo(
@@ -205,24 +196,18 @@ def _merge_dags(
 
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
-    resource_intervals: dict[Resource, list[tuple[int, int]]] = {
-        r: [] for r in Resource
-    }
+    resource_intervals: dict[Resource, list[tuple[int, int]]] = {r: [] for r in Resource}
     scheduled_end: dict[str, int] = {}
     remaining = set(s.step_id for s in all_steps)
     result: list[ScheduledStep] = []
 
     while remaining:
         # Find ready steps: all dependencies satisfied
-        ready = [
-            step_map[sid] for sid in remaining
-            if all(dep in scheduled_end for dep in step_map[sid].depends_on)
-        ]
+        ready = [step_map[sid] for sid in remaining if all(dep in scheduled_end for dep in step_map[sid].depends_on)]
 
         if not ready:
             raise ResourceConflictError(
-                f"Deadlock: {len(remaining)} steps remain but none are ready. "
-                f"Remaining: {sorted(remaining)}"
+                f"Deadlock: {len(remaining)} steps remain but none are ready. Remaining: {sorted(remaining)}"
             )
 
         # Sort by priority: critical path desc, slug asc, step_id asc
@@ -252,20 +237,22 @@ def _merge_dags(
         scheduled_end[step.step_id] = end
         remaining.remove(step.step_id)
 
-        result.append(ScheduledStep(
-            step_id=step.step_id,
-            recipe_name=step.recipe_name,
-            description=step.description,
-            resource=step.resource,
-            duration_minutes=step.duration_minutes,
-            duration_max=step.duration_max,
-            start_at_minute=start,
-            end_at_minute=end,
-            can_be_done_ahead=step.can_be_done_ahead,
-            prep_ahead_window=step.prep_ahead_window,
-            prep_ahead_notes=step.prep_ahead_notes,
-            depends_on=step.depends_on,
-        ))
+        result.append(
+            ScheduledStep(
+                step_id=step.step_id,
+                recipe_name=step.recipe_name,
+                description=step.description,
+                resource=step.resource,
+                duration_minutes=step.duration_minutes,
+                duration_max=step.duration_max,
+                start_at_minute=start,
+                end_at_minute=end,
+                can_be_done_ahead=step.can_be_done_ahead,
+                prep_ahead_window=step.prep_ahead_window,
+                prep_ahead_notes=step.prep_ahead_notes,
+                depends_on=step.depends_on,
+            )
+        )
 
     # Sort output deterministically
     result.sort(key=lambda s: (s.start_at_minute, s.recipe_name, s.step_id))
@@ -307,22 +294,26 @@ async def dag_merger_node(state: GRASPState) -> dict:
     except ResourceConflictError as exc:
         logger.error("Resource conflict: %s", exc)
         return {
-            "errors": [{
-                "node_name": "dag_merger",
-                "error_type": ErrorType.RESOURCE_CONFLICT.value,
-                "recoverable": False,
-                "message": str(exc),
-                "metadata": {"detail": str(exc)},
-            }]
+            "errors": [
+                {
+                    "node_name": "dag_merger",
+                    "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                    "recoverable": False,
+                    "message": str(exc),
+                    "metadata": {"detail": str(exc)},
+                }
+            ]
         }
     except Exception as exc:
         logger.error("Merge failed: %s: %s", type(exc).__name__, exc)
         return {
-            "errors": [{
-                "node_name": "dag_merger",
-                "error_type": ErrorType.RESOURCE_CONFLICT.value,
-                "recoverable": False,
-                "message": f"Merge failed: {type(exc).__name__}: {exc}",
-                "metadata": {"exception_type": type(exc).__name__},
-            }]
+            "errors": [
+                {
+                    "node_name": "dag_merger",
+                    "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                    "recoverable": False,
+                    "message": f"Merge failed: {type(exc).__name__}: {exc}",
+                    "metadata": {"exception_type": type(exc).__name__},
+                }
+            ]
         }

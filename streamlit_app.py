@@ -36,6 +36,7 @@ def _resolve_dev_user_id() -> str:
         from sqlalchemy import create_engine, text
 
         from core.settings import get_settings
+
         settings = get_settings()
         # Convert async URL to sync for this one-shot query
         sync_url = settings.database_url.replace("+asyncpg", "").replace("postgresql+asyncpg", "postgresql")
@@ -51,6 +52,7 @@ def _resolve_dev_user_id() -> str:
     except Exception:
         pass
     return ""
+
 
 tab_pipeline, tab_ingest = st.tabs(["Plan a Meal", "Ingest Cookbooks"])
 
@@ -69,7 +71,7 @@ with tab_pipeline:
         free_text = st.text_area(
             "Describe your meal",
             value="A rustic Italian dinner: handmade pasta with bolognese, "
-                  "a simple arugula salad, and tiramisu for dessert.",
+            "a simple arugula salad, and tiramisu for dessert.",
             height=120,
         )
         guest_count = st.number_input("Guest count", min_value=1, max_value=50, value=4)
@@ -89,8 +91,12 @@ with tab_pipeline:
 
     # ── Pipeline execution ───────────────────────────────────────────────────
     PIPELINE_NODES = [
-        "recipe_generator", "rag_enricher", "validator",
-        "dag_builder", "dag_merger", "schedule_renderer",
+        "recipe_generator",
+        "rag_enricher",
+        "validator",
+        "dag_builder",
+        "dag_merger",
+        "schedule_renderer",
     ]
     NODE_LABELS = {
         "recipe_generator": "Generating recipes...",
@@ -189,10 +195,7 @@ with tab_pipeline:
     if errors:
         with st.expander(f"Errors ({len(errors)})", expanded=False):
             for err in errors:
-                st.warning(
-                    f"**{err.get('node_name', '?')}** ({err.get('error_type', '?')}): "
-                    f"{err.get('message', '?')}"
-                )
+                st.warning(f"**{err.get('node_name', '?')}** ({err.get('error_type', '?')}): {err.get('message', '?')}")
 
     # ── Schedule ──────────────────────────────────────────────────────────────
     schedule_dict = state.get("schedule")
@@ -244,10 +247,7 @@ with tab_pipeline:
             for entry in prep_ahead:
                 badge = RESOURCE_BADGES.get(entry.resource.value, entry.resource.value)
                 with st.container(border=True):
-                    st.markdown(
-                        f"**{entry.recipe_name}** | {badge} | "
-                        f"`{entry.duration_minutes} min`"
-                    )
+                    st.markdown(f"**{entry.recipe_name}** | {badge} | `{entry.duration_minutes} min`")
                     st.write(entry.action)
                     if entry.prep_ahead_window:
                         st.caption(f"Window: {entry.prep_ahead_window}")
@@ -264,10 +264,7 @@ with tab_pipeline:
             with st.container(border=True):
                 cols = st.columns([1, 5, 2])
                 cols[0].markdown(f"### {entry.label}")
-                cols[1].markdown(
-                    f"**{entry.recipe_name}** | {badge}\n\n"
-                    f"{entry.action}"
-                )
+                cols[1].markdown(f"**{entry.recipe_name}** | {badge}\n\n{entry.action}")
                 cols[2].markdown(f"{duration_str}")
                 if entry.heads_up:
                     st.caption(f"Note: {entry.heads_up}")
@@ -325,11 +322,13 @@ with tab_pipeline:
                 ing_data = []
                 for ing in ingredients:
                     prep = ing.get("preparation", "")
-                    ing_data.append({
-                        "Ingredient": ing.get("name", ""),
-                        "Qty": ing.get("quantity", ""),
-                        "Prep": prep if prep else "—",
-                    })
+                    ing_data.append(
+                        {
+                            "Ingredient": ing.get("name", ""),
+                            "Qty": ing.get("quantity", ""),
+                            "Prep": prep if prep else "—",
+                        }
+                    )
                 if ing_data:
                     st.dataframe(
                         ing_data,
@@ -351,9 +350,7 @@ with tab_pipeline:
 
                 with st.container(border=True):
                     # Step header row
-                    st.markdown(
-                        f"**Step {j}** | {badge} | `{time_str}`"
-                    )
+                    st.markdown(f"**Step {j}** | {badge} | `{time_str}`")
 
                     # Description
                     st.write(step.get("description", ""))
@@ -392,9 +389,14 @@ with tab_pipeline:
     # DEBUG TAB — raw JSON for inspection
     # ══════════════════════════════════════════════════════════════════════════
     with tab_debug:
-        debug_recipes_tab, debug_dags, debug_merged, debug_raw = st.tabs([
-            "Recipes", "DAGs", "Merged Schedule", "Raw State",
-        ])
+        debug_recipes_tab, debug_dags, debug_merged, debug_raw = st.tabs(
+            [
+                "Recipes",
+                "DAGs",
+                "Merged Schedule",
+                "Raw State",
+            ]
+        )
 
         with debug_recipes_tab:
             for r in state.get("raw_recipes", []):
@@ -444,6 +446,7 @@ with tab_ingest:
         import models.ingestion  # noqa: F401
         import models.session  # noqa: F401
         import models.user  # noqa: F401
+
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -525,6 +528,7 @@ with tab_ingest:
     ingest_button = st.button("Ingest", type="primary", disabled=not uploaded_files)
 
     if ingest_button and uploaded_files:
+
         async def _run_ingestion():
             engine, SessionLocal = await _get_db_session()
             results = []

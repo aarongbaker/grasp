@@ -74,6 +74,7 @@ def sample_state(sample_raw_recipe) -> dict:
 
 # ── Unit tests for helpers (no API call) ─────────────────────────────────────
 
+
 def test_generate_recipe_slug():
     """Verify slug generation from recipe names."""
     assert _generate_recipe_slug("Braised Short Ribs") == "braised_short_ribs"
@@ -132,6 +133,7 @@ def test_build_enrichment_prompt_resource_types(sample_raw_recipe):
 
 # ── Unit tests for node error handling (mocked LLM) ─────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_enricher_per_recipe_error_keeps_survivors():
     """If one recipe fails enrichment, the others should still be returned."""
@@ -161,8 +163,10 @@ async def test_enricher_per_recipe_error_keeps_survivors():
         "errors": [],
     }
 
-    with patch("graph.nodes.enricher._create_llm", return_value=mock_llm), \
-         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+    with (
+        patch("graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+    ):
         result = await rag_enricher_node(state)
 
     # 1 enriched recipe survived, 1 error
@@ -188,8 +192,10 @@ async def test_enricher_all_fail_is_fatal():
         "errors": [],
     }
 
-    with patch("graph.nodes.enricher._create_llm", return_value=mock_llm), \
-         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+    with (
+        patch("graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+    ):
         result = await rag_enricher_node(state)
 
     assert result["enriched_recipes"] == []
@@ -211,6 +217,7 @@ async def test_enricher_empty_raw_recipes():
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -254,9 +261,7 @@ async def test_enricher_node_produces_valid_enriched_recipes(sample_state):
     all_ids = set(step_ids)
     for step in enriched.steps:
         for dep in step.depends_on:
-            assert dep in all_ids, (
-                f"Step '{step.step_id}' depends on '{dep}' which is not in step list"
-            )
+            assert dep in all_ids, f"Step '{step.step_id}' depends on '{dep}' which is not in step list"
 
     # Chef notes and techniques should be populated
     assert enriched.chef_notes, "chef_notes should not be empty"

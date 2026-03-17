@@ -52,14 +52,10 @@ class UserProfile(SQLModel, table=True):
     user_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str
     email: str = Field(unique=True, index=True)
-    kitchen_config_id: Optional[uuid.UUID] = Field(
-        default=None, foreign_key="kitchen_configs.kitchen_config_id"
-    )
+    kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
     # Merged into every DinnerConcept at session creation
     dietary_defaults: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     kitchen_config: Optional[KitchenConfig] = Relationship(back_populates="user")
     equipment: list[Equipment] = Relationship(back_populates="user")

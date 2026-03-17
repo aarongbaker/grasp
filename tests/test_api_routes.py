@@ -28,6 +28,7 @@ from models.user import KitchenConfig, UserProfile
 # Test app + fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
     from api.routes.health import router as health_router
@@ -59,6 +60,7 @@ class MockDBSession:
     Minimal mock of AsyncSession for route testing.
     Stores objects in memory. Supports add, commit, refresh, get.
     """
+
     def __init__(self):
         self._store: dict[tuple, object] = {}
 
@@ -123,6 +125,7 @@ def app_with_overrides(mock_db, test_user):
 # Auth edge cases (Fix #10)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_auth_invalid_uuid_returns_400():
     """X-User-ID with a non-UUID value should return 400."""
@@ -174,17 +177,21 @@ async def test_auth_unknown_uuid_returns_404():
 # Session routes (Fix #7)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_session_201(app_with_overrides, test_user):
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post("/api/v1/sessions", json={
-            "free_text": "Dinner party with lamb and rosemary.",
-            "guest_count": 4,
-            "meal_type": "dinner",
-            "occasion": "dinner_party",
-            "dietary_restrictions": ["nut-free"],
-        })
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "free_text": "Dinner party with lamb and rosemary.",
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": ["nut-free"],
+            },
+        )
     assert resp.status_code == 201
     data = resp.json()
     assert data["status"] == "pending"
@@ -199,12 +206,15 @@ async def test_create_session_invalid_guest_count(app_with_overrides):
     """guest_count=0 is rejected at the request body layer (422)."""
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post("/api/v1/sessions", json={
-            "free_text": "Quick dinner.",
-            "guest_count": 0,
-            "meal_type": "dinner",
-            "occasion": "casual",
-        })
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "free_text": "Quick dinner.",
+                "guest_count": 0,
+                "meal_type": "dinner",
+                "occasion": "casual",
+            },
+        )
     assert resp.status_code == 422
 
 
@@ -225,9 +235,13 @@ async def test_get_session_pending_returns_row(app_with_overrides, mock_db, test
         session_id=session_id,
         user_id=test_user.user_id,
         status=SessionStatus.PENDING,
-        concept_json={"free_text": "test", "guest_count": 2,
-                       "meal_type": "dinner", "occasion": "casual",
-                       "dietary_restrictions": []},
+        concept_json={
+            "free_text": "test",
+            "guest_count": 2,
+            "meal_type": "dinner",
+            "occasion": "casual",
+            "dietary_restrictions": [],
+        },
     )
     mock_db.seed(Session, session_id, session)
 
@@ -310,6 +324,7 @@ async def test_run_pipeline_202_enqueues(app_with_overrides, mock_db, test_user)
 # ─────────────────────────────────────────────────────────────────────────────
 # Ingest routes (Fix #7)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_upload_non_pdf_returns_400(app_with_overrides):

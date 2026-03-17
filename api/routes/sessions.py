@@ -9,6 +9,7 @@ POST /sessions/{id}/run is the ONLY place GENERATING is written to DB.
 All other status transitions are handled by finalise_session() or derived
 by status_projection(). This is the V1.6 single-source-of-truth contract.
 """
+
 import uuid
 from datetime import datetime, timezone
 
@@ -39,9 +40,7 @@ class CreateSessionRequest(BaseModel):
 @limiter.limit("30/minute")
 async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
     # Merge chef's dietary_defaults into every session automatically
-    merged_restrictions = list(set(
-        current_user.dietary_defaults + body.dietary_restrictions
-    ))
+    merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
 
     concept = DinnerConcept(
         free_text=body.free_text,
@@ -88,6 +87,7 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
 
     # Enqueue Celery task
     from workers.tasks import run_grasp_pipeline
+
     run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))
 
     return {"session_id": str(session_id), "status": "generating", "message": "Pipeline enqueued"}
@@ -114,6 +114,7 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
         # Slow path: derive live status from checkpoint
         from core.status import status_projection
         from main import get_graph  # injected at startup
+
         try:
             graph = get_graph()
             live_status = await status_projection(session_id, graph)

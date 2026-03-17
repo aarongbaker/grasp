@@ -51,6 +51,7 @@ def _make_mock_graph_error():
 # Derivation rules
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_empty_state_returns_generating():
     graph = _make_mock_graph({})
@@ -76,10 +77,12 @@ async def test_raw_recipes_returns_enriching():
 @pytest.mark.asyncio
 async def test_enriched_recipes_returns_validating():
     """enriched_recipes populated means enricher ran → validator is next."""
-    graph = _make_mock_graph({
-        "raw_recipes": [{"name": "test"}],
-        "enriched_recipes": [{"source": {}, "steps": []}],
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [{"name": "test"}],
+            "enriched_recipes": [{"source": {}, "steps": []}],
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.VALIDATING
 
@@ -87,11 +90,13 @@ async def test_enriched_recipes_returns_validating():
 @pytest.mark.asyncio
 async def test_validated_recipes_returns_scheduling():
     """validated_recipes populated → SCHEDULING (dag_builder is next)."""
-    graph = _make_mock_graph({
-        "raw_recipes": [{"name": "test"}],
-        "enriched_recipes": [{"source": {}, "steps": []}],
-        "validated_recipes": [{"source": {}, "validated_at": "2024-01-01"}],
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [{"name": "test"}],
+            "enriched_recipes": [{"source": {}, "steps": []}],
+            "validated_recipes": [{"source": {}, "validated_at": "2024-01-01"}],
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.SCHEDULING
 
@@ -99,12 +104,14 @@ async def test_validated_recipes_returns_scheduling():
 @pytest.mark.asyncio
 async def test_recipe_dags_returns_scheduling():
     """recipe_dags populated → SCHEDULING (dag_merger is next)."""
-    graph = _make_mock_graph({
-        "raw_recipes": [{"name": "test"}],
-        "enriched_recipes": [{"source": {}, "steps": []}],
-        "validated_recipes": [{"source": {}, "validated_at": "2024-01-01"}],
-        "recipe_dags": [{"recipe_name": "test", "edges": []}],
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [{"name": "test"}],
+            "enriched_recipes": [{"source": {}, "steps": []}],
+            "validated_recipes": [{"source": {}, "validated_at": "2024-01-01"}],
+            "recipe_dags": [{"recipe_name": "test", "edges": []}],
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.SCHEDULING
 
@@ -112,10 +119,12 @@ async def test_recipe_dags_returns_scheduling():
 @pytest.mark.asyncio
 async def test_merged_dag_returns_scheduling():
     """merged_dag populated → SCHEDULING (renderer is next)."""
-    graph = _make_mock_graph({
-        "raw_recipes": [{"name": "test"}],
-        "merged_dag": {"scheduled_steps": [], "total_duration_minutes": 100},
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [{"name": "test"}],
+            "merged_dag": {"scheduled_steps": [], "total_duration_minutes": 100},
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.SCHEDULING
 
@@ -123,6 +132,7 @@ async def test_merged_dag_returns_scheduling():
 # ─────────────────────────────────────────────────────────────────────────────
 # Edge cases / fallbacks
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_exception_returns_generating():
@@ -135,13 +145,15 @@ async def test_exception_returns_generating():
 @pytest.mark.asyncio
 async def test_empty_lists_treated_as_not_populated():
     """Empty lists are falsy — should not advance status."""
-    graph = _make_mock_graph({
-        "raw_recipes": [],
-        "enriched_recipes": [],
-        "validated_recipes": [],
-        "recipe_dags": [],
-        "merged_dag": None,
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [],
+            "enriched_recipes": [],
+            "validated_recipes": [],
+            "recipe_dags": [],
+            "merged_dag": None,
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.GENERATING
 
@@ -149,12 +161,14 @@ async def test_empty_lists_treated_as_not_populated():
 @pytest.mark.asyncio
 async def test_most_advanced_field_wins():
     """When multiple fields populated, the most advanced one determines status."""
-    graph = _make_mock_graph({
-        "raw_recipes": [{"name": "a"}],
-        "enriched_recipes": [{"source": {}}],
-        "validated_recipes": [{"source": {}}],
-        "merged_dag": {"scheduled_steps": []},
-    })
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [{"name": "a"}],
+            "enriched_recipes": [{"source": {}}],
+            "validated_recipes": [{"source": {}}],
+            "merged_dag": {"scheduled_steps": []},
+        }
+    )
     status = await status_projection(uuid.uuid4(), graph)
     # merged_dag is most advanced → SCHEDULING (not VALIDATING or ENRICHING)
     assert status == SessionStatus.SCHEDULING

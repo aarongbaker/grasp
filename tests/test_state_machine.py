@@ -17,6 +17,7 @@ from ingestion.state_machine import CookbookState, _tripwire_check, run_state_ma
 # Empty / minimal input
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def test_empty_pages_returns_empty_list():
     """Fix #1 regression test: empty pages must not crash."""
     result = run_state_machine([])
@@ -25,7 +26,12 @@ def test_empty_pages_returns_empty_list():
 
 def test_single_page_narrative_only():
     """A page with no tripwire matches stays NARRATIVE → chunk_type=intro."""
-    pages = [{"page_number": 1, "text": "This is a long narrative about the history of French cuisine and its evolution over centuries."}]
+    pages = [
+        {
+            "page_number": 1,
+            "text": "This is a long narrative about the history of French cuisine and its evolution over centuries.",
+        }
+    ]
     chunks = run_state_machine(pages)
     assert len(chunks) == 1
     assert chunks[0]["chunk_type"] == "intro"
@@ -42,6 +48,7 @@ def test_short_text_discarded():
 # ─────────────────────────────────────────────────────────────────────────────
 # Tripwire detection
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def test_tripwire_detects_ingredients():
     """Ingredient patterns like '200g flour' trigger INGREDIENTS state."""
@@ -83,16 +90,19 @@ def test_tripwire_no_match():
 # State transitions
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def test_transition_narrative_to_method():
     """A transition from NARRATIVE to METHOD should produce two chunks."""
-    pages = [{
-        "page_number": 1,
-        "text": (
-            "This chapter explores the fundamentals of French braising technique and its many variations. "
-            "Heat the olive oil in a large Dutch oven over high heat until shimmering. "
-            "Add the seasoned short ribs and sear on all sides until deeply browned."
-        ),
-    }]
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "This chapter explores the fundamentals of French braising technique and its many variations. "
+                "Heat the olive oil in a large Dutch oven over high heat until shimmering. "
+                "Add the seasoned short ribs and sear on all sides until deeply browned."
+            ),
+        }
+    ]
     chunks = run_state_machine(pages)
     types = [c["chunk_type"] for c in chunks]
     assert "intro" in types
@@ -101,14 +111,16 @@ def test_transition_narrative_to_method():
 
 def test_transition_method_to_recipe_end():
     """Method + serving instruction stay as one recipe chunk (recipe lifecycle)."""
-    pages = [{
-        "page_number": 1,
-        "text": (
-            "1. Heat the butter in a saucepan until foaming and lightly browned. "
-            "2. Add the shallots and cook until softened, about three minutes. "
-            "Serve immediately with crusty bread and a green salad on the side."
-        ),
-    }]
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "1. Heat the butter in a saucepan until foaming and lightly browned. "
+                "2. Add the shallots and cook until softened, about three minutes. "
+                "Serve immediately with crusty bread and a green salad on the side."
+            ),
+        }
+    ]
     chunks = run_state_machine(pages)
     assert len(chunks) == 1
     assert chunks[0]["chunk_type"] == "recipe"
@@ -118,8 +130,14 @@ def test_transition_method_to_recipe_end():
 def test_multiple_pages_preserve_page_numbers():
     """Chunks track their originating page number."""
     pages = [
-        {"page_number": 1, "text": "This is a long narrative introduction to the cookbook and its themes and philosophy."},
-        {"page_number": 2, "text": "200 g dark chocolate, roughly chopped into small even pieces for consistent melting."},
+        {
+            "page_number": 1,
+            "text": "This is a long narrative introduction to the cookbook and its themes and philosophy.",
+        },
+        {
+            "page_number": 2,
+            "text": "200 g dark chocolate, roughly chopped into small even pieces for consistent melting.",
+        },
     ]
     chunks = run_state_machine(pages)
     assert len(chunks) >= 1
@@ -129,14 +147,16 @@ def test_multiple_pages_preserve_page_numbers():
 
 def test_same_state_no_flush():
     """Consecutive sentences matching the same state accumulate into one chunk."""
-    pages = [{
-        "page_number": 1,
-        "text": (
-            "Heat the oil in a pan over medium heat until shimmering. "
-            "Add the onions and stir until translucent and softened. "
-            "Season with salt and pepper to taste and stir again."
-        ),
-    }]
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "Heat the oil in a pan over medium heat until shimmering. "
+                "Add the onions and stir until translucent and softened. "
+                "Season with salt and pepper to taste and stir again."
+            ),
+        }
+    ]
     chunks = run_state_machine(pages)
     # All sentences match METHOD — should be a single chunk
     assert len(chunks) == 1

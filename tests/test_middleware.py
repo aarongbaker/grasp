@@ -19,6 +19,7 @@ from slowapi.util import get_remote_address
 # Test app factory
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _create_middleware_app(
     allowed_origins: list[str] | None = None,
     rate_limit: str = "100/minute",
@@ -58,6 +59,7 @@ def _create_middleware_app(
 # ─────────────────────────────────────────────────────────────────────────────
 # CORS tests
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_cors_allowed_origin():
@@ -126,6 +128,7 @@ async def test_cors_preflight_disallowed():
 # ─────────────────────────────────────────────────────────────────────────────
 # Rate limiting tests
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_rate_limit_allows_under_limit():

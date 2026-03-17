@@ -56,13 +56,15 @@ async def validator_node(state: GRASPState) -> dict:
         except Exception as exc:
             logger.warning("Validation failed for '%s': %s", recipe_name, exc)
             # Per-recipe recoverable failure
-            errors.append({
-                "node_name": "validator",
-                "error_type": ErrorType.VALIDATION_FAILURE.value,
-                "recoverable": True,
-                "message": f"Validation failed for '{recipe_name}': {exc}",
-                "metadata": {"recipe_name": recipe_name, "error": str(exc)},
-            })
+            errors.append(
+                {
+                    "node_name": "validator",
+                    "error_type": ErrorType.VALIDATION_FAILURE.value,
+                    "recoverable": True,
+                    "message": f"Validation failed for '{recipe_name}': {exc}",
+                    "metadata": {"recipe_name": recipe_name, "error": str(exc)},
+                }
+            )
 
     logger.info("Validation complete: %d/%d passed", len(validated), len(enriched_dicts))
 
@@ -70,13 +72,15 @@ async def validator_node(state: GRASPState) -> dict:
         # All recipes failed — fatal
         return {
             "validated_recipes": [],
-            "errors": [{
-                "node_name": "validator",
-                "error_type": ErrorType.VALIDATION_FAILURE.value,
-                "recoverable": False,
-                "message": "All recipes failed Pydantic validation. Cannot schedule.",
-                "metadata": {"failed_count": len(enriched_dicts)},
-            }],
+            "errors": [
+                {
+                    "node_name": "validator",
+                    "error_type": ErrorType.VALIDATION_FAILURE.value,
+                    "recoverable": False,
+                    "message": "All recipes failed Pydantic validation. Cannot schedule.",
+                    "metadata": {"failed_count": len(enriched_dicts)},
+                }
+            ],
         }
 
     update: dict = {"validated_recipes": validated}

@@ -23,10 +23,10 @@ from models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
 # This eliminates typo bugs in depends_on references across both fixture files.
 
 # Short Rib steps
-SR_STEP_1 = "short_rib_step_1"   # sear — STOVETOP, 20 min
-SR_STEP_2 = "short_rib_step_2"   # braising liquid — HANDS, 10 min
-SR_STEP_3 = "short_rib_step_3"   # braise — OVEN, 150-180 min (PASSIVE parallelism during window)
-SR_STEP_4 = "short_rib_step_4"   # rest — PASSIVE, 15 min
+SR_STEP_1 = "short_rib_step_1"  # sear — STOVETOP, 20 min
+SR_STEP_2 = "short_rib_step_2"  # braising liquid — HANDS, 10 min
+SR_STEP_3 = "short_rib_step_3"  # braise — OVEN, 150-180 min (PASSIVE parallelism during window)
+SR_STEP_4 = "short_rib_step_4"  # rest — PASSIVE, 15 min
 
 # Pommes Puree steps
 PP_STEP_1 = "pommes_puree_step_1"  # boil potatoes — STOVETOP, 30 min
@@ -46,7 +46,7 @@ CF_STEP_5 = "fondant_step_5"  # bake — OVEN, 12 min (duration_max=14)
 RAW_SHORT_RIBS = RawRecipe(
     name="Braised Short Ribs",
     description="Low-and-slow bone-in short ribs in a red wine braise. "
-                "Rich, deeply flavoured, ideal for a dinner party.",
+    "Rich, deeply flavoured, ideal for a dinner party.",
     servings=4,
     cuisine="French-American",
     estimated_total_minutes=210,
@@ -95,7 +95,7 @@ RAW_POMMES_PUREE = RawRecipe(
 RAW_CHOCOLATE_FONDANT = RawRecipe(
     name="Chocolate Fondant",
     description="Individual molten chocolate puddings. Batter made ahead. "
-                "12-minute bake at service. Molten centre is non-negotiable.",
+    "12-minute bake at service. Molten centre is non-negotiable.",
     servings=4,
     cuisine="French-British",
     estimated_total_minutes=75,

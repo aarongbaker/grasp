@@ -60,10 +60,7 @@ async def finalise_session(
         result.status = SessionStatus.FAILED
 
     if has_errors:
-        error_messages = [
-            f"{e.get('node_name', '?')}: {e.get('message', '?')}"
-            for e in errors
-        ]
+        error_messages = [f"{e.get('node_name', '?')}: {e.get('message', '?')}" for e in errors]
         result.error_summary = "; ".join(error_messages)
 
     # Persist accumulated LLM token usage for observability

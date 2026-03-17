@@ -40,21 +40,22 @@ logger = logging.getLogger(__name__)
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
+
 class ScheduleSummaryOutput(BaseModel):
     """Wrapper for LangChain structured output. Claude returns this shape."""
+
     summary: str
     error_summary: Optional[str] = None
 
 
 # ── Deterministic timeline construction ──────────────────────────────────────
 
+
 def _build_timeline_entry(step: ScheduledStep) -> TimelineEntry:
     """Convert a ScheduledStep to a TimelineEntry. Pure, deterministic."""
     heads_up = None
     if step.duration_max and step.duration_max != step.duration_minutes:
-        heads_up = (
-            f"{step.duration_minutes}–{step.duration_max} min depending on oven"
-        )
+        heads_up = f"{step.duration_minutes}–{step.duration_max} min depending on oven"
 
     return TimelineEntry(
         time_offset_minutes=step.start_at_minute,
@@ -77,6 +78,7 @@ def _build_timeline(merged_dag: MergedDAG) -> list[TimelineEntry]:
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
+
 
 def _format_schedule_for_prompt(merged_dag: MergedDAG) -> str:
     """Format the scheduled steps as a readable text block for the LLM."""
@@ -134,7 +136,7 @@ which recipe(s) were dropped and why, suitable for display to the user."""
 - Guest count: {concept.guest_count}
 
 ## RECIPES IN SCHEDULE
-{', '.join(recipe_names)}
+{", ".join(recipe_names)}
 
 ## SCHEDULED TIMELINE
 {schedule_text}
@@ -154,6 +156,7 @@ which recipe(s) were dropped and why, suitable for display to the user."""
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
 
+
 def _create_llm() -> ChatAnthropic:
     """
     Creates the ChatAnthropic instance. Extracted as a separate function so
@@ -169,16 +172,14 @@ def _create_llm() -> ChatAnthropic:
 
 # ── Fallback summary (used when LLM call fails) ─────────────────────────────
 
+
 def _fallback_summary(merged_dag: MergedDAG, errors: list[dict]) -> str:
     """Generate a basic summary without LLM. Used on renderer failure."""
     recipe_names = sorted(set(s.recipe_name for s in merged_dag.scheduled_steps))
     hours = merged_dag.total_duration_minutes // 60
     minutes = merged_dag.total_duration_minutes % 60
     time_str = f"{hours} hours {minutes} minutes" if hours else f"{minutes} minutes"
-    return (
-        f"Schedule for {len(recipe_names)} course(s): {', '.join(recipe_names)}. "
-        f"Total elapsed time: {time_str}."
-    )
+    return f"Schedule for {len(recipe_names)} course(s): {', '.join(recipe_names)}. Total elapsed time: {time_str}."
 
 
 def _fallback_error_summary(errors: list[dict]) -> Optional[str]:
@@ -197,6 +198,7 @@ def _fallback_error_summary(errors: list[dict]) -> Optional[str]:
 
 
 # ── Node function ────────────────────────────────────────────────────────────
+
 
 async def schedule_renderer_node(state: GRASPState) -> dict:
     """
@@ -246,13 +248,15 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
 
         @llm_retry
         async def _invoke_llm():
-            return await chain.ainvoke([
-                SystemMessage(content=prompt),
-                HumanMessage(
-                    content=f"Write a summary for this {len(timeline)}-step "
-                    f"cooking schedule ({merged_dag.total_duration_minutes} min total)."
-                ),
-            ])
+            return await chain.ainvoke(
+                [
+                    SystemMessage(content=prompt),
+                    HumanMessage(
+                        content=f"Write a summary for this {len(timeline)}-step "
+                        f"cooking schedule ({merged_dag.total_duration_minutes} min total)."
+                    ),
+                ]
+            )
 
         result = await _invoke_llm()
 

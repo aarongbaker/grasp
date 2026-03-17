@@ -45,6 +45,7 @@ from tests.fixtures.schedules import (
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _make_validated(enriched: EnrichedRecipe) -> ValidatedRecipe:
     """Wrap an EnrichedRecipe in a ValidatedRecipe for testing."""
     return ValidatedRecipe(source=enriched, validated_at=datetime.now())
@@ -62,6 +63,7 @@ DEFAULT_KITCHEN = {
 
 
 # ── DAG Builder Tests ────────────────────────────────────────────────────────
+
 
 class TestBuildSingleDag:
     def test_happy_path_short_ribs(self):
@@ -119,6 +121,7 @@ class TestSlugGeneration:
 
 # ── DAG Merger Tests ─────────────────────────────────────────────────────────
 
+
 class TestCriticalPath:
     def test_critical_path_values(self):
         """Verify critical path lengths for all steps across 3 recipes."""
@@ -131,15 +134,17 @@ class TestCriticalPath:
             (RECIPE_DAG_FONDANT, VALIDATED_FONDANT),
         ]:
             for step in validated.source.steps:
-                steps.append(_StepInfo(
-                    step_id=step.step_id,
-                    recipe_name=dag.recipe_name,
-                    recipe_slug=dag.recipe_slug,
-                    description=step.description,
-                    resource=step.resource,
-                    duration_minutes=step.duration_minutes,
-                    depends_on=list(step.depends_on),
-                ))
+                steps.append(
+                    _StepInfo(
+                        step_id=step.step_id,
+                        recipe_name=dag.recipe_name,
+                        recipe_slug=dag.recipe_slug,
+                        description=step.description,
+                        resource=step.resource,
+                        duration_minutes=step.duration_minutes,
+                        depends_on=list(step.depends_on),
+                    )
+                )
             all_edges.extend(dag.edges)
 
         cp = _compute_critical_paths(steps, all_edges)
@@ -183,9 +188,7 @@ class TestMergeDags:
             assert r.start_at_minute == f.start_at_minute, (
                 f"{step_id}: start {r.start_at_minute} != fixture {f.start_at_minute}"
             )
-            assert r.end_at_minute == f.end_at_minute, (
-                f"{step_id}: end {r.end_at_minute} != fixture {f.end_at_minute}"
-            )
+            assert r.end_at_minute == f.end_at_minute, f"{step_id}: end {r.end_at_minute} != fixture {f.end_at_minute}"
 
     def test_three_recipe_sort_order(self):
         """Output steps must be sorted by (start_at_minute, recipe_slug, step_id)."""
@@ -197,9 +200,7 @@ class TestMergeDags:
         # Verify order matches fixture order exactly
         result_ids = [s.step_id for s in result.scheduled_steps]
         fixture_ids = [s.step_id for s in MERGED_DAG_FULL.scheduled_steps]
-        assert result_ids == fixture_ids, (
-            f"Sort order mismatch:\n  result:  {result_ids}\n  fixture: {fixture_ids}"
-        )
+        assert result_ids == fixture_ids, f"Sort order mismatch:\n  result:  {result_ids}\n  fixture: {fixture_ids}"
 
     def test_two_recipe_exact_match(self):
         """2-recipe merge (no fondant) must match the 2-recipe fixture."""
@@ -241,12 +242,9 @@ class TestResourceContention:
         result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
 
         stovetop_at_zero = [
-            s for s in result.scheduled_steps
-            if s.start_at_minute == 0 and s.resource == Resource.STOVETOP
+            s for s in result.scheduled_steps if s.start_at_minute == 0 and s.resource == Resource.STOVETOP
         ]
-        assert len(stovetop_at_zero) == 3, (
-            f"Expected 3 STOVETOP steps at T+0, got {len(stovetop_at_zero)}"
-        )
+        assert len(stovetop_at_zero) == 3, f"Expected 3 STOVETOP steps at T+0, got {len(stovetop_at_zero)}"
 
     def test_oven_exclusion(self):
         """Two OVEN steps (braise + fondant bake) cannot overlap with 1 oven."""
@@ -270,21 +268,35 @@ class TestResourceContention:
         """With has_second_oven=True, two OVEN steps CAN overlap."""
         # Build two minimal recipes, each with a single OVEN step
         raw_a = RawRecipe(
-            name="Recipe A", description="t", servings=2, cuisine="t",
-            estimated_total_minutes=60, ingredients=[], steps=["bake"],
+            name="Recipe A",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=60,
+            ingredients=[],
+            steps=["bake"],
         )
         raw_b = RawRecipe(
-            name="Recipe B", description="t", servings=2, cuisine="t",
-            estimated_total_minutes=60, ingredients=[], steps=["bake"],
+            name="Recipe B",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=60,
+            ingredients=[],
+            steps=["bake"],
         )
-        enriched_a = EnrichedRecipe(source=raw_a, steps=[
-            RecipeStep(step_id="a_step_1", description="bake A",
-                       duration_minutes=60, resource=Resource.OVEN),
-        ])
-        enriched_b = EnrichedRecipe(source=raw_b, steps=[
-            RecipeStep(step_id="b_step_1", description="bake B",
-                       duration_minutes=60, resource=Resource.OVEN),
-        ])
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="a_step_1", description="bake A", duration_minutes=60, resource=Resource.OVEN),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="b_step_1", description="bake B", duration_minutes=60, resource=Resource.OVEN),
+            ],
+        )
 
         dags = [
             RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[]),
@@ -352,5 +364,5 @@ class TestResourceUtilisation:
         assert "passive" not in result.resource_utilisation  # PASSIVE not tracked
 
         assert len(result.resource_utilisation["stovetop"]) == 3  # 3 burner uses
-        assert len(result.resource_utilisation["hands"]) == 5     # 5 HANDS steps
-        assert len(result.resource_utilisation["oven"]) == 2      # braise + bake
+        assert len(result.resource_utilisation["hands"]) == 5  # 5 HANDS steps
+        assert len(result.resource_utilisation["oven"]) == 2  # braise + bake

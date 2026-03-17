@@ -32,7 +32,9 @@ async def create_db_and_tables():
 async def get_session():
     """FastAPI dependency. Yields one AsyncSession per request."""
     SessionLocal = sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False,
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
     )
     async with SessionLocal() as session:
         yield session

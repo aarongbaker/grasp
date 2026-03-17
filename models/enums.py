@@ -34,6 +34,7 @@ class Resource(str, Enum):
       PASSIVE   — non-exclusive (always parallelisable)
       HANDS     — exclusive (only one at a time)
     """
+
     OVEN = "oven"
     STOVETOP = "stovetop"
     PASSIVE = "passive"
@@ -76,7 +77,8 @@ class SessionStatus(str, Enum):
     by finalise_session(). In-progress statuses derived by status_projection() from
     checkpoint. Nodes never write Session.status directly.
     """
-    PENDING = "pending"        # neither terminal nor in-progress — awaiting POST /run
+
+    PENDING = "pending"  # neither terminal nor in-progress — awaiting POST /run
     GENERATING = "generating"
     ENRICHING = "enriching"
     VALIDATING = "validating"
@@ -92,8 +94,10 @@ class SessionStatus(str, Enum):
     @property
     def is_in_progress(self) -> bool:
         return self in (
-            SessionStatus.GENERATING, SessionStatus.ENRICHING,
-            SessionStatus.VALIDATING, SessionStatus.SCHEDULING,
+            SessionStatus.GENERATING,
+            SessionStatus.ENRICHING,
+            SessionStatus.VALIDATING,
+            SessionStatus.SCHEDULING,
         )
 
 

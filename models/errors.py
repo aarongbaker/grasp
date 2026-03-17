@@ -17,6 +17,7 @@ from models.enums import ErrorType
 
 class NodeError(BaseModel):
     """Accumulates in GRASPState.errors — the one intentional accumulator."""
+
     node_name: str
     error_type: ErrorType
     recoverable: bool

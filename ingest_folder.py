@@ -86,6 +86,7 @@ async def _ingest_one_pdf(
         from sqlalchemy import delete as sa_delete
 
         from models.ingestion import CookbookChunk, PageCache
+
         await db.execute(sa_delete(PageCache).where(PageCache.book_id == prev.book_id))
         await db.execute(sa_delete(CookbookChunk).where(CookbookChunk.book_id == prev.book_id))
         await db.delete(prev)
@@ -152,6 +153,7 @@ async def main(folder: str, user_id_str: str | None):
     import models.ingestion  # noqa: F401
     import models.session  # noqa: F401
     import models.user  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -196,9 +198,9 @@ async def main(folder: str, user_id_str: str | None):
     await engine.dispose()
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("INGESTION COMPLETE")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Successes: {len(results)}")
     print(f"  Failures:  {len(failures)}")
     total_chunks = sum(r["chunks"] for r in results)

@@ -32,6 +32,7 @@ class DinnerConcept(BaseModel):
     safety-critical constraints (dietary_restrictions, meal_type) are
     never ambiguous. guest_count bounded [1, 100].
     """
+
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
     meal_type: MealType
@@ -55,16 +56,16 @@ from typing import TypedDict
 
 
 class GRASPState(TypedDict, total=False):
-    concept: dict                                           # DinnerConcept.model_dump()
-    kitchen_config: dict                                    # KitchenConfig fields
-    equipment: list[dict]                                   # List[Equipment-like dicts] snapshotted at session start
-    user_id: str                                            # UUID string for Pinecone RAG filtering
-    raw_recipes: list[dict]                                 # List[RawRecipe.model_dump()]
-    enriched_recipes: list[dict]                            # List[EnrichedRecipe.model_dump()]
-    validated_recipes: list[dict]                           # List[ValidatedRecipe.model_dump()]
-    recipe_dags: list[dict]                                 # List[RecipeDAG.model_dump()]
-    merged_dag: Optional[dict]                              # MergedDAG.model_dump() | None
-    schedule: Optional[dict]                                # NaturalLanguageSchedule.model_dump() | None
-    errors: Annotated[list[dict], operator.add]             # ACCUMULATOR — NodeError.model_dump()
-    token_usage: Annotated[list[dict], operator.add]        # ACCUMULATOR — per-node LLM token counts
-    test_mode: Optional[str]                                # Phase 3 only. None in production.
+    concept: dict  # DinnerConcept.model_dump()
+    kitchen_config: dict  # KitchenConfig fields
+    equipment: list[dict]  # List[Equipment-like dicts] snapshotted at session start
+    user_id: str  # UUID string for Pinecone RAG filtering
+    raw_recipes: list[dict]  # List[RawRecipe.model_dump()]
+    enriched_recipes: list[dict]  # List[EnrichedRecipe.model_dump()]
+    validated_recipes: list[dict]  # List[ValidatedRecipe.model_dump()]
+    recipe_dags: list[dict]  # List[RecipeDAG.model_dump()]
+    merged_dag: Optional[dict]  # MergedDAG.model_dump() | None
+    schedule: Optional[dict]  # NaturalLanguageSchedule.model_dump() | None
+    errors: Annotated[list[dict], operator.add]  # ACCUMULATOR — NodeError.model_dump()
+    token_usage: Annotated[list[dict], operator.add]  # ACCUMULATOR — per-node LLM token counts
+    test_mode: Optional[str]  # Phase 3 only. None in production.

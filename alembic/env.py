@@ -27,6 +27,7 @@ if config.config_file_name is not None:
 # Set sqlalchemy.url from settings if not already set via CLI
 if not config.get_main_option("sqlalchemy.url"):
     from core.settings import get_settings
+
     settings = get_settings()
     # Alembic needs a sync driver — use psycopg3 (already installed)
     sync_url = settings.database_url.replace("+asyncpg", "+psycopg")
@@ -36,7 +37,10 @@ target_metadata = SQLModel.metadata
 
 # LangGraph checkpoint tables are managed by PostgresSaver, not Alembic
 EXCLUDE_TABLES = {
-    "checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+    "checkpoint_migrations",
 }
 
 

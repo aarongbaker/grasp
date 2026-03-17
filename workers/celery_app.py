@@ -26,7 +26,7 @@ celery_app.conf.update(
     enable_utc=True,
     worker_concurrency=settings.celery_worker_concurrency,
     task_soft_time_limit=settings.celery_task_timeout,
-    task_acks_late=True,       # ack only after task completes (prevents loss on worker crash)
+    task_acks_late=True,  # ack only after task completes (prevents loss on worker crash)
     task_reject_on_worker_lost=True,
-    task_max_retries=0,        # NO automatic retry — inspect before re-running
+    task_max_retries=0,  # NO automatic retry — inspect before re-running
 )

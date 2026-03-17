@@ -68,15 +68,15 @@ def build_grasp_graph(checkpointer) -> StateGraph:
     workflow = StateGraph(GRASPState)
 
     # ── Add nodes ─────────────────────────────────────────────────────────────
-    workflow.add_node("recipe_generator",  recipe_generator_node)
-    workflow.add_node("rag_enricher",      rag_enricher_node)
-    workflow.add_node("validator",         validator_node)
-    workflow.add_node("dag_builder",       dag_builder_node)
-    workflow.add_node("dag_merger",        dag_merger_node)
+    workflow.add_node("recipe_generator", recipe_generator_node)
+    workflow.add_node("rag_enricher", rag_enricher_node)
+    workflow.add_node("validator", validator_node)
+    workflow.add_node("dag_builder", dag_builder_node)
+    workflow.add_node("dag_merger", dag_merger_node)
     workflow.add_node("schedule_renderer", schedule_renderer_node)
     workflow.add_node("handle_fatal_error", handle_fatal_error_node)
-    workflow.add_node("mark_complete",     mark_complete_node)
-    workflow.add_node("mark_partial",      mark_partial_node)
+    workflow.add_node("mark_complete", mark_complete_node)
+    workflow.add_node("mark_partial", mark_partial_node)
 
     # ── Entry point ───────────────────────────────────────────────────────────
     workflow.set_entry_point("recipe_generator")

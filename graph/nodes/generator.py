@@ -33,8 +33,10 @@ logger = logging.getLogger(__name__)
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
+
 class RecipeGenerationOutput(BaseModel):
     """Wrapper for LangChain structured output. Claude returns this shape."""
+
     recipes: list[RawRecipe]
 
 
@@ -50,7 +52,6 @@ RECIPE_COUNT_MAP: dict[tuple[MealType, Occasion], int] = {
     (MealType.SNACKS, Occasion.CASUAL): 2,
     (MealType.DESSERT, Occasion.CASUAL): 1,
     (MealType.MEAL_PREP, Occasion.CASUAL): 3,
-
     # Dinner party — multi-course
     (MealType.BREAKFAST, Occasion.DINNER_PARTY): 2,
     (MealType.BRUNCH, Occasion.DINNER_PARTY): 3,
@@ -60,7 +61,6 @@ RECIPE_COUNT_MAP: dict[tuple[MealType, Occasion], int] = {
     (MealType.SNACKS, Occasion.DINNER_PARTY): 3,
     (MealType.DESSERT, Occasion.DINNER_PARTY): 2,
     (MealType.MEAL_PREP, Occasion.DINNER_PARTY): 3,
-
     # Tasting menu — many small courses
     (MealType.BREAKFAST, Occasion.TASTING_MENU): 3,
     (MealType.BRUNCH, Occasion.TASTING_MENU): 5,
@@ -70,7 +70,6 @@ RECIPE_COUNT_MAP: dict[tuple[MealType, Occasion], int] = {
     (MealType.SNACKS, Occasion.TASTING_MENU): 4,
     (MealType.DESSERT, Occasion.TASTING_MENU): 3,
     (MealType.MEAL_PREP, Occasion.TASTING_MENU): 3,
-
     # Meal prep — batch cooking
     (MealType.BREAKFAST, Occasion.MEAL_PREP): 3,
     (MealType.BRUNCH, Occasion.MEAL_PREP): 3,
@@ -91,6 +90,7 @@ def _derive_recipe_count(meal_type: MealType, occasion: Occasion) -> int:
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
+
 
 def _format_dietary_restrictions(restrictions: list[str]) -> str:
     if not restrictions:
@@ -164,6 +164,7 @@ Your recipes are written for experienced home cooks who value precision, techniq
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
 
+
 def _create_llm() -> ChatAnthropic:
     """
     Creates the ChatAnthropic instance. Extracted as a separate function so
@@ -178,6 +179,7 @@ def _create_llm() -> ChatAnthropic:
 
 
 # ── Node function ────────────────────────────────────────────────────────────
+
 
 async def recipe_generator_node(state: GRASPState) -> dict:
     """
@@ -204,10 +206,14 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
         @llm_retry
         async def _invoke_llm():
-            return await chain.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."),
-            ])
+            return await chain.ainvoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(
+                        content=f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."
+                    ),
+                ]
+            )
 
         logger.info("Generating %d recipes for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
         result = await _invoke_llm()

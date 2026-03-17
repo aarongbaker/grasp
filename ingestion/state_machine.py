@@ -27,12 +27,14 @@ _MAX_CHUNK_WORDS = 500
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 # States that belong to a recipe lifecycle — these accumulate into one chunk
-_RECIPE_STATES = frozenset({
-    "recipe_header",
-    "ingredients",
-    "method",
-    "recipe_end",
-})
+_RECIPE_STATES = frozenset(
+    {
+        "recipe_header",
+        "ingredients",
+        "method",
+        "recipe_end",
+    }
+)
 
 
 class CookbookState(str, Enum):
@@ -103,8 +105,10 @@ def run_state_machine(pages: list[dict]) -> list[dict]:
             text = " ".join(current_chunk).strip()
             if len(text) > 20:
                 ctype = chunk_type or (
-                    ChunkType.RECIPE if _is_recipe_state(state)
-                    else ChunkType.TECHNIQUE if state == CookbookState.TECHNIQUE_ASIDE
+                    ChunkType.RECIPE
+                    if _is_recipe_state(state)
+                    else ChunkType.TECHNIQUE
+                    if state == CookbookState.TECHNIQUE_ASIDE
                     else ChunkType.INTRO
                 )
                 base = {

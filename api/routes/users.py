@@ -1,4 +1,5 @@
 """api/routes/users.py — User profile CRUD"""
+
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -61,9 +62,6 @@ async def list_sessions(user_id: uuid.UUID, db: DBSession, current_user: Current
     if current_user.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     from models.session import Session
-    result = await db.exec(
-        select(Session)
-        .where(Session.user_id == user_id)
-        .order_by(Session.created_at.desc())
-    )
+
+    result = await db.exec(select(Session).where(Session.user_id == user_id).order_by(Session.created_at.desc()))
     return result.all()

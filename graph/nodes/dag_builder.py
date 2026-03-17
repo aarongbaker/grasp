@@ -81,7 +81,7 @@ def _build_single_dag(validated: ValidatedRecipe) -> RecipeDAG:
     return RecipeDAG(
         recipe_name=raw.name,
         recipe_slug=slug,
-        steps=[],       # Steps live in EnrichedRecipe; DAG stores edges only
+        steps=[],  # Steps live in EnrichedRecipe; DAG stores edges only
         edges=edges,
     )
 
@@ -92,8 +92,7 @@ async def dag_builder_node(state: GRASPState) -> dict:
     # Checkpoint resume test: simulate crash before completing
     if os.environ.get("SIMULATE_INTERRUPT") == "1":
         raise RuntimeError(
-            "SIMULATE_INTERRUPT: dag_builder crashed. "
-            "LangGraph will resume from validator checkpoint on next invoke."
+            "SIMULATE_INTERRUPT: dag_builder crashed. LangGraph will resume from validator checkpoint on next invoke."
         )
 
     validated_dicts = state.get("validated_recipes", [])
@@ -102,9 +101,7 @@ async def dag_builder_node(state: GRASPState) -> dict:
     errors: list[dict] = []
 
     for recipe_dict in validated_dicts:
-        recipe_name = (
-            recipe_dict.get("source", {}).get("source", {}).get("name", "unknown")
-        )
+        recipe_name = recipe_dict.get("source", {}).get("source", {}).get("name", "unknown")
         try:
             validated = ValidatedRecipe.model_validate(recipe_dict)
             dag = _build_single_dag(validated)
@@ -112,28 +109,29 @@ async def dag_builder_node(state: GRASPState) -> dict:
             logger.info("DAG built for '%s': %d edges", recipe_name, len(dag.edges))
         except Exception as exc:
             logger.warning("DAG build failed for '%s': %s", recipe_name, exc)
-            errors.append({
-                "node_name": "dag_builder",
-                "error_type": ErrorType.DEPENDENCY_RESOLUTION.value,
-                "recoverable": True,
-                "message": f"DAG build failed for '{recipe_name}': {exc}",
-                "metadata": {"recipe_name": recipe_name},
-            })
+            errors.append(
+                {
+                    "node_name": "dag_builder",
+                    "error_type": ErrorType.DEPENDENCY_RESOLUTION.value,
+                    "recoverable": True,
+                    "message": f"DAG build failed for '{recipe_name}': {exc}",
+                    "metadata": {"recipe_name": recipe_name},
+                }
+            )
 
     # All recipes failed — fatal
     if not dags:
         return {
             "recipe_dags": [],
-            "errors": [{
-                "node_name": "dag_builder",
-                "error_type": ErrorType.DEPENDENCY_RESOLUTION.value,
-                "recoverable": False,
-                "message": (
-                    f"All {len(validated_dicts)} recipes failed DAG construction. "
-                    "Cannot schedule."
-                ),
-                "metadata": {"failed_count": len(validated_dicts)},
-            }],
+            "errors": [
+                {
+                    "node_name": "dag_builder",
+                    "error_type": ErrorType.DEPENDENCY_RESOLUTION.value,
+                    "recoverable": False,
+                    "message": (f"All {len(validated_dicts)} recipes failed DAG construction. Cannot schedule."),
+                    "metadata": {"failed_count": len(validated_dicts)},
+                }
+            ],
         }
 
     update: dict = {"recipe_dags": dags}

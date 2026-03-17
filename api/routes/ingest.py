@@ -1,4 +1,5 @@
 """api/routes/ingest.py — PDF upload and ingestion job polling."""
+
 import base64
 import uuid
 
@@ -32,7 +33,9 @@ async def upload_pdf(
     content = await file.read()
 
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+        raise HTTPException(
+            status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
 
     job = IngestionJob(
         user_id=current_user.user_id,
@@ -47,6 +50,7 @@ async def upload_pdf(
     # Enqueue ingestion task — base64-encode PDF bytes for JSON serialiser.
     # TODO: V2 should store to object storage and pass a reference instead.
     from workers.tasks import ingest_cookbook
+
     content_b64 = base64.b64encode(content).decode("ascii")
     ingest_cookbook.delay(str(job.job_id), str(current_user.user_id), content_b64, file.filename)
 

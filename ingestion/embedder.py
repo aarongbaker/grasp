@@ -31,7 +31,7 @@ def _split_oversized_chunks(chunks: list[dict]) -> list[dict]:
             result.append(chunk)
         else:
             for i in range(0, len(words), _MAX_CHUNK_WORDS):
-                part = " ".join(words[i:i + _MAX_CHUNK_WORDS])
+                part = " ".join(words[i : i + _MAX_CHUNK_WORDS])
                 result.append({**chunk, "text": part})
     return result
 
@@ -65,16 +65,14 @@ async def embed_and_upsert_chunks(
     chunks = _split_oversized_chunks(chunks)
 
     # Clean up old chunks for this book (idempotent re-ingestion)
-    old_chunks = await db.execute(
-        select(CookbookChunk).where(CookbookChunk.book_id == uuid.UUID(book_id))
-    )
+    old_chunks = await db.execute(select(CookbookChunk).where(CookbookChunk.book_id == uuid.UUID(book_id)))
     for old in old_chunks.scalars().all():
         await db.delete(old)
 
     total_upserted = 0
 
     for batch_start in range(0, len(chunks), _EMBED_BATCH_SIZE):
-        batch = chunks[batch_start:batch_start + _EMBED_BATCH_SIZE]
+        batch = chunks[batch_start : batch_start + _EMBED_BATCH_SIZE]
         texts = [c["text"] for c in batch]
 
         # Embed batch — on failure, fall back to per-chunk embedding
@@ -117,17 +115,19 @@ async def embed_and_upsert_chunks(
             )
             db.add(chunk_obj)
 
-            vectors.append({
-                "id": str(chunk_id),
-                "values": embedding,
-                "metadata": chunk_obj.to_pinecone_metadata(),
-            })
+            vectors.append(
+                {
+                    "id": str(chunk_id),
+                    "values": embedding,
+                    "metadata": chunk_obj.to_pinecone_metadata(),
+                }
+            )
 
         # Upsert to Pinecone then commit DB (correct order: vector store first)
         if vectors:
             pinecone_batch = 100
             for i in range(0, len(vectors), pinecone_batch):
-                index.upsert(vectors=vectors[i:i + pinecone_batch])
+                index.upsert(vectors=vectors[i : i + pinecone_batch])
             await db.commit()
             total_upserted += len(vectors)
 

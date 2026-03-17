@@ -67,6 +67,7 @@ def _make_state(merged_dag=None, errors=None, concept=None):
 
 # ── Timeline Entry Construction ──────────────────────────────────────────────
 
+
 class TestBuildTimelineEntry:
     def test_basic_step(self):
         """A simple step with no duration_max produces no heads_up."""
@@ -145,9 +146,13 @@ class TestBuildTimelineEntry:
     def test_label_format(self):
         """Label is T+{start_at_minute}."""
         step = ScheduledStep(
-            step_id="s1", recipe_name="R", description="D",
-            resource=Resource.HANDS, duration_minutes=5,
-            start_at_minute=45, end_at_minute=50,
+            step_id="s1",
+            recipe_name="R",
+            description="D",
+            resource=Resource.HANDS,
+            duration_minutes=5,
+            start_at_minute=45,
+            end_at_minute=50,
         )
         entry = _build_timeline_entry(step)
         assert entry.label == "T+45"
@@ -185,6 +190,7 @@ class TestBuildTimeline:
 
 # ── Fallback Summary ────────────────────────────────────────────────────────
 
+
 class TestFallbackSummary:
     def test_full_schedule_summary(self):
         """Fallback summary mentions all recipe names and total time."""
@@ -208,30 +214,35 @@ class TestFallbackSummary:
 
     def test_fallback_error_summary_with_recipe_name(self):
         """Error with recipe_name metadata mentions the dropped recipe."""
-        errors = [{
-            "node_name": "rag_enricher",
-            "error_type": "rag_failure",
-            "recoverable": True,
-            "message": "Failed",
-            "metadata": {"recipe_name": "Chocolate Fondant"},
-        }]
+        errors = [
+            {
+                "node_name": "rag_enricher",
+                "error_type": "rag_failure",
+                "recoverable": True,
+                "message": "Failed",
+                "metadata": {"recipe_name": "Chocolate Fondant"},
+            }
+        ]
         summary = _fallback_error_summary(errors)
         assert "Chocolate Fondant" in summary
 
     def test_fallback_error_summary_no_recipe_name(self):
         """Error without recipe_name metadata gives generic message."""
-        errors = [{
-            "node_name": "validator",
-            "error_type": "validation_failure",
-            "recoverable": True,
-            "message": "Failed",
-            "metadata": {},
-        }]
+        errors = [
+            {
+                "node_name": "validator",
+                "error_type": "validation_failure",
+                "recoverable": True,
+                "message": "Failed",
+                "metadata": {},
+            }
+        ]
         summary = _fallback_error_summary(errors)
         assert "1 recoverable error" in summary
 
 
 # ── Prompt Builder ──────────────────────────────────────────────────────────
+
 
 class TestBuildSummaryPrompt:
     def test_prompt_includes_concept(self):
@@ -259,11 +270,13 @@ class TestBuildSummaryPrompt:
     def test_prompt_with_errors(self):
         """Prompt with errors includes error section and instructions."""
         concept = DinnerConcept.model_validate(CONCEPT_DICT)
-        errors = [{
-            "node_name": "rag_enricher",
-            "message": "Fondant enrichment failed",
-            "metadata": {"recipe_name": "Chocolate Fondant"},
-        }]
+        errors = [
+            {
+                "node_name": "rag_enricher",
+                "message": "Fondant enrichment failed",
+                "metadata": {"recipe_name": "Chocolate Fondant"},
+            }
+        ]
         prompt = _build_summary_prompt(concept, MERGED_DAG_TWO_RECIPE, errors)
         assert "PIPELINE ERRORS" in prompt
         assert "Fondant enrichment failed" in prompt
@@ -277,6 +290,7 @@ class TestBuildSummaryPrompt:
 
 
 # ── Node Function ───────────────────────────────────────────────────────────
+
 
 class TestScheduleRendererNode:
     @pytest.mark.asyncio
@@ -319,13 +333,15 @@ class TestScheduleRendererNode:
         mock_llm = MagicMock()
         mock_llm.with_structured_output.return_value = mock_chain
 
-        errors = [{
-            "node_name": "rag_enricher",
-            "error_type": "rag_failure",
-            "recoverable": True,
-            "message": "Enrichment failed for 'Chocolate Fondant'",
-            "metadata": {"recipe_name": "Chocolate Fondant"},
-        }]
+        errors = [
+            {
+                "node_name": "rag_enricher",
+                "error_type": "rag_failure",
+                "recoverable": True,
+                "message": "Enrichment failed for 'Chocolate Fondant'",
+                "metadata": {"recipe_name": "Chocolate Fondant"},
+            }
+        ]
         state = _make_state(
             merged_dag=MERGED_DAG_TWO_RECIPE.model_dump(),
             errors=errors,
@@ -386,13 +402,15 @@ class TestScheduleRendererNode:
         mock_llm = MagicMock()
         mock_llm.with_structured_output.return_value = mock_chain
 
-        errors = [{
-            "node_name": "rag_enricher",
-            "error_type": "rag_failure",
-            "recoverable": True,
-            "message": "Failed",
-            "metadata": {"recipe_name": "Chocolate Fondant"},
-        }]
+        errors = [
+            {
+                "node_name": "rag_enricher",
+                "error_type": "rag_failure",
+                "recoverable": True,
+                "message": "Failed",
+                "metadata": {"recipe_name": "Chocolate Fondant"},
+            }
+        ]
         state = _make_state(
             merged_dag=MERGED_DAG_TWO_RECIPE.model_dump(),
             errors=errors,

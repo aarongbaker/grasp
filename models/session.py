@@ -37,16 +37,14 @@ class Session(SQLModel, table=True):
     concept_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
     # Populated by finalise_session() on completion
-    schedule_summary: Optional[str] = None       # one-paragraph overview for list view
+    schedule_summary: Optional[str] = None  # one-paragraph overview for list view
     total_duration_minutes: Optional[int] = None
-    error_summary: Optional[str] = None          # populated on PARTIAL outcome
+    error_summary: Optional[str] = None  # populated on PARTIAL outcome
 
     # LLM token usage (observability — no enforcement in V1)
     token_usage: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
     # Timing
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

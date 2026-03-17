@@ -51,6 +51,7 @@ def casual_lunch_concept() -> DinnerConcept:
 
 # ── Unit tests for helpers (no API call) ─────────────────────────────────────
 
+
 def test_derive_recipe_count():
     """Verify the lookup table returns expected counts."""
     assert _derive_recipe_count(MealType.DINNER, Occasion.DINNER_PARTY) == 3
@@ -75,7 +76,11 @@ def test_build_system_prompt_includes_concept(dinner_concept):
 def test_build_system_prompt_includes_equipment(dinner_concept):
     """System prompt should format equipment with unlocked techniques."""
     equipment = [
-        {"name": "Sous vide circulator", "category": "precision", "unlocks_techniques": ["precise-temperature cooking"]},
+        {
+            "name": "Sous vide circulator",
+            "category": "precision",
+            "unlocks_techniques": ["precise-temperature cooking"],
+        },
         {"name": "Stand mixer", "category": "baking", "unlocks_techniques": ["laminated doughs", "meringue"]},
     ]
     prompt = _build_system_prompt(
@@ -101,6 +106,7 @@ def test_build_system_prompt_dietary_restrictions(casual_lunch_concept):
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio

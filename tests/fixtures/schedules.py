@@ -68,7 +68,7 @@ from tests.fixtures.recipes import (
 RECIPE_DAG_SHORT_RIBS = RecipeDAG(
     recipe_name="Braised Short Ribs",
     recipe_slug="braised_short_ribs",
-    steps=[],          # Steps live in EnrichedRecipe; DAG stores edges only
+    steps=[],  # Steps live in EnrichedRecipe; DAG stores edges only
     edges=[
         (SR_STEP_1, SR_STEP_2),
         (SR_STEP_2, SR_STEP_3),
@@ -105,77 +105,140 @@ RECIPE_DAG_FONDANT = RecipeDAG(
 
 _SCHEDULED_STEPS_FULL = [
     # T+0: Three STOVETOP steps in parallel (multi-burner, capacity=4)
-    ScheduledStep(step_id=SR_STEP_1, recipe_name="Braised Short Ribs",
+    ScheduledStep(
+        step_id=SR_STEP_1,
+        recipe_name="Braised Short Ribs",
         description="Season and sear short ribs on all sides until deeply browned.",
-        resource=Resource.STOVETOP, duration_minutes=20,
-        start_at_minute=0, end_at_minute=20, depends_on=[]),
-
-    ScheduledStep(step_id=CF_STEP_1, recipe_name="Chocolate Fondant",
+        resource=Resource.STOVETOP,
+        duration_minutes=20,
+        start_at_minute=0,
+        end_at_minute=20,
+        depends_on=[],
+    ),
+    ScheduledStep(
+        step_id=CF_STEP_1,
+        recipe_name="Chocolate Fondant",
         description="Melt chocolate and butter together over a bain-marie.",
-        resource=Resource.STOVETOP, duration_minutes=10,
-        start_at_minute=0, end_at_minute=10, depends_on=[]),
-
-    ScheduledStep(step_id=PP_STEP_1, recipe_name="Pommes Puree",
+        resource=Resource.STOVETOP,
+        duration_minutes=10,
+        start_at_minute=0,
+        end_at_minute=10,
+        depends_on=[],
+    ),
+    ScheduledStep(
+        step_id=PP_STEP_1,
+        recipe_name="Pommes Puree",
         description="Boil potatoes in well-salted water from cold until tender.",
-        resource=Resource.STOVETOP, duration_minutes=30,
-        start_at_minute=0, end_at_minute=30, depends_on=[]),
-
+        resource=Resource.STOVETOP,
+        duration_minutes=30,
+        start_at_minute=0,
+        end_at_minute=30,
+        depends_on=[],
+    ),
     # T+20: SR2 (HANDS) — first HANDS step, wins by cp=175
-    ScheduledStep(step_id=SR_STEP_2, recipe_name="Braised Short Ribs",
+    ScheduledStep(
+        step_id=SR_STEP_2,
+        recipe_name="Braised Short Ribs",
         description="Sweat aromatics, deglaze with wine, add stock and herbs.",
-        resource=Resource.HANDS, duration_minutes=10,
-        start_at_minute=20, end_at_minute=30, depends_on=[SR_STEP_1]),
-
+        resource=Resource.HANDS,
+        duration_minutes=10,
+        start_at_minute=20,
+        end_at_minute=30,
+        depends_on=[SR_STEP_1],
+    ),
     # T+30: SR3 (OVEN) + CF2 (HANDS, cp=67) — HANDS free after SR2
-    ScheduledStep(step_id=SR_STEP_3, recipe_name="Braised Short Ribs",
+    ScheduledStep(
+        step_id=SR_STEP_3,
+        recipe_name="Braised Short Ribs",
         description="Braise in 150°C oven, covered, for 2.5-3 hours.",
-        resource=Resource.OVEN, duration_minutes=150, duration_max=180,
-        start_at_minute=30, end_at_minute=180,
-        can_be_done_ahead=True, prep_ahead_window="up to 2 days in advance",
+        resource=Resource.OVEN,
+        duration_minutes=150,
+        duration_max=180,
+        start_at_minute=30,
+        end_at_minute=180,
+        can_be_done_ahead=True,
+        prep_ahead_window="up to 2 days in advance",
         prep_ahead_notes="Cool in braising liquid. Reheat gently with strained jus.",
-        depends_on=[SR_STEP_2]),
-
-    ScheduledStep(step_id=CF_STEP_2, recipe_name="Chocolate Fondant",
+        depends_on=[SR_STEP_2],
+    ),
+    ScheduledStep(
+        step_id=CF_STEP_2,
+        recipe_name="Chocolate Fondant",
         description="Whisk eggs, yolks, sugar until pale. Fold in chocolate, then flour.",
-        resource=Resource.HANDS, duration_minutes=15,
-        start_at_minute=30, end_at_minute=45, depends_on=[CF_STEP_1]),
-
+        resource=Resource.HANDS,
+        duration_minutes=15,
+        start_at_minute=30,
+        end_at_minute=45,
+        depends_on=[CF_STEP_1],
+    ),
     # T+45: CF3 (HANDS) — fondant chain continues
-    ScheduledStep(step_id=CF_STEP_3, recipe_name="Chocolate Fondant",
+    ScheduledStep(
+        step_id=CF_STEP_3,
+        recipe_name="Chocolate Fondant",
         description="Butter and cocoa-dust ramekins. Fill to within 5mm of rim.",
-        resource=Resource.HANDS, duration_minutes=10,
-        start_at_minute=45, end_at_minute=55, depends_on=[CF_STEP_2]),
-
+        resource=Resource.HANDS,
+        duration_minutes=10,
+        start_at_minute=45,
+        end_at_minute=55,
+        depends_on=[CF_STEP_2],
+    ),
     # T+55: CF4 (PASSIVE) + PP2 (HANDS) — fondant chills, potatoes riced
-    ScheduledStep(step_id=CF_STEP_4, recipe_name="Chocolate Fondant",
+    ScheduledStep(
+        step_id=CF_STEP_4,
+        recipe_name="Chocolate Fondant",
         description="Refrigerate filled ramekins for at least 30 minutes.",
-        resource=Resource.PASSIVE, duration_minutes=30,
-        start_at_minute=55, end_at_minute=85,
-        can_be_done_ahead=True, prep_ahead_window="up to 24 hours in advance",
+        resource=Resource.PASSIVE,
+        duration_minutes=30,
+        start_at_minute=55,
+        end_at_minute=85,
+        can_be_done_ahead=True,
+        prep_ahead_window="up to 24 hours in advance",
         prep_ahead_notes="Bake straight from fridge for clean molten centre.",
-        depends_on=[CF_STEP_3]),
-
-    ScheduledStep(step_id=PP_STEP_2, recipe_name="Pommes Puree",
+        depends_on=[CF_STEP_3],
+    ),
+    ScheduledStep(
+        step_id=PP_STEP_2,
+        recipe_name="Pommes Puree",
         description="Drain and rice potatoes while hot. Steam-dry in pot.",
-        resource=Resource.HANDS, duration_minutes=10,
-        start_at_minute=55, end_at_minute=65, depends_on=[PP_STEP_1]),
-
+        resource=Resource.HANDS,
+        duration_minutes=10,
+        start_at_minute=55,
+        end_at_minute=65,
+        depends_on=[PP_STEP_1],
+    ),
     # T+65: PP3 (HANDS) — finish puree
-    ScheduledStep(step_id=PP_STEP_3, recipe_name="Pommes Puree",
+    ScheduledStep(
+        step_id=PP_STEP_3,
+        recipe_name="Pommes Puree",
         description="Beat in cold butter cube by cube. Stream warm milk. Season. Sieve.",
-        resource=Resource.HANDS, duration_minutes=15,
-        start_at_minute=65, end_at_minute=80, depends_on=[PP_STEP_2]),
-
+        resource=Resource.HANDS,
+        duration_minutes=15,
+        start_at_minute=65,
+        end_at_minute=80,
+        depends_on=[PP_STEP_2],
+    ),
     # T+180: SR4 (PASSIVE) + CF5 (OVEN) — braise window ends
-    ScheduledStep(step_id=SR_STEP_4, recipe_name="Braised Short Ribs",
+    ScheduledStep(
+        step_id=SR_STEP_4,
+        recipe_name="Braised Short Ribs",
         description="Rest ribs, loosely tented with foil.",
-        resource=Resource.PASSIVE, duration_minutes=15,
-        start_at_minute=180, end_at_minute=195, depends_on=[SR_STEP_3]),
-
-    ScheduledStep(step_id=CF_STEP_5, recipe_name="Chocolate Fondant",
+        resource=Resource.PASSIVE,
+        duration_minutes=15,
+        start_at_minute=180,
+        end_at_minute=195,
+        depends_on=[SR_STEP_3],
+    ),
+    ScheduledStep(
+        step_id=CF_STEP_5,
+        recipe_name="Chocolate Fondant",
         description="Bake at 200°C for 12-14 min. Edges set, centre wobbles. Serve immediately.",
-        resource=Resource.OVEN, duration_minutes=12, duration_max=14,
-        start_at_minute=180, end_at_minute=192, depends_on=[CF_STEP_4]),
+        resource=Resource.OVEN,
+        duration_minutes=12,
+        duration_max=14,
+        start_at_minute=180,
+        end_at_minute=192,
+        depends_on=[CF_STEP_4],
+    ),
 ]
 
 MERGED_DAG_FULL = MergedDAG(
@@ -195,43 +258,80 @@ MERGED_DAG_FULL = MergedDAG(
 # "Braised Short Ribs" < "Pommes Puree"
 
 _SCHEDULED_STEPS_TWO = [
-    ScheduledStep(step_id=SR_STEP_1, recipe_name="Braised Short Ribs",
+    ScheduledStep(
+        step_id=SR_STEP_1,
+        recipe_name="Braised Short Ribs",
         description="Season and sear short ribs on all sides until deeply browned.",
-        resource=Resource.STOVETOP, duration_minutes=20,
-        start_at_minute=0, end_at_minute=20, depends_on=[]),
-
-    ScheduledStep(step_id=PP_STEP_1, recipe_name="Pommes Puree",
+        resource=Resource.STOVETOP,
+        duration_minutes=20,
+        start_at_minute=0,
+        end_at_minute=20,
+        depends_on=[],
+    ),
+    ScheduledStep(
+        step_id=PP_STEP_1,
+        recipe_name="Pommes Puree",
         description="Boil potatoes in well-salted water from cold until tender.",
-        resource=Resource.STOVETOP, duration_minutes=30,
-        start_at_minute=0, end_at_minute=30, depends_on=[]),
-
-    ScheduledStep(step_id=SR_STEP_2, recipe_name="Braised Short Ribs",
+        resource=Resource.STOVETOP,
+        duration_minutes=30,
+        start_at_minute=0,
+        end_at_minute=30,
+        depends_on=[],
+    ),
+    ScheduledStep(
+        step_id=SR_STEP_2,
+        recipe_name="Braised Short Ribs",
         description="Sweat aromatics, deglaze with wine, add stock and herbs.",
-        resource=Resource.HANDS, duration_minutes=10,
-        start_at_minute=20, end_at_minute=30, depends_on=[SR_STEP_1]),
-
-    ScheduledStep(step_id=SR_STEP_3, recipe_name="Braised Short Ribs",
+        resource=Resource.HANDS,
+        duration_minutes=10,
+        start_at_minute=20,
+        end_at_minute=30,
+        depends_on=[SR_STEP_1],
+    ),
+    ScheduledStep(
+        step_id=SR_STEP_3,
+        recipe_name="Braised Short Ribs",
         description="Braise in 150°C oven, covered, for 2.5-3 hours.",
-        resource=Resource.OVEN, duration_minutes=150, duration_max=180,
-        start_at_minute=30, end_at_minute=180,
-        can_be_done_ahead=True, prep_ahead_window="up to 2 days in advance",
+        resource=Resource.OVEN,
+        duration_minutes=150,
+        duration_max=180,
+        start_at_minute=30,
+        end_at_minute=180,
+        can_be_done_ahead=True,
+        prep_ahead_window="up to 2 days in advance",
         prep_ahead_notes="Cool in braising liquid. Reheat gently with strained jus.",
-        depends_on=[SR_STEP_2]),
-
-    ScheduledStep(step_id=PP_STEP_2, recipe_name="Pommes Puree",
+        depends_on=[SR_STEP_2],
+    ),
+    ScheduledStep(
+        step_id=PP_STEP_2,
+        recipe_name="Pommes Puree",
         description="Drain and rice potatoes while hot. Steam-dry in pot.",
-        resource=Resource.HANDS, duration_minutes=10,
-        start_at_minute=30, end_at_minute=40, depends_on=[PP_STEP_1]),
-
-    ScheduledStep(step_id=PP_STEP_3, recipe_name="Pommes Puree",
+        resource=Resource.HANDS,
+        duration_minutes=10,
+        start_at_minute=30,
+        end_at_minute=40,
+        depends_on=[PP_STEP_1],
+    ),
+    ScheduledStep(
+        step_id=PP_STEP_3,
+        recipe_name="Pommes Puree",
         description="Beat in cold butter cube by cube. Stream warm milk. Season. Sieve.",
-        resource=Resource.HANDS, duration_minutes=15,
-        start_at_minute=40, end_at_minute=55, depends_on=[PP_STEP_2]),
-
-    ScheduledStep(step_id=SR_STEP_4, recipe_name="Braised Short Ribs",
+        resource=Resource.HANDS,
+        duration_minutes=15,
+        start_at_minute=40,
+        end_at_minute=55,
+        depends_on=[PP_STEP_2],
+    ),
+    ScheduledStep(
+        step_id=SR_STEP_4,
+        recipe_name="Braised Short Ribs",
         description="Rest ribs, loosely tented with foil.",
-        resource=Resource.PASSIVE, duration_minutes=15,
-        start_at_minute=180, end_at_minute=195, depends_on=[SR_STEP_3]),
+        resource=Resource.PASSIVE,
+        duration_minutes=15,
+        start_at_minute=180,
+        end_at_minute=195,
+        depends_on=[SR_STEP_3],
+    ),
 ]
 
 MERGED_DAG_TWO_RECIPE = MergedDAG(
@@ -246,6 +346,7 @@ MERGED_DAG_TWO_RECIPE = MergedDAG(
 
 
 # ── Natural Language Schedules ────────────────────────────────────────────────
+
 
 def _make_timeline_entry(step: ScheduledStep) -> TimelineEntry:
     heads_up = None

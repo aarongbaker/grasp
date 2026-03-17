@@ -72,9 +72,7 @@ async def test_checkpointer():
         import psycopg_pool
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        async with AsyncPostgresSaver.from_conn_string(
-            settings.test_langgraph_checkpoint_url
-        ) as checkpointer:
+        async with AsyncPostgresSaver.from_conn_string(settings.test_langgraph_checkpoint_url) as checkpointer:
             await checkpointer.setup()
             yield checkpointer
 
@@ -82,6 +80,7 @@ async def test_checkpointer():
         # Fall back to MemorySaver if langgraph-checkpoint-postgres not installed
         # This allows tests to run without Postgres in CI environments
         from langgraph.checkpoint.memory import MemorySaver
+
         checkpointer = MemorySaver()
         yield checkpointer
 
@@ -121,9 +120,7 @@ async def compiled_graph(test_checkpointer):
     )
 
     # ── Generator mock (Phase 4) ─────────────────────────────────────────────
-    gen_mock_output = RecipeGenerationOutput(
-        recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT]
-    )
+    gen_mock_output = RecipeGenerationOutput(recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT])
     gen_mock_chain = AsyncMock()
     gen_mock_chain.ainvoke.return_value = gen_mock_output
 
@@ -152,9 +149,7 @@ async def compiled_graph(test_checkpointer):
         # Check if any skip recipe name appears in the message
         for skip_name in _enricher_skip_recipes:
             if skip_name in human_content:
-                raise Exception(
-                    f"Simulated enrichment failure for '{skip_name}'"
-                )
+                raise Exception(f"Simulated enrichment failure for '{skip_name}'")
 
         # Cyclic mode: return steps with circular dependencies
         if _enricher_cyclic_mode:
@@ -215,11 +210,14 @@ async def compiled_graph(test_checkpointer):
     renderer_mock_llm.with_structured_output.return_value = renderer_mock_chain
 
     # ── Build graph with all mocks active ────────────────────────────────────
-    with patch("graph.nodes.generator._create_llm", return_value=gen_mock_llm), \
-         patch("graph.nodes.enricher._create_llm", return_value=enricher_mock_llm), \
-         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]), \
-         patch("graph.nodes.renderer._create_llm", return_value=renderer_mock_llm):
+    with (
+        patch("graph.nodes.generator._create_llm", return_value=gen_mock_llm),
+        patch("graph.nodes.enricher._create_llm", return_value=enricher_mock_llm),
+        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+        patch("graph.nodes.renderer._create_llm", return_value=renderer_mock_llm),
+    ):
         from graph.graph import build_grasp_graph
+
         graph = build_grasp_graph(test_checkpointer)
         yield graph
 
@@ -276,7 +274,9 @@ async def test_db_session(test_db_engine):
     """Function-scoped DB session. Fresh engine per test to avoid asyncpg
     connection reuse issues ('another operation is in progress')."""
     engine = create_async_engine(
-        settings.test_database_url, echo=False, poolclass=NullPool,
+        settings.test_database_url,
+        echo=False,
+        poolclass=NullPool,
     )
     session = AsyncSession(engine, expire_on_commit=False)
     try:
@@ -291,6 +291,7 @@ async def test_user_id(test_db_session):
     """Creates a UserProfile in the test DB and returns the user_id.
     Required because sessions.user_id has a FK to user_profiles."""
     from models.user import UserProfile
+
     user_id = uuid.uuid4()
     user = UserProfile(
         user_id=user_id,

@@ -18,14 +18,15 @@ from models.recipe import RecipeStep
 
 class ScheduledStep(BaseModel):
     """A RecipeStep with absolute timing resolved by the DAG Merger."""
+
     step_id: str
     recipe_name: str
     description: str
     resource: Resource
     duration_minutes: int
     duration_max: Optional[int] = None
-    start_at_minute: int     # absolute offset from T+0
-    end_at_minute: int       # start_at_minute + duration_minutes
+    start_at_minute: int  # absolute offset from T+0
+    end_at_minute: int  # start_at_minute + duration_minutes
     can_be_done_ahead: bool = False
     prep_ahead_window: Optional[str] = None
     prep_ahead_notes: Optional[str] = None
@@ -34,6 +35,7 @@ class ScheduledStep(BaseModel):
 
 class RecipeDAG(BaseModel):
     """Per-recipe dependency graph. Built by DAG Builder, consumed by DAG Merger."""
+
     recipe_name: str
     recipe_slug: str
     steps: list[RecipeStep]
@@ -42,7 +44,7 @@ class RecipeDAG(BaseModel):
     # JSON round-trip: tuples become lists. Pydantic v2 coerces back to
     # tuple on model_validate(), but raw dict access from GRASPState gives
     # list[list[str]]. Always model_validate() before using typed edges.
-    edges: list[tuple[str, str]]    # (from_step_id, to_step_id)
+    edges: list[tuple[str, str]]  # (from_step_id, to_step_id)
 
 
 class MergedDAG(BaseModel):
@@ -51,6 +53,7 @@ class MergedDAG(BaseModel):
     All step timings are absolute (start_at_minute from T+0).
     total_duration_minutes = max(end_at_minute) across all steps.
     """
+
     scheduled_steps: list[ScheduledStep]
     total_duration_minutes: int
     resource_utilisation: dict[str, list[tuple[int, int]]] = {}
@@ -60,11 +63,12 @@ class MergedDAG(BaseModel):
 
 class TimelineEntry(BaseModel):
     """Single entry in the chef-facing schedule. T+0, T+15, T+30..."""
+
     time_offset_minutes: int = Field(ge=0)
-    label: str                      # e.g. "T+30"
+    label: str  # e.g. "T+30"
     step_id: str
     recipe_name: str
-    action: str                     # natural language description
+    action: str  # natural language description
     resource: Resource
     duration_minutes: int
     duration_max: Optional[int] = None
@@ -79,7 +83,8 @@ class NaturalLanguageSchedule(BaseModel):
     Prep-ahead steps are surfaced first (before T+0) in a distinct section.
     summary is stored in Session.schedule_summary for the list view.
     """
+
     timeline: list[TimelineEntry]
     total_duration_minutes: int
-    summary: str        # one-paragraph overview for session list view
-    error_summary: Optional[str] = None   # populated on PARTIAL outcome
+    summary: str  # one-paragraph overview for session list view
+    error_summary: Optional[str] = None  # populated on PARTIAL outcome

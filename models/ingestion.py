@@ -37,9 +37,7 @@ class BookRecord(SQLModel, table=True):
     document_type: Optional[DocumentType] = None
     total_pages: int = 0
     total_chunks: int = 0
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class PageCache(SQLModel, table=True):
@@ -48,18 +46,17 @@ class PageCache(SQLModel, table=True):
     page_hash is SHA256 of the source PDF page bytes — enables change detection
     if the same PDF is re-ingested after editing.
     """
+
     __tablename__ = "page_cache"
 
     page_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     book_id: uuid.UUID = Field(foreign_key="book_records.book_id", index=True)
     page_number: int
     page_text: str
-    page_hash: str                         # SHA256 of source PDF page bytes
-    vision_confidence: float = 0.0        # Apple Vision's reported confidence
+    page_hash: str  # SHA256 of source PDF page bytes
+    vision_confidence: float = 0.0  # Apple Vision's reported confidence
     resolution_dpi: int = Field(default=300)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class CookbookChunk(SQLModel, table=True):
@@ -75,9 +72,7 @@ class CookbookChunk(SQLModel, table=True):
     page_number: int = 0
     token_count: int = 0
     pinecone_upserted: bool = Field(default=False)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def to_pinecone_metadata(self) -> dict:
         """Metadata envelope for Pinecone upsert. user_id enables per-chef isolation."""
@@ -96,6 +91,7 @@ class IngestionJob(SQLModel, table=True):
     Tracks a multi-book upload. book_statuses is a JSON array:
     [{book_id, title, status, error}] — one entry per book in the batch.
     """
+
     __tablename__ = "ingestion_jobs"
 
     job_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -105,7 +101,5 @@ class IngestionJob(SQLModel, table=True):
     completed: int = 0
     failed: int = 0
     book_statuses: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     completed_at: Optional[datetime] = None

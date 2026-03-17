@@ -44,8 +44,10 @@ logger = logging.getLogger(__name__)
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
+
 class StepEnrichmentOutput(BaseModel):
     """Wrapper for LangChain structured output. Claude returns this shape."""
+
     steps: list[RecipeStep]
     chef_notes: str
     techniques_used: list[str]
@@ -53,15 +55,17 @@ class StepEnrichmentOutput(BaseModel):
 
 # ── Slug generation ──────────────────────────────────────────────────────────
 
+
 def _generate_recipe_slug(name: str) -> str:
     """
     Convert recipe name to a URL-safe slug for step_id generation.
     'Braised Short Ribs' → 'braised_short_ribs'
     """
-    return re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
 # ── RAG retrieval (mockable seam) ────────────────────────────────────────────
+
 
 def _retrieve_rag_context(query: str, user_id: str) -> list[dict]:
     """
@@ -101,12 +105,14 @@ def _retrieve_rag_context(query: str, user_id: str) -> list[dict]:
         chunks = []
         for match in results.get("matches", []):
             metadata = match.get("metadata", {})
-            chunks.append({
-                "text": metadata.get("text", ""),
-                "chunk_type": metadata.get("chunk_type", ""),
-                "chunk_id": metadata.get("chunk_id", match.get("id", "")),
-                "score": match.get("score", 0.0),
-            })
+            chunks.append(
+                {
+                    "text": metadata.get("text", ""),
+                    "chunk_type": metadata.get("chunk_type", ""),
+                    "chunk_id": metadata.get("chunk_id", match.get("id", "")),
+                    "score": match.get("score", 0.0),
+                }
+            )
 
         return chunks
 
@@ -116,6 +122,7 @@ def _retrieve_rag_context(query: str, user_id: str) -> list[dict]:
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
+
 
 def _format_rag_context(chunks: list[dict]) -> str:
     """Format retrieved RAG chunks for inclusion in the enrichment prompt."""
@@ -140,7 +147,7 @@ def _build_enrichment_prompt(
     """Build the system prompt for step enrichment."""
     rag_text = _format_rag_context(rag_context)
 
-    steps_text = "\n".join(f"  {i+1}. {step}" for i, step in enumerate(raw_recipe.steps))
+    steps_text = "\n".join(f"  {i + 1}. {step}" for i, step in enumerate(raw_recipe.steps))
     ingredients_text = "\n".join(
         f"  - {ing.name}: {ing.quantity}" + (f" ({ing.preparation})" if ing.preparation else "")
         for ing in raw_recipe.ingredients
@@ -202,6 +209,7 @@ Assign exactly one resource per step:
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
 
+
 def _create_llm() -> ChatAnthropic:
     """
     Creates the ChatAnthropic instance. Extracted as a separate function so
@@ -216,6 +224,7 @@ def _create_llm() -> ChatAnthropic:
 
 
 # ── Per-recipe enrichment ────────────────────────────────────────────────────
+
 
 async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
@@ -241,10 +250,14 @@ async def _enrich_single_recipe(
 
     @llm_retry
     async def _invoke_llm():
-        return await chain.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Convert the {len(raw_recipe.steps)} flat steps for '{raw_recipe.name}' into structured RecipeStep objects."),
-        ])
+        return await chain.ainvoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(
+                    content=f"Convert the {len(raw_recipe.steps)} flat steps for '{raw_recipe.name}' into structured RecipeStep objects."
+                ),
+            ]
+        )
 
     result = await _invoke_llm()
     usage = extract_token_usage(result, "rag_enricher")
@@ -263,6 +276,7 @@ async def _enrich_single_recipe(
 
 
 # ── Node function ────────────────────────────────────────────────────────────
+
 
 async def rag_enricher_node(state: GRASPState) -> dict:
     """
@@ -287,7 +301,12 @@ async def rag_enricher_node(state: GRASPState) -> dict:
             enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id)
             enriched.append(enriched_recipe.model_dump())
             token_usages.append(usage)
-            logger.info("Enriched recipe: %s (%d steps, %d RAG sources)", recipe_name, len(enriched_recipe.steps), len(enriched_recipe.rag_sources))
+            logger.info(
+                "Enriched recipe: %s (%d steps, %d RAG sources)",
+                recipe_name,
+                len(enriched_recipe.steps),
+                len(enriched_recipe.rag_sources),
+            )
 
         except Exception as exc:
             exc_type = type(exc).__name__
@@ -310,13 +329,15 @@ async def rag_enricher_node(state: GRASPState) -> dict:
         # All recipes failed — fatal
         return {
             "enriched_recipes": [],
-            "errors": [{
-                "node_name": "rag_enricher",
-                "error_type": ErrorType.RAG_FAILURE.value,
-                "recoverable": False,
-                "message": f"All {len(raw_recipe_dicts)} recipes failed enrichment. Cannot proceed.",
-                "metadata": {"failed_count": len(raw_recipe_dicts)},
-            }],
+            "errors": [
+                {
+                    "node_name": "rag_enricher",
+                    "error_type": ErrorType.RAG_FAILURE.value,
+                    "recoverable": False,
+                    "message": f"All {len(raw_recipe_dicts)} recipes failed enrichment. Cannot proceed.",
+                    "metadata": {"failed_count": len(raw_recipe_dicts)},
+                }
+            ],
         }
 
     update: dict = {"enriched_recipes": enriched}

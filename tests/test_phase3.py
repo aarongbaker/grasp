@@ -41,6 +41,7 @@ from models.enums import ErrorType, SessionStatus
 # Run 1: Happy Path
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_run1_happy_path_complete(
     compiled_graph,
@@ -131,13 +132,13 @@ async def test_run1_happy_path_complete(
     assert refreshed.error_summary is None
     assert refreshed.completed_at is not None
 
-    print(f"\n✓ Run 1 COMPLETE — {len(timeline)} timeline entries, "
-          f"{refreshed.total_duration_minutes} min total")
+    print(f"\n✓ Run 1 COMPLETE — {len(timeline)} timeline entries, {refreshed.total_duration_minutes} min total")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Run 2: Recoverable Error (PARTIAL)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_run2_recoverable_error_partial(
@@ -218,6 +219,7 @@ async def test_run2_recoverable_error_partial(
 # Run 3: Fatal Error (FAILED)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_run3_fatal_error_failed(
     compiled_graph,
@@ -289,6 +291,7 @@ async def test_run3_fatal_error_failed(
 # ─────────────────────────────────────────────────────────────────────────────
 # Run 4: Checkpoint Resume (idempotency contract)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_run4_checkpoint_resume(
@@ -370,13 +373,16 @@ async def test_run4_checkpoint_resume(
     assert refreshed.status == SessionStatus.COMPLETE
     assert refreshed.schedule_summary is not None
 
-    print(f"\n✓ Run 4 RESUME → COMPLETE — idempotency verified, "
-          f"{len(raw_recipes)} raw_recipes (not {len(raw_recipes) * 2})")
+    print(
+        f"\n✓ Run 4 RESUME → COMPLETE — idempotency verified, "
+        f"{len(raw_recipes)} raw_recipes (not {len(raw_recipes) * 2})"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bonus: status_projection correctness
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_status_projection_derives_enriching(
@@ -393,8 +399,6 @@ async def test_status_projection_derives_enriching(
     # We can't easily interrupt after exactly one node in integration test.
     # Instead, test that an empty checkpoint → GENERATING
     status = await status_projection(unique_session_id, compiled_graph)
-    assert status == SessionStatus.GENERATING, (
-        f"Empty checkpoint should project GENERATING, got {status}"
-    )
+    assert status == SessionStatus.GENERATING, f"Empty checkpoint should project GENERATING, got {status}"
 
     print("\n✓ status_projection returns GENERATING for empty checkpoint")

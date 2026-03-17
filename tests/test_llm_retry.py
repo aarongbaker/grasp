@@ -12,6 +12,7 @@ from core.llm import is_timeout_error, llm_retry
 
 # ── is_timeout_error ─────────────────────────────────────────────────────────
 
+
 def test_timeout_error_detected():
     exc = APITimeoutError(request=MagicMock())
     assert is_timeout_error(exc) is True
@@ -28,17 +29,20 @@ def test_connection_error_not_timeout():
 
 # ── llm_retry decorator ─────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_retry_succeeds_after_transient_failure():
     """Retry should succeed when a transient error resolves."""
-    mock_fn = AsyncMock(side_effect=[
-        RateLimitError(
-            message="rate limited",
-            response=MagicMock(status_code=429, headers={"retry-after": "1"}),
-            body=None,
-        ),
-        "success",
-    ])
+    mock_fn = AsyncMock(
+        side_effect=[
+            RateLimitError(
+                message="rate limited",
+                response=MagicMock(status_code=429, headers={"retry-after": "1"}),
+                body=None,
+            ),
+            "success",
+        ]
+    )
 
     @llm_retry
     async def call():
@@ -84,11 +88,14 @@ async def test_no_retry_on_validation_error():
 async def test_no_retry_on_auth_error():
     """Auth errors should not be retried."""
     from anthropic import AuthenticationError
-    mock_fn = AsyncMock(side_effect=AuthenticationError(
-        message="invalid key",
-        response=MagicMock(status_code=401, headers={}),
-        body=None,
-    ))
+
+    mock_fn = AsyncMock(
+        side_effect=AuthenticationError(
+            message="invalid key",
+            response=MagicMock(status_code=401, headers={}),
+            body=None,
+        )
+    )
 
     @llm_retry
     async def call():

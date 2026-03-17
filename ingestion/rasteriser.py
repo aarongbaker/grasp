@@ -137,12 +137,14 @@ async def rasterise_and_ocr_pdf(
             resolution_dpi=300,
         )
         db.add(cache_row)
-        pages.append({
-            "page_number": page_num + 1,
-            "text": text,
-            "confidence": confidence,
-            "page_hash": page_hash,
-        })
+        pages.append(
+            {
+                "page_number": page_num + 1,
+                "text": text,
+                "confidence": confidence,
+                "page_hash": page_hash,
+            }
+        )
 
         # Batch-commit to avoid holding all PageCache objects in session
         if (page_num + 1) % _COMMIT_BATCH == 0:
