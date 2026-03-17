@@ -6,7 +6,7 @@ GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbo
 
 ## Prerequisites
 
-- **Python 3.11+**
+- **Python 3.12**
 - **Docker** (for Postgres and Redis)
 
 ## Quick Start
@@ -20,14 +20,18 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
 # 3. Copy the example env and fill in your API keys (see next section)
-cp .env.example .env   # or edit .env directly
+cp .env.example .env
 
-# 4. Start Postgres and Redis
+# 4. Generate a JWT secret key and add it to .env
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+# Copy the output into .env as JWT_SECRET_KEY=...
+
+# 5. Start Postgres and Redis
 docker compose up -d postgres redis
 
-# 5. Ingest your cookbooks (see "Ingest Your Cookbooks" below)
+# 6. Ingest your cookbooks (see "Ingest Your Cookbooks" below)
 
-# 6. Launch the UI
+# 7. Launch the UI
 .venv/bin/streamlit run streamlit_app.py
 ```
 
@@ -68,7 +72,11 @@ This launches:
 - **Postgres** on port 5432 — stores user profiles, sessions, and ingested book records
 - **Redis** on port 6379 — Celery task broker (used by the FastAPI server, not needed for Streamlit)
 
-Tables are auto-created on first run.
+Database migrations run automatically on app startup via Alembic. You can also run them manually:
+
+```bash
+.venv/bin/alembic upgrade head
+```
 
 ## Ingest Your Cookbooks
 
