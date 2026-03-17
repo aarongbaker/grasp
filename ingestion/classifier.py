@@ -14,6 +14,10 @@ COOKBOOK_SIGNALS = [
     r"\b(tablespoon|teaspoon|tbsp|tsp|cup[s]?)\b",
     r"\b(preheat|roast|sauté|braise|fold in)\b",
     r"°[CF]\b",
+    # Signals that appear in cookbook front matter / TOC / introductions
+    r"\b(recipe[s]?|cookbook|cooking|cuisine|kitchen)\b",
+    r"\b(appetizer|entrée|dessert|sauce|soup|salad|pastry)\b",
+    r"\b(butter|flour|sugar|salt|pepper|garlic|onion)\b",
 ]
 CULINARY_REF_SIGNALS = [
     r"\b(maillard|emulsif|gelatinis|denaturation|osmosis)\b",
@@ -22,8 +26,9 @@ CULINARY_REF_SIGNALS = [
 ]
 GENERAL_KNOWLEDGE_SIGNALS = [
     r"\b(creativity|philosophy|memoir|biography)\b",
-    r"\b(chapter \d+|part [ivx]+)\b",
-    r"\b(I felt|I remember|I believe|in my experience)\b",
+    # Removed: "chapter \d+" and "part [ivx]+" — these are structural markers
+    # found in any book, not semantic signals for general knowledge content.
+    # Removed: first-person patterns — common in narrative cookbooks too.
 ]
 
 CONFIDENCE_THRESHOLD = 0.65
@@ -39,13 +44,13 @@ def _heuristic_classify(text: str) -> tuple[DocumentType, float]:
         return DocumentType.GENERAL_KNOWLEDGE, 0.3
 
     if cookbook_hits >= culinary_hits and cookbook_hits >= general_hits:
-        confidence = cookbook_hits / (total + 2)
+        confidence = cookbook_hits / total
         return DocumentType.COOKBOOK, min(confidence, 0.95)
     elif culinary_hits >= general_hits:
-        confidence = culinary_hits / (total + 2)
+        confidence = culinary_hits / total
         return DocumentType.CULINARY_REFERENCE, min(confidence, 0.90)
     else:
-        confidence = general_hits / (total + 2)
+        confidence = general_hits / total
         return DocumentType.GENERAL_KNOWLEDGE, min(confidence, 0.85)
 
 

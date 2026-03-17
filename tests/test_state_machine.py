@@ -101,7 +101,7 @@ def test_transition_narrative_to_method():
 
 
 def test_transition_method_to_recipe_end():
-    """Method text followed by serving instruction produces both chunks."""
+    """Method + serving instruction stay as one recipe chunk (recipe lifecycle)."""
     pages = [{
         "page_number": 1,
         "text": (
@@ -111,9 +111,9 @@ def test_transition_method_to_recipe_end():
         ),
     }]
     chunks = run_state_machine(pages)
-    types = [c["chunk_type"] for c in chunks]
-    assert "recipe" in types
-    assert "tip" in types
+    assert len(chunks) == 1
+    assert chunks[0]["chunk_type"] == "recipe"
+    assert "Serve immediately" in chunks[0]["text"]
 
 
 def test_multiple_pages_preserve_page_numbers():

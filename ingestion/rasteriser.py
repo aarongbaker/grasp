@@ -20,9 +20,12 @@ is free — re-running OCR is not.
 import sys
 import hashlib
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 import fitz  # pymupdf
+
+logger = logging.getLogger(__name__)
 
 
 def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
@@ -61,6 +64,7 @@ def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
         return text, avg_confidence
 
     except Exception as e:
+        logger.warning("Apple Vision OCR failed: %s", e)
         return "", 0.0
 
 
@@ -75,7 +79,7 @@ def _ocr_page_pymupdf_fallback(page) -> tuple[str, float]:
 
 
 async def rasterise_and_ocr_pdf(
-    pdf_bytes: bytes,
+    pdf_source: bytes | str | Path,
     book_id: str,
     user_id: str,
     db,  # AsyncSession
@@ -83,13 +87,20 @@ async def rasterise_and_ocr_pdf(
     """
     Rasterises every page at 300 DPI, runs OCR, writes PageCache rows.
     Returns list of page dicts (page_number, text, confidence, page_hash).
+
+    pdf_source: file path (str/Path) preferred — pymupdf memory-maps it.
+                bytes still accepted for backwards compatibility.
     """
     from models.ingestion import PageCache
     import uuid
 
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if isinstance(pdf_source, (str, Path)):
+        doc = fitz.open(str(pdf_source))
+    else:
+        doc = fitz.open(stream=pdf_source, filetype="pdf")
     pages = []
     is_mac = sys.platform == "darwin"
+    _COMMIT_BATCH = 50  # flush to DB every N pages to limit session memory
 
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -97,9 +108,12 @@ async def rasterise_and_ocr_pdf(
         pix = page.get_pixmap(matrix=mat)
         img_bytes = pix.tobytes("png")
 
-        # SHA256 of original PDF page bytes (not the image — stable across re-runs)
-        page_content = page.get_text("rawdict")
-        page_hash = hashlib.sha256(str(page_content).encode()).hexdigest()
+        # Free the pixmap immediately — 300 DPI images are 10-20 MB each
+        del pix
+
+        # SHA256 of page text content — stable across re-runs, much lighter than rawdict
+        page_text_for_hash = page.get_text("text")
+        page_hash = hashlib.sha256(page_text_for_hash.encode()).hexdigest()
 
         if is_mac:
             text, confidence = await asyncio.to_thread(_ocr_page_apple_vision, img_bytes)
@@ -107,6 +121,9 @@ async def rasterise_and_ocr_pdf(
                 text, confidence = _ocr_page_pymupdf_fallback(page)
         else:
             text, confidence = _ocr_page_pymupdf_fallback(page)
+
+        # Free image bytes after OCR — no longer needed
+        del img_bytes
 
         cache_row = PageCache(
             page_id=uuid.uuid4(),
@@ -124,6 +141,10 @@ async def rasterise_and_ocr_pdf(
             "confidence": confidence,
             "page_hash": page_hash,
         })
+
+        # Batch-commit to avoid holding all PageCache objects in session
+        if (page_num + 1) % _COMMIT_BATCH == 0:
+            await db.commit()
 
     await db.commit()
     doc.close()
