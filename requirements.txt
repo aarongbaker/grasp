@@ -33,8 +33,8 @@ networkx==3.3                   # DAG construction and cycle detection
 # ── PDF / OCR ─────────────────────────────────────────────────────────────────
 pymupdf==1.24.5                 # PDF rasterisation — fitz. 300 DPI page images.
 Pillow==10.3.0                  # image handling for Vision pipeline
-pyobjc-framework-Vision==11.0   # Apple Vision OCR — macOS only
-pyobjc-framework-Quartz==11.0   # CGImage support for Vision pipeline
+pyobjc-framework-Vision==11.0; sys_platform == "darwin"   # Apple Vision OCR — macOS only
+pyobjc-framework-Quartz==11.0; sys_platform == "darwin"   # CGImage support for Vision pipeline
 
 # ── Task Queue ────────────────────────────────────────────────────────────────
 celery==5.4.0
