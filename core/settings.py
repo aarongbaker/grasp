@@ -14,7 +14,6 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 _JWT_SECRET_DEFAULT = "change-me-in-production"
 
 
