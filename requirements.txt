@@ -6,7 +6,7 @@ uvicorn[standard]==0.30.1
 alembic==1.15.2                 # database migrations
 sqlmodel==0.0.19
 asyncpg==0.29.0                 # async Postgres driver for SQLAlchemy
-psycopg[binary]==3.1.19         # psycopg3 — required by LangGraph PostgresSaver
+psycopg[binary]==3.3.3          # psycopg3 — required by LangGraph PostgresSaver (>=3.2 for checkpoint-postgres)
 psycopg-pool==3.2.2             # connection pool for LangGraph checkpointer
 
 # ── Pydantic ──────────────────────────────────────────────────────────────────
