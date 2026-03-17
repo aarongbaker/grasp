@@ -48,6 +48,7 @@ jobs:
           --health-retries 5
 
     env:
+      PYTHONPATH: ${{ github.workspace }}
       TEST_DATABASE_URL: postgresql+asyncpg://grasp:grasp@localhost:5432/grasp_test
       TEST_LANGGRAPH_CHECKPOINT_URL: postgresql://grasp:grasp@localhost:5432/grasp_test
       REDIS_URL: redis://localhost:6379/0
