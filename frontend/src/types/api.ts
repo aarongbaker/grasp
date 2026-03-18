@@ -2,12 +2,12 @@
 
 export type MealType = 'breakfast' | 'brunch' | 'lunch' | 'dinner' | 'appetizers' | 'snacks' | 'dessert' | 'meal_prep';
 export type Occasion = 'casual' | 'dinner_party' | 'tasting_menu' | 'meal_prep';
-export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating' | 'scheduling' | 'complete' | 'partial' | 'failed';
+export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating' | 'scheduling' | 'complete' | 'partial' | 'failed' | 'cancelled';
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
 export type IngestionStatus = 'pending' | 'processing' | 'complete' | 'failed';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
 
-export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed'];
+export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
 
 export const PIPELINE_STAGES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling', 'complete'];
@@ -64,6 +64,7 @@ export interface KitchenConfig {
   max_burners: number;
   max_oven_racks: number;
   has_second_oven: boolean;
+  max_second_oven_racks: number;
 }
 
 export interface Equipment {

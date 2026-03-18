@@ -17,7 +17,7 @@
 }
 
 .pending {
-  background: rgba(92, 82, 72, 0.3);
+  background: rgba(28, 25, 23, 0.1);
   color: var(--text-muted);
 }
 
@@ -26,7 +26,7 @@
 }
 
 .generating, .enriching, .validating, .scheduling {
-  background: rgba(201, 129, 58, 0.15);
+  background: rgba(194, 65, 12, 0.1);
   color: var(--accent-warm);
 }
 
@@ -36,7 +36,7 @@
 }
 
 .complete {
-  background: rgba(122, 173, 122, 0.15);
+  background: rgba(21, 128, 61, 0.1);
   color: var(--cost-positive);
 }
 
@@ -45,7 +45,7 @@
 }
 
 .partial {
-  background: rgba(212, 162, 78, 0.15);
+  background: rgba(180, 83, 9, 0.1);
   color: var(--cost-warning);
 }
 
@@ -54,12 +54,21 @@
 }
 
 .failed {
-  background: rgba(196, 107, 107, 0.15);
+  background: rgba(185, 28, 28, 0.1);
   color: var(--cost-negative);
 }
 
 .failed .dot {
   background: var(--cost-negative);
+}
+
+.cancelled {
+  background: rgba(28, 25, 23, 0.1);
+  color: var(--text-secondary);
+}
+
+.cancelled .dot {
+  background: var(--text-secondary);
 }
 
 @keyframes pulse {

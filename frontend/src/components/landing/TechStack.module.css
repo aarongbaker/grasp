@@ -1,0 +1,168 @@
+.section {
+  padding: 6rem 1.5rem;
+  background-color: var(--lp-warmgray);
+  border-top: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.container {
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 4rem;
+}
+
+.title {
+  font-family: var(--lp-font-serif);
+  font-size: 1.875rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  font-family: var(--lp-font-body);
+  color: rgba(28, 25, 23, 0.6);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-bottom: 4rem;
+}
+
+.card {
+  background-color: var(--lp-cream);
+  border: 1px solid rgba(28, 25, 23, 0.05);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.cardBrand {
+  font-size: 0.75rem;
+  font-family: var(--lp-font-body);
+  font-weight: 700;
+  color: rgba(194, 65, 12, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.cardName {
+  font-family: var(--lp-font-serif);
+  font-size: 1.5rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 0.5rem;
+}
+
+.cardRole {
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  color: rgba(28, 25, 23, 0.7);
+}
+
+/* Architectural diagram */
+.diagram {
+  max-width: 48rem;
+  margin: 0 auto;
+  background-color: var(--lp-cream);
+  border: 1px solid rgba(28, 25, 23, 0.1);
+  border-radius: 1rem;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.7);
+}
+
+.diagramNode {
+  padding: 0.5rem 1rem;
+  background-color: var(--lp-warmgray);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.diagramArrow {
+  display: none;
+  height: 1px;
+  flex: 1;
+  background-color: rgba(28, 25, 23, 0.2);
+  position: relative;
+}
+
+.diagramArrow::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 0.5rem;
+  height: 0.5rem;
+  border-top: 1px solid rgba(28, 25, 23, 0.4);
+  border-right: 1px solid rgba(28, 25, 23, 0.4);
+}
+
+.diagramCenter {
+  padding: 0.75rem 1.5rem;
+  background-color: rgba(54, 83, 20, 0.1);
+  color: var(--lp-sage);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(54, 83, 20, 0.2);
+  font-weight: 700;
+  text-align: center;
+}
+
+.diagramCenterSub {
+  font-size: 0.75rem;
+  font-weight: 400;
+  opacity: 0.7;
+  margin-top: 0.25rem;
+}
+
+.diagramOutput {
+  padding: 0.5rem 1rem;
+  background-color: rgba(194, 65, 12, 0.1);
+  color: var(--lp-terracotta);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(194, 65, 12, 0.2);
+}
+
+@media (min-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 768px) {
+  .section {
+    padding: 6rem 3rem;
+  }
+
+  .title {
+    font-size: 2.25rem;
+  }
+
+  .diagram {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 2rem;
+  }
+
+  .diagramArrow {
+    display: block;
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

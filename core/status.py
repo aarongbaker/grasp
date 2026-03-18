@@ -47,6 +47,13 @@ async def finalise_session(
     if not result:
         return
 
+    # Re-read from DB to catch cancellation that happened during pipeline execution
+    await db.refresh(result)
+
+    # If the session was cancelled while the pipeline was running, don't overwrite
+    if result.status == SessionStatus.CANCELLED:
+        return
+
     errors: list[dict] = final_state.get("errors", [])
     has_errors = len(errors) > 0
 

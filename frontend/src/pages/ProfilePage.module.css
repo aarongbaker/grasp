@@ -1,88 +1,340 @@
+/* ProfilePage — "Your Kitchen" configurator */
+
+.page {
+  max-width: 880px;
+}
+
 .title {
   font-family: var(--font-display);
   font-size: var(--text-3xl);
-  font-weight: 600;
-  margin-bottom: var(--space-xl);
+  font-weight: 400;
+  margin-bottom: var(--space-xs);
 }
 
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--space-2xl);
+}
+
+/* ─── Section ─── */
+
 .section {
-  margin-bottom: var(--space-xl);
+  margin-bottom: var(--space-2xl);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border);
 }
 
 .sectionTitle {
   font-family: var(--font-display);
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-primary);
-  margin-bottom: var(--space-md);
-  padding-bottom: var(--space-sm);
-  border-bottom: 1px solid var(--border);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-md);
+.sectionHint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
-.field {
-  padding: var(--space-md);
+/* ─── Stovetop visual ─── */
+
+.stovetop {
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  position: relative;
 }
 
-.fieldLabel {
+.stovetopLabel {
   font-size: var(--text-xs);
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--space-xs);
+  letter-spacing: 0.08em;
+  margin-bottom: var(--space-lg);
 }
 
-.fieldValue {
-  font-size: var(--text-base);
-  color: var(--text-primary);
+.burnerGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  justify-content: center;
+  padding: var(--space-md) 0;
 }
 
-.fieldValueMono {
+.burner {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-base);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.burner:hover {
+  border-color: var(--text-muted);
+  transform: scale(1.05);
+}
+
+.burner:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.burnerActive {
+  border-color: var(--accent-primary);
+  background: rgba(194, 65, 12, 0.06);
+  box-shadow: 0 0 0 4px rgba(194, 65, 12, 0.08);
+}
+
+.burnerActive:hover {
+  border-color: var(--accent-warm);
+}
+
+/* concentric ring SVG inside burner */
+.burnerRing {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--border);
+  transition: border-color var(--transition-base);
+}
+
+.burnerActive .burnerRing {
+  border-color: var(--accent-primary);
+}
+
+.burnerDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background var(--transition-base);
+}
+
+.burnerActive .burnerDot {
+  background: var(--accent-primary);
+}
+
+.burnerCount {
+  text-align: center;
+  margin-top: var(--space-md);
   font-family: var(--font-mono);
   font-size: var(--text-lg);
   color: var(--text-primary);
 }
 
-.dietaryList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-}
-
-.dietaryTag {
+.burnerCountLabel {
   font-size: var(--text-xs);
-  padding: 2px var(--space-sm);
-  background: var(--bg-raised);
-  border-radius: 999px;
-  color: var(--text-primary);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.equipmentList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
+/* ─── Oven visual ─── */
+
+.ovenRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
 }
 
-.equipmentItem {
+.oven {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  position: relative;
+}
+
+.ovenDisabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.ovenHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: var(--space-md);
+}
+
+.ovenTitle {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ovenCavity {
+  background: var(--bg-base);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  min-height: 160px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
   padding: var(--space-sm) var(--space-md);
+}
+
+.rack {
+  height: 3px;
+  background: var(--text-muted);
+  border-radius: 1px;
+  position: relative;
+  transition: background var(--transition-fast);
+}
+
+.rackActive {
+  background: var(--accent-primary);
+  height: 4px;
+  box-shadow: 0 1px 4px rgba(194, 65, 12, 0.2);
+}
+
+.rackControls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.rackBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.rackBtn:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.rackBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.rackBtn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.rackCount {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  min-width: 24px;
+  text-align: center;
+}
+
+/* ─── Toggle switch ─── */
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.toggleOn {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  transition: transform var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.toggleOn .toggleKnob {
+  transform: translateX(20px);
+}
+
+.toggleLabel {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* ─── Equipment ─── */
+
+.equipmentGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-md);
+}
+
+.equipmentCard {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.equipmentCard:hover {
+  border-color: var(--text-muted);
+}
+
+.equipmentInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .equipmentName {
   font-size: var(--text-sm);
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -90,11 +342,212 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.emptyEquipment {
-  font-size: var(--text-sm);
+.equipmentTechniques {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-xs);
+}
+
+.techniquePill {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  background: var(--bg-raised);
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+
+.removeBtn {
+  background: none;
+  border: none;
   color: var(--text-muted);
-  padding: var(--space-lg);
+  cursor: pointer;
+  padding: 2px;
+  font-size: var(--text-base);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.removeBtn:hover {
+  color: var(--cost-negative);
+}
+
+.removeBtn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.addEquipmentCard {
+  background: var(--bg-base);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  min-height: 80px;
+  transition: all var(--transition-fast);
+}
+
+.addEquipmentCard:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.addEquipmentCard:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* inline add form */
+.addForm {
+  background: var(--bg-surface);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.addFormRow {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.addFormRow > * {
+  flex: 1;
+}
+
+.addFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+/* ─── Dietary tags ─── */
+
+.dietaryContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.dietaryTag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--bg-raised);
+  border-radius: 999px;
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.dietaryTag:hover {
+  border-color: var(--border);
+}
+
+.dietaryTagRemove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-xs);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast);
+}
+
+.dietaryTagRemove:hover {
+  color: var(--cost-negative);
+}
+
+.dietaryInput {
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  padding: var(--space-xs) 0;
+  outline: none;
+  min-width: 140px;
+}
+
+.dietaryInput::placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Profile info ─── */
+
+.profileRow {
+  display: flex;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-lg);
+}
+
+.profileField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profileFieldLabel {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.profileFieldValue {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+/* ─── Save indicator ─── */
+
+.saveIndicator {
+  position: fixed;
+  bottom: var(--space-lg);
+  right: var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all var(--transition-base);
+  pointer-events: none;
+}
+
+.saveIndicatorVisible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ─── Empty state ─── */
+
+.emptyState {
   text-align: center;
+  padding: var(--space-xl);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }

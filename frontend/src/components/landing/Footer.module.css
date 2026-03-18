@@ -1,0 +1,80 @@
+.footer {
+  background-color: var(--lp-cream);
+  border-top: 1px solid rgba(28, 25, 23, 0.1);
+  padding: 3rem 1.5rem;
+}
+
+.container {
+  max-width: 80rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.brand {
+  text-align: center;
+}
+
+.brandTitle {
+  font-family: var(--lp-font-serif);
+  font-size: 1.875rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 0.5rem;
+}
+
+.brandSub {
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  color: rgba(28, 25, 23, 0.6);
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.links a {
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.7);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.links a:hover {
+  color: var(--lp-terracotta);
+}
+
+.copyright {
+  max-width: 80rem;
+  margin: 3rem auto 0;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(28, 25, 23, 0.05);
+  text-align: center;
+  font-family: var(--lp-font-body);
+  font-size: 0.75rem;
+  color: rgba(28, 25, 23, 0.4);
+}
+
+@media (min-width: 768px) {
+  .footer {
+    padding: 3rem;
+  }
+
+  .container {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .brand {
+    text-align: left;
+  }
+
+  .copyright {
+    text-align: left;
+  }
+}

@@ -42,6 +42,7 @@ class KitchenConfig(SQLModel, table=True):
     max_burners: int = Field(default=4)
     max_oven_racks: int = Field(default=2)
     has_second_oven: bool = Field(default=False)
+    max_second_oven_racks: int = Field(default=2)
 
     user: Optional["UserProfile"] = Relationship(back_populates="kitchen_config")
 

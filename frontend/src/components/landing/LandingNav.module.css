@@ -1,0 +1,64 @@
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  background-color: rgba(253, 251, 247, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.logo {
+  font-family: var(--lp-font-serif);
+  font-size: 1.5rem;
+  color: var(--lp-charcoal);
+  text-decoration: none;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.signInLink {
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.7);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.signInLink:hover {
+  color: var(--lp-terracotta);
+}
+
+.getStartedBtn {
+  background-color: var(--lp-terracotta);
+  color: var(--lp-cream);
+  padding: 0.5rem 1.25rem;
+  border-radius: 9999px;
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.2s;
+}
+
+.getStartedBtn:hover {
+  background-color: rgba(194, 65, 12, 0.9);
+}
+
+@media (min-width: 768px) {
+  .nav {
+    padding: 1rem 3rem;
+  }
+}

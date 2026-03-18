@@ -1,62 +1,101 @@
 .page {
+  /* Override app CSS variables so shared components (Button, Input) render warm */
+  --bg-base: #FDFBF7;
+  --bg-surface: #ffffff;
+  --bg-raised: #F5F0EB;
+  --border: rgba(28, 25, 23, 0.1);
+  --text-primary: #1C1917;
+  --text-secondary: rgba(28, 25, 23, 0.6);
+  --text-muted: rgba(28, 25, 23, 0.35);
+  --accent-primary: #C2410C;
+  --accent-warm: rgba(194, 65, 12, 0.85);
+
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  padding: var(--space-xl);
+  padding: 2rem;
+  background-color: #FDFBF7;
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.backLink {
+  position: absolute;
+  top: 1.5rem;
+  left: 1.5rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.5);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.backLink:hover {
+  color: #C2410C;
 }
 
 .card {
   width: 100%;
   max-width: 400px;
-  padding: var(--space-2xl);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 3rem;
+  background: #ffffff;
+  border: 1px solid rgba(28, 25, 23, 0.08);
+  border-radius: 1.5rem;
+  box-shadow: 0 4px 24px rgba(28, 25, 23, 0.06);
 }
 
 .logo {
-  font-family: var(--font-display);
-  font-size: var(--text-4xl);
-  font-weight: 600;
-  color: var(--text-primary);
+  font-family: 'DM Serif Display', serif;
+  font-size: 2.5rem;
+  font-weight: 400;
+  color: #1C1917;
   text-align: center;
-  margin-bottom: var(--space-xs);
+  margin-bottom: 0.25rem;
 }
 
 .subtitle {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
+  font-size: 0.875rem;
+  color: rgba(28, 25, 23, 0.6);
   text-align: center;
-  margin-bottom: var(--space-xl);
+  margin-bottom: 2rem;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 1rem;
 }
 
 .error {
-  font-size: var(--text-sm);
-  color: var(--cost-negative);
+  font-size: 0.875rem;
+  color: #C2410C;
   text-align: center;
-  padding: var(--space-sm);
-  background: rgba(196, 107, 107, 0.1);
-  border-radius: var(--radius-md);
+  padding: 0.5rem;
+  background: rgba(194, 65, 12, 0.08);
+  border-radius: 0.5rem;
 }
 
 .switchLink {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
+  font-size: 0.875rem;
+  color: rgba(28, 25, 23, 0.6);
   text-align: center;
-  margin-top: var(--space-md);
+  margin-top: 1.5rem;
 }
 
 .switchLink a {
-  color: var(--accent-primary);
+  color: #C2410C;
+  font-weight: 500;
 }
 
 .switchLink a:hover {
-  color: var(--accent-warm);
+  color: rgba(194, 65, 12, 0.85);
+}
+
+@media (min-width: 768px) {
+  .backLink {
+    top: 2rem;
+    left: 3rem;
+  }
 }

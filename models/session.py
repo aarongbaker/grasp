@@ -44,6 +44,9 @@ class Session(SQLModel, table=True):
     # LLM token usage (observability — no enforcement in V1)
     token_usage: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
+    # Celery task tracking (for cancellation)
+    celery_task_id: Optional[str] = None
+
     # Timing
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     started_at: Optional[datetime] = None

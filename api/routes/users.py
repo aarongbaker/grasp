@@ -40,6 +40,17 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 
+class UpdateKitchenRequest(BaseModel):
+    max_burners: int | None = Field(default=None, ge=1, le=10)
+    max_oven_racks: int | None = Field(default=None, ge=1, le=6)
+    has_second_oven: bool | None = None
+    max_second_oven_racks: int | None = Field(default=None, ge=1, le=6)
+
+
+class UpdateDietaryDefaultsRequest(BaseModel):
+    dietary_defaults: list[str]
+
+
 class EquipmentRequest(BaseModel):
     name: str
     category: EquipmentCategory
@@ -78,8 +89,21 @@ async def create_user(body: CreateUserRequest, db: DBSession):
 async def get_profile(user_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     if current_user.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    # Exclude password_hash from response
-    data = current_user.model_dump(exclude={"password_hash"})
+    # Eagerly load relationships that aren't available via async lazy loading
+    from sqlalchemy.orm import selectinload
+
+    result = await db.exec(
+        select(UserProfile)
+        .where(UserProfile.user_id == user_id)
+        .options(selectinload(UserProfile.kitchen_config), selectinload(UserProfile.equipment))
+    )
+    user = result.first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    data = user.model_dump(exclude={"password_hash"})
+    # model_dump() doesn't serialize relationships — add them manually
+    data["kitchen_config"] = user.kitchen_config.model_dump() if user.kitchen_config else None
+    data["equipment"] = [eq.model_dump() for eq in user.equipment]
     return data
 
 
@@ -91,3 +115,69 @@ async def list_sessions(user_id: uuid.UUID, db: DBSession, current_user: Current
 
     result = await db.exec(select(Session).where(Session.user_id == user_id).order_by(Session.created_at.desc()))
     return result.all()
+
+
+@router.patch("/{user_id}/kitchen")
+async def update_kitchen(user_id: uuid.UUID, body: UpdateKitchenRequest, db: DBSession, current_user: CurrentUser):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Load kitchen_config since async sessions don't support lazy loading
+    kc = None
+    if current_user.kitchen_config_id:
+        result = await db.exec(select(KitchenConfig).where(KitchenConfig.kitchen_config_id == current_user.kitchen_config_id))
+        kc = result.first()
+    if not kc:
+        kc = KitchenConfig()
+        db.add(kc)
+        await db.flush()
+        current_user.kitchen_config_id = kc.kitchen_config_id
+
+    if body.max_burners is not None:
+        kc.max_burners = body.max_burners
+    if body.max_oven_racks is not None:
+        kc.max_oven_racks = body.max_oven_racks
+    if body.has_second_oven is not None:
+        kc.has_second_oven = body.has_second_oven
+    if body.max_second_oven_racks is not None:
+        kc.max_second_oven_racks = body.max_second_oven_racks
+
+    await db.commit()
+    await db.refresh(kc)
+    return {"kitchen_config_id": str(kc.kitchen_config_id), "max_burners": kc.max_burners, "max_oven_racks": kc.max_oven_racks, "has_second_oven": kc.has_second_oven, "max_second_oven_racks": kc.max_second_oven_racks}
+
+
+@router.put("/{user_id}/dietary-defaults")
+async def update_dietary_defaults(user_id: uuid.UUID, body: UpdateDietaryDefaultsRequest, db: DBSession, current_user: CurrentUser):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    current_user.dietary_defaults = body.dietary_defaults
+    await db.commit()
+    return {"dietary_defaults": current_user.dietary_defaults}
+
+
+@router.post("/{user_id}/equipment", status_code=201)
+async def add_equipment(user_id: uuid.UUID, body: EquipmentRequest, db: DBSession, current_user: CurrentUser):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    eq = Equipment(user_id=user_id, name=body.name, category=body.category, unlocks_techniques=body.unlocks_techniques)
+    db.add(eq)
+    await db.commit()
+    await db.refresh(eq)
+    return {"equipment_id": str(eq.equipment_id), "user_id": str(eq.user_id), "name": eq.name, "category": eq.category, "unlocks_techniques": eq.unlocks_techniques}
+
+
+@router.delete("/{user_id}/equipment/{equipment_id}", status_code=204)
+async def delete_equipment(user_id: uuid.UUID, equipment_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    result = await db.exec(select(Equipment).where(Equipment.equipment_id == equipment_id, Equipment.user_id == user_id))
+    eq = result.first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+
+    await db.delete(eq)
+    await db.commit()

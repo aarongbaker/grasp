@@ -10,7 +10,14 @@ all state lives in Postgres, not in memory.
 """
 
 import asyncio
+import sys
 import uuid
+from pathlib import Path
+
+# Ensure project root is importable in forked worker processes
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from core.settings import get_settings
 from workers.celery_app import celery_app
@@ -28,6 +35,14 @@ def run_grasp_pipeline(session_id: str, user_id: str):
 
 
 async def _run_pipeline_async(session_id: str, user_id: str):
+    # Must re-check sys.path inside the forked worker process
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _root = str(_Path(__file__).resolve().parent.parent)
+    if _root not in _sys.path:
+        _sys.path.insert(0, _root)
+
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
@@ -115,6 +130,13 @@ def ingest_cookbook(job_id: str, user_id: str, pdf_bytes_b64: str, filename: str
 
 
 async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: str):
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _root = str(_Path(__file__).resolve().parent.parent)
+    if _root not in _sys.path:
+        _sys.path.insert(0, _root)
+
     import uuid as uuid_lib
     from datetime import datetime, timezone
 

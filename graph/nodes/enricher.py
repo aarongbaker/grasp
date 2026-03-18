@@ -25,6 +25,7 @@ Mockable seams:
 Tests patch these two functions to bypass external APIs.
 """
 
+import asyncio
 import logging
 import re
 
@@ -239,7 +240,7 @@ async def _enrich_single_recipe(
 
     # RAG retrieval (graceful degradation — returns [] on failure)
     rag_query = f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
-    rag_chunks = _retrieve_rag_context(rag_query, user_id)
+    rag_chunks = await asyncio.to_thread(_retrieve_rag_context, rag_query, user_id)
 
     # Build prompt
     system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
@@ -294,20 +295,19 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     errors: list[dict] = []
     token_usages: list[dict] = []
 
-    for recipe_dict in raw_recipe_dicts:
+    async def _enrich_one(recipe_dict: dict) -> tuple[dict | None, dict | None, dict | None]:
+        """Enrich a single recipe, returning (enriched_dict, usage, error)."""
         recipe_name = recipe_dict.get("name", "unknown")
         try:
             raw_recipe = RawRecipe.model_validate(recipe_dict)
             enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id)
-            enriched.append(enriched_recipe.model_dump())
-            token_usages.append(usage)
             logger.info(
                 "Enriched recipe: %s (%d steps, %d RAG sources)",
                 recipe_name,
                 len(enriched_recipe.steps),
                 len(enriched_recipe.rag_sources),
             )
-
+            return enriched_recipe.model_dump(), usage, None
         except Exception as exc:
             exc_type = type(exc).__name__
             if is_timeout_error(exc):
@@ -315,7 +315,6 @@ async def rag_enricher_node(state: GRASPState) -> dict:
             else:
                 error_type = ErrorType.RAG_FAILURE
             logger.warning("Enrichment failed for '%s': %s: %s", recipe_name, exc_type, exc)
-
             error = NodeError(
                 node_name="rag_enricher",
                 error_type=error_type,
@@ -323,7 +322,16 @@ async def rag_enricher_node(state: GRASPState) -> dict:
                 message=f"Enrichment failed for '{recipe_name}': {exc_type}: {exc}",
                 metadata={"recipe_name": recipe_name, "exception_type": exc_type},
             )
-            errors.append(error.model_dump())
+            return None, None, error.model_dump()
+
+    results = await asyncio.gather(*[_enrich_one(rd) for rd in raw_recipe_dicts])
+
+    for enriched_dict, usage, error in results:
+        if error:
+            errors.append(error)
+        else:
+            enriched.append(enriched_dict)
+            token_usages.append(usage)
 
     if not enriched:
         # All recipes failed — fatal

@@ -10,6 +10,7 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   complete: 'Complete',
   partial: 'Partial',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 export function StatusBadge({ status }: { status: SessionStatus }) {

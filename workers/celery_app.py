@@ -5,6 +5,15 @@ No automatic retry — failed runs should be inspected before re-running.
 Automatic retries could amplify LLM costs on systematic failures.
 """
 
+import sys
+from pathlib import Path
+
+# Ensure the project root is on sys.path so forked worker processes can
+# resolve top-level packages (models, core, graph, etc.)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from celery import Celery
 
 from core.settings import get_settings

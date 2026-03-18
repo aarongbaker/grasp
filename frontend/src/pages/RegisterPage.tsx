@@ -54,8 +54,9 @@ export function RegisterPage() {
 
   return (
     <div className={styles.page}>
+      <Link to="/welcome" className={styles.backLink}>← Back</Link>
       <div className={styles.card}>
-        <h1 className={styles.logo}>grasp</h1>
+        <h1 className={styles.logo}>GRASP</h1>
         <p className={styles.subtitle}>Set up your kitchen</p>
         <form className={styles.form} onSubmit={handleSubmit}>
           {error && <div className={styles.error}>{error}</div>}

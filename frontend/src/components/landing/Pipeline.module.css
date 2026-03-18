@@ -1,0 +1,135 @@
+.section {
+  padding: 6rem 1.5rem;
+  background-color: var(--lp-cream);
+  border-top: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.container {
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+.header {
+  margin-bottom: 4rem;
+  max-width: 48rem;
+}
+
+.title {
+  font-family: var(--lp-font-serif);
+  font-size: 2.25rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 1.5rem;
+}
+
+.subtitle {
+  font-family: var(--lp-font-body);
+  font-size: 1.125rem;
+  color: rgba(28, 25, 23, 0.7);
+  line-height: 1.75;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  position: relative;
+}
+
+.connectingLine {
+  display: none;
+}
+
+.card {
+  background-color: var(--lp-warmgray);
+  border-radius: 1rem;
+  padding: 2rem;
+  position: relative;
+  z-index: 1;
+  border: 1px solid rgba(28, 25, 23, 0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s;
+}
+
+.card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.iconBox {
+  width: 3rem;
+  height: 3rem;
+  background-color: var(--lp-cream);
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.iconBox svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--lp-terracotta);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.cardNumber {
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: rgba(194, 65, 12, 0.5);
+}
+
+.cardTitle {
+  font-family: var(--lp-font-serif);
+  font-size: 1.5rem;
+  color: var(--lp-charcoal);
+}
+
+.cardDesc {
+  font-family: var(--lp-font-body);
+  color: rgba(28, 25, 23, 0.7);
+  line-height: 1.75;
+}
+
+@media (min-width: 768px) {
+  .section {
+    padding: 6rem 3rem;
+  }
+
+  .header {
+    margin-bottom: 6rem;
+  }
+
+  .title {
+    font-size: 3rem;
+  }
+
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .connectingLine {
+    display: block;
+    position: absolute;
+    top: 3rem;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background-color: rgba(28, 25, 23, 0.1);
+    z-index: 0;
+  }
+}

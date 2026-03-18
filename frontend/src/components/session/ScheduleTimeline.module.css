@@ -9,7 +9,7 @@
 .sectionTitle {
   font-family: var(--font-display);
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-primary);
   margin-bottom: var(--space-md);
 }
@@ -88,22 +88,22 @@
 }
 
 .resourceBadge.hands {
-  background: rgba(201, 129, 58, 0.15);
+  background: rgba(194, 65, 12, 0.1);
   color: var(--accent-warm);
 }
 
 .resourceBadge.stovetop {
-  background: rgba(196, 107, 107, 0.15);
+  background: rgba(185, 28, 28, 0.1);
   color: var(--cost-negative);
 }
 
 .resourceBadge.oven {
-  background: rgba(212, 162, 78, 0.15);
+  background: rgba(180, 83, 9, 0.1);
   color: var(--cost-warning);
 }
 
 .resourceBadge.passive {
-  background: rgba(106, 143, 163, 0.15);
+  background: rgba(54, 83, 20, 0.08);
   color: var(--accent-cool);
 }
 
@@ -117,7 +117,7 @@
   font-size: var(--text-xs);
   color: var(--accent-cool);
   padding: 2px var(--space-sm);
-  background: rgba(106, 143, 163, 0.1);
+  background: rgba(54, 83, 20, 0.1);
   border-radius: 999px;
 }
 

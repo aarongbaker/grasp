@@ -47,7 +47,8 @@ export function NewSessionPage() {
       await runPipeline(session.session_id);
       navigate(`/sessions/${session.session_id}`);
     } catch (err: any) {
-      setError(err.detail || 'Failed to create session');
+      setError(err.detail || err.message || 'Something went wrong — please try again');
+    } finally {
       setLoading(false);
     }
   }

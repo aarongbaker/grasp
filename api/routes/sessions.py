@@ -85,12 +85,48 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
     db.add(session)
     await db.commit()
 
-    # Enqueue Celery task
+    # Enqueue Celery task and store task ID for cancellation
     from workers.tasks import run_grasp_pipeline
 
-    run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))
+    result = run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))
+    session.celery_task_id = result.id
+    db.add(session)
+    await db.commit()
 
     return {"session_id": str(session_id), "status": "generating", "message": "Pipeline enqueued"}
+
+
+@router.post("/{session_id}/cancel", status_code=200)
+async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Cancels an in-progress pipeline by revoking its Celery task and
+    marking the session as CANCELLED. Idempotent — returns 200 if already cancelled.
+    """
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if session.status == SessionStatus.CANCELLED:
+        return {"session_id": str(session_id), "status": "cancelled"}
+    if not session.status.is_in_progress:
+        raise HTTPException(status_code=409, detail=f"Session is {session.status}, not in progress")
+
+    # Revoke the Celery task (best-effort — don't fail cancel if revoke fails)
+    if session.celery_task_id:
+        try:
+            from workers.celery_app import celery_app
+
+            celery_app.control.revoke(session.celery_task_id, terminate=True, signal="SIGTERM")
+        except Exception:
+            pass  # Task may already be done; cancellation still marks status
+
+    session.status = SessionStatus.CANCELLED
+    session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.add(session)
+    await db.commit()
+
+    return {"session_id": str(session_id), "status": "cancelled"}
 
 
 @router.get("/{session_id}")

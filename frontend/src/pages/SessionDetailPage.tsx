@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getSessionResults } from '../api/sessions';
+import { pdf } from '@react-pdf/renderer';
+import { cancelSession, getSessionResults } from '../api/sessions';
+import { Button } from '../components/shared/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { Skeleton } from '../components/shared/Skeleton';
 import { PipelineProgress } from '../components/session/PipelineProgress';
 import { ScheduleTimeline } from '../components/session/ScheduleTimeline';
 import { RecipeCard } from '../components/session/RecipeCard';
+import { RecipePDF } from '../components/session/RecipePDF';
 import { useSessionStatus } from '../hooks/useSessionStatus';
 import { TERMINAL_STATUSES, type SessionResults } from '../types/api';
 import styles from './SessionDetailPage.module.css';
@@ -18,9 +21,42 @@ export function SessionDetailPage() {
   const [results, setResults] = useState<SessionResults | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [tab, setTab] = useState<Tab>('schedule');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const isTerminal = session && TERMINAL_STATUSES.includes(session.status);
   const isFailed = session?.status === 'failed';
+  const isCancelled = session?.status === 'cancelled';
+
+  async function handleCancel() {
+    if (!sessionId || cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await cancelSession(sessionId);
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : 'Failed to cancel');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleDownloadPDF() {
+    if (!results || !session) return;
+    setPdfLoading(true);
+    try {
+      const blob = await pdf(<RecipePDF session={session} results={results} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `grasp-session-${sessionId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   // Fetch full results when session reaches terminal state
   useEffect(() => {
@@ -58,12 +94,28 @@ export function SessionDetailPage() {
       {/* In-progress state */}
       {!isTerminal && (
         <>
-          <PipelineProgress status={session.status} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <PipelineProgress status={session.status} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              {cancelError && <span style={{ color: 'var(--cost-negative)', fontSize: '0.85rem' }}>{cancelError}</span>}
+              <Button variant="secondary" size="sm" onClick={handleCancel} disabled={cancelling}>
+                {cancelling ? 'Cancelling...' : 'Cancel'}
+              </Button>
+            </div>
+          </div>
           <div className={styles.loadingContent}>
             <Skeleton variant="timeline" count={4} />
             <Skeleton variant="card" count={2} />
           </div>
         </>
+      )}
+
+      {/* Cancelled state */}
+      {isCancelled && (
+        <div className={styles.errorBanner}>
+          <div className={styles.errorTitle}>Session cancelled</div>
+          Pipeline was cancelled. No tokens will be used for this session going forward.
+        </div>
       )}
 
       {/* Failed state */}
@@ -95,19 +147,24 @@ export function SessionDetailPage() {
             </div>
           ) : results ? (
             <>
-              <div className={styles.tabBar}>
-                <button
-                  className={`${styles.tab} ${tab === 'schedule' ? styles.tabActive : ''}`}
-                  onClick={() => setTab('schedule')}
-                >
-                  Schedule
-                </button>
-                <button
-                  className={`${styles.tab} ${tab === 'recipes' ? styles.tabActive : ''}`}
-                  onClick={() => setTab('recipes')}
-                >
-                  Recipes ({results.recipes.length})
-                </button>
+              <div className={styles.tabRow}>
+                <div className={styles.tabBar}>
+                  <button
+                    className={`${styles.tab} ${tab === 'schedule' ? styles.tabActive : ''}`}
+                    onClick={() => setTab('schedule')}
+                  >
+                    Schedule
+                  </button>
+                  <button
+                    className={`${styles.tab} ${tab === 'recipes' ? styles.tabActive : ''}`}
+                    onClick={() => setTab('recipes')}
+                  >
+                    Recipes ({results.recipes.length})
+                  </button>
+                </div>
+                <Button variant="secondary" size="sm" onClick={handleDownloadPDF} disabled={pdfLoading}>
+                  {pdfLoading ? 'Generating...' : 'Download PDF'}
+                </Button>
               </div>
 
               {tab === 'schedule' && <ScheduleTimeline schedule={results.schedule} />}

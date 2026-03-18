@@ -1,0 +1,206 @@
+.section {
+  position: relative;
+  padding: 8rem 1.5rem 5rem;
+  max-width: 80rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow: hidden;
+}
+
+.inner {
+  max-width: 56rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.label {
+  color: var(--lp-terracotta);
+  font-family: var(--lp-font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 2rem;
+}
+
+.heading {
+  font-family: var(--lp-font-serif);
+  font-size: 3rem;
+  color: var(--lp-charcoal);
+  line-height: 1.1;
+  margin-bottom: 2rem;
+}
+
+.headingAccent {
+  font-style: italic;
+  color: var(--lp-terracotta);
+}
+
+.description {
+  font-family: var(--lp-font-body);
+  font-size: 1.125rem;
+  color: rgba(28, 25, 23, 0.8);
+  max-width: 42rem;
+  margin-bottom: 3rem;
+  line-height: 1.75;
+}
+
+.ctas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 6rem;
+}
+
+.primaryBtn {
+  background-color: var(--lp-terracotta);
+  color: var(--lp-cream);
+  padding: 1rem 2rem;
+  border-radius: 9999px;
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  font-size: 1rem;
+}
+
+.primaryBtn:hover {
+  background-color: rgba(194, 65, 12, 0.9);
+}
+
+.secondaryLink {
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  color: var(--lp-charcoal);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: rgba(28, 25, 23, 0.2);
+  transition: color 0.2s, text-decoration-color 0.2s;
+}
+
+.secondaryLink:hover {
+  color: var(--lp-terracotta);
+  text-decoration-color: var(--lp-terracotta);
+}
+
+/* Mini Timeline Visual */
+.timelineCard {
+  width: 100%;
+  max-width: 56rem;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(28, 25, 23, 0.05);
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  box-shadow: 0 20px 25px -5px rgba(28, 25, 23, 0.05);
+}
+
+.timelineRows {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: relative;
+}
+
+.gridLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(28, 25, 23, 0.1);
+}
+
+.gridLine1 { left: 30%; }
+.gridLine2 { left: 60%; }
+
+/* Timeline Row */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.rowLabel {
+  width: 12rem;
+  font-family: var(--lp-font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.8);
+  flex-shrink: 0;
+}
+
+.rowTrack {
+  flex: 1;
+  height: 2.5rem;
+  background-color: var(--lp-warmgray);
+  border-radius: 9999px;
+  position: relative;
+  overflow: hidden;
+}
+
+.rowBar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 9999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.barTerracotta { background-color: var(--lp-terracotta); }
+.barSage { background-color: var(--lp-sage); }
+.barAmber { background-color: var(--lp-amber); }
+.barMaroon { background-color: var(--lp-maroon); }
+
+@media (min-width: 768px) {
+  .section {
+    padding: 8rem 3rem 5rem;
+  }
+
+  .label {
+    font-size: 0.875rem;
+  }
+
+  .heading {
+    font-size: 4.5rem;
+  }
+
+  .description {
+    font-size: 1.25rem;
+  }
+
+  .ctas {
+    flex-direction: row;
+  }
+
+  .timelineCard {
+    padding: 2.5rem;
+  }
+
+  .row {
+    flex-direction: row;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .rowLabel {
+    text-align: right;
+  }
+}
+
+@media (min-width: 1024px) {
+  .heading {
+    font-size: 6rem;
+  }
+}

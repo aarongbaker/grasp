@@ -12,7 +12,7 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {},
+  options: RequestInit & { timeout?: number } = {},
 ): Promise<T> {
   const token = localStorage.getItem('grasp_token');
 
@@ -29,10 +29,25 @@ export async function apiFetch<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  const { timeout = 30_000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (controller.signal.aborted) {
+      throw new ApiError(0, 'Request timed out — is the server running?');
+    }
+    throw new ApiError(0, 'Network error — could not reach the server');
+  }
+  clearTimeout(timer);
 
   if (res.status === 401) {
     localStorage.removeItem('grasp_token');
@@ -46,5 +61,6 @@ export async function apiFetch<T>(
     throw new ApiError(res.status, body.detail || res.statusText);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json();
 }

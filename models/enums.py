@@ -86,10 +86,11 @@ class SessionStatus(str, Enum):
     COMPLETE = "complete"
     PARTIAL = "partial"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
     @property
     def is_terminal(self) -> bool:
-        return self in (SessionStatus.COMPLETE, SessionStatus.PARTIAL, SessionStatus.FAILED)
+        return self in (SessionStatus.COMPLETE, SessionStatus.PARTIAL, SessionStatus.FAILED, SessionStatus.CANCELLED)
 
     @property
     def is_in_progress(self) -> bool:

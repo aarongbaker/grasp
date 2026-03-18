@@ -16,8 +16,8 @@ export function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       <div className={styles.logo}>
-        <div className={styles.logoText}>grasp</div>
-        <div className={styles.logoSub}>dinner, planned</div>
+        <div className={styles.logoText}>GRASP</div>
+        <div className={styles.logoSub}>meal scheduling engine</div>
       </div>
 
       <nav className={styles.nav}>

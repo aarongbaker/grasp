@@ -1,0 +1,242 @@
+.section {
+  padding: 6rem 1.5rem;
+  background-color: var(--lp-cream);
+  overflow: hidden;
+}
+
+.container {
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+.header {
+  margin-bottom: 4rem;
+  max-width: 48rem;
+}
+
+.title {
+  font-family: var(--lp-font-serif);
+  font-size: 2.25rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 1.5rem;
+}
+
+.subtitle {
+  font-family: var(--lp-font-body);
+  font-size: 1.125rem;
+  color: rgba(28, 25, 23, 0.7);
+  line-height: 1.75;
+}
+
+/* Timeline Card */
+.timelineCard {
+  background: white;
+  border: 1px solid rgba(28, 25, 23, 0.1);
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 25px -5px rgba(28, 25, 23, 0.05);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.scrollArea {
+  overflow-x: auto;
+  padding-bottom: 1.5rem;
+}
+
+.scrollArea::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scrollArea::-webkit-scrollbar-track {
+  background: var(--lp-warmgray);
+  border-radius: 4px;
+}
+
+.scrollArea::-webkit-scrollbar-thumb {
+  background: var(--lp-amber);
+  border-radius: 4px;
+}
+
+.scrollInner {
+  min-width: 900px;
+}
+
+/* Time Axis */
+.timeAxis {
+  display: flex;
+  border-bottom: 1px solid rgba(28, 25, 23, 0.1);
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  margin-left: 12rem;
+}
+
+.timeMark {
+  flex: 1;
+  font-size: 0.75rem;
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  color: rgba(28, 25, 23, 0.4);
+  position: relative;
+}
+
+.timeMark span {
+  position: absolute;
+  left: -1rem;
+}
+
+.timeGridLine {
+  position: absolute;
+  top: 1.5rem;
+  left: -1px;
+  width: 1px;
+  height: 400px;
+  background-color: rgba(28, 25, 23, 0.05);
+}
+
+/* Swimlanes */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.laneLabel {
+  width: 10rem;
+  flex-shrink: 0;
+  font-family: var(--lp-font-serif);
+  font-size: 1.125rem;
+  color: var(--lp-charcoal);
+}
+
+.laneTrack {
+  flex: 1;
+  height: 3rem;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Timeline Segments */
+.segment {
+  position: absolute;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  color: var(--lp-cream);
+  font-size: 0.75rem;
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.segTerracotta { background-color: var(--lp-terracotta); }
+.segTerracotta60 { background-color: rgba(194, 65, 12, 0.6); }
+.segTerracotta40 { background-color: rgba(194, 65, 12, 0.4); }
+.segSage { background-color: var(--lp-sage); }
+.segSage60 { background-color: rgba(54, 83, 20, 0.6); }
+.segAmber { background-color: var(--lp-amber); }
+.segMaroon { background-color: var(--lp-maroon); }
+.segMaroon60 { background-color: rgba(159, 18, 57, 0.6); }
+
+/* Pulsing active segment */
+.activeSegment {
+  position: absolute;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  background-color: var(--lp-amber);
+  color: var(--lp-cream);
+  font-size: 0.75rem;
+  font-family: var(--lp-font-body);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  z-index: 1;
+}
+
+/* Current Step Card */
+.currentStep {
+  background-color: var(--lp-warmgray);
+  border: 1px solid rgba(217, 119, 6, 0.2);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  max-width: 42rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.currentStepAccent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background-color: var(--lp-amber);
+}
+
+.currentStepHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.currentStepBadge {
+  background-color: rgba(217, 119, 6, 0.1);
+  color: var(--lp-amber);
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: var(--lp-font-body);
+  letter-spacing: 0.05em;
+}
+
+.currentStepTime {
+  font-family: var(--lp-font-body);
+  color: rgba(28, 25, 23, 0.5);
+  font-weight: 500;
+}
+
+.currentStepTitle {
+  font-family: var(--lp-font-serif);
+  font-size: 1.5rem;
+  color: var(--lp-charcoal);
+  margin-bottom: 0.75rem;
+}
+
+.currentStepDesc {
+  font-family: var(--lp-font-body);
+  color: rgba(28, 25, 23, 0.8);
+  line-height: 1.75;
+}
+
+@media (min-width: 768px) {
+  .section {
+    padding: 6rem 3rem;
+  }
+
+  .title {
+    font-size: 3rem;
+  }
+
+  .timelineCard {
+    padding: 2rem;
+  }
+
+  .currentStep {
+    padding: 2rem;
+  }
+}

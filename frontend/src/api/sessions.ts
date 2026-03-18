@@ -25,3 +25,7 @@ export function getSession(sessionId: string): Promise<Session> {
 export function getSessionResults(sessionId: string): Promise<SessionResults> {
   return apiFetch<SessionResults>(`/sessions/${sessionId}/results`);
 }
+
+export function cancelSession(sessionId: string): Promise<{ session_id: string; status: string }> {
+  return apiFetch(`/sessions/${sessionId}/cancel`, { method: 'POST' });
+}

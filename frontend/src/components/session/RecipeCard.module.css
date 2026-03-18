@@ -19,7 +19,7 @@
 .recipeName {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-primary);
   margin-bottom: var(--space-xs);
 }
@@ -50,7 +50,7 @@
   font-size: var(--text-xs);
   color: var(--accent-cool);
   padding: 2px var(--space-sm);
-  background: rgba(106, 143, 163, 0.1);
+  background: rgba(54, 83, 20, 0.1);
   border-radius: 999px;
 }
 
@@ -166,8 +166,8 @@
   font-size: var(--text-xs);
   padding: 2px var(--space-sm);
   border-radius: 999px;
-  background: rgba(201, 129, 58, 0.1);
-  color: var(--accent-warm);
+  background: rgba(54, 83, 20, 0.1);
+  color: var(--accent-primary);
 }
 
 .warnings {

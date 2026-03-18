@@ -11,7 +11,7 @@ export function AppShell() {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      navigate('/welcome', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 

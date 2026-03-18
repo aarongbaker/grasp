@@ -17,7 +17,7 @@
 .pageTitle {
   font-family: var(--font-display);
   font-size: var(--text-3xl);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text-primary);
 }
 

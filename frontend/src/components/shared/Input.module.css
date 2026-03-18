@@ -28,7 +28,7 @@
 .input:focus {
   border-color: var(--accent-primary);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(201, 129, 58, 0.15);
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.15);
 }
 
 .input::placeholder {
