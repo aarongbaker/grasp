@@ -42,20 +42,20 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GANTT-01 | — | Pending |
-| GANTT-02 | — | Pending |
-| GANTT-03 | — | Pending |
-| GANTT-04 | — | Pending |
-| TIME-01 | — | Pending |
-| TIME-02 | — | Pending |
-| TABLE-01 | — | Pending |
-| TABLE-02 | — | Pending |
+| GANTT-01 | Phase 1 | Pending |
+| GANTT-02 | Phase 1 | Pending |
+| GANTT-03 | Phase 1 | Pending |
+| GANTT-04 | Phase 1 | Pending |
+| TIME-01 | Phase 1 | Pending |
+| TIME-02 | Phase 1 | Pending |
+| TABLE-01 | Phase 2 | Pending |
+| TABLE-02 | Phase 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 8 total
-- Mapped to phases: 0
-- Unmapped: 8 ⚠️
+- Mapped to phases: 8
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-18*
-*Last updated: 2026-03-18 after initial definition*
+*Last updated: 2026-03-18 after roadmap creation*
