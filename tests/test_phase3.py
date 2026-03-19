@@ -111,12 +111,15 @@ async def test_run1_happy_path_complete(
     assert len(timeline) > 0, "Timeline should have entries"
 
     # Prep-ahead steps should exist (braise and fondant chill are prep-ahead)
-    prep_ahead = [e for e in timeline if e.get("is_prep_ahead")]
+    prep_ahead_entries = schedule.get("prep_ahead_entries", [])
+    prep_ahead_in_timeline = [e for e in timeline if e.get("is_prep_ahead")]
+    prep_ahead = prep_ahead_entries or prep_ahead_in_timeline
     assert len(prep_ahead) >= 1, "Expected at least 1 prep-ahead entry"
 
     # duration_max heads_up: fondant bake has duration_max=14
+    all_entries = timeline + prep_ahead
     fondant_bake = next(
-        (e for e in timeline if "fondant" in e.get("step_id", "") and e.get("duration_max")),
+        (e for e in all_entries if "fondant" in e.get("step_id", "") and e.get("duration_max")),
         None,
     )
     assert fondant_bake is not None, "Fondant bake step with duration_max should be in timeline"

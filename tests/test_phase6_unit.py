@@ -17,6 +17,7 @@ from graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
 from graph.nodes.dag_merger import (
     ResourceConflictError,
     _compute_critical_paths,
+    _IntervalIndex,
     _merge_dags,
     _StepInfo,
 )
@@ -366,3 +367,238 @@ class TestResourceUtilisation:
         assert len(result.resource_utilisation["stovetop"]) == 3  # 3 burner uses
         assert len(result.resource_utilisation["hands"]) == 5  # 5 HANDS steps
         assert len(result.resource_utilisation["oven"]) == 2  # braise + bake
+
+
+class TestWorstCase:
+    def test_total_duration_max(self):
+        """Worst-case total accounts for duration_max on SR3 (braise 150-180 min)."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+        # SR3 worst-case: start=30, dur_max=180, end_max=210
+        # SR4 depends on SR3, starts at 180 (optimistic). If SR3 takes max → SR4 at 210, ends 225
+        # But the merger places SR4 at optimistic timing. Worst case total = max(end_max)
+        # SR3 end_max = 30+180 = 210, SR4 end_max = 180+15 = 195
+        # So total_max = 210 (from SR3)
+        # Wait — CF5 end_max = 180 + 14 = 194. SR4 has no duration_max so end_max = 195.
+        # SR3 end_max = 210, which is the max overall
+        assert result.total_duration_minutes_max == 210
+
+    def test_end_at_minute_max(self):
+        """Steps with duration_max get correct end_at_minute_max."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        # SR3: start=30, dur_max=180, end_max=210
+        sr3 = by_id["short_rib_step_3"]
+        assert sr3.end_at_minute_max == 210
+
+        # CF5: start=180, dur_max=14, end_max=194
+        cf5 = by_id["fondant_step_5"]
+        assert cf5.end_at_minute_max == 194
+
+        # SR1: no dur_max → end_max = end_at_minute = 20
+        sr1 = by_id["short_rib_step_1"]
+        assert sr1.end_at_minute_max == 20
+
+    def test_slack_minutes(self):
+        """SR3 (braise) has negative slack: overrunning delays SR4."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        # SR3 end_max=210, successor SR4 starts at 180 → slack = 180 - 210 = -30 → clamped to 0
+        assert by_id["short_rib_step_3"].slack_minutes == 0
+
+        # SR1 end_max=20, successor SR2 starts at 20 → slack = 20 - 20 = 0
+        assert by_id["short_rib_step_1"].slack_minutes == 0
+
+    def test_no_max_when_equal(self):
+        """total_duration_minutes_max is None when no steps have duration_max."""
+        # Single recipe with no duration_max steps
+        raw = RawRecipe(
+            name="Simple",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=10,
+            ingredients=[],
+            steps=["cook"],
+        )
+        enriched = EnrichedRecipe(
+            source=raw,
+            steps=[RecipeStep(step_id="s1", description="cook", duration_minutes=10, resource=Resource.HANDS)],
+        )
+        dag = RecipeDAG(recipe_name="Simple", recipe_slug="simple", steps=[], edges=[])
+        validated = [ValidatedRecipe(source=enriched, validated_at=datetime.now())]
+        result = _merge_dags([dag], validated, DEFAULT_KITCHEN)
+        assert result.total_duration_minutes_max is None
+
+
+class TestActiveTime:
+    def test_three_recipe_active_time(self):
+        """Active time excludes PASSIVE steps (SR4=15, CF4=30)."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+        assert result.active_time_minutes == 282  # total 327 - PASSIVE 45
+
+    def test_two_recipe_active_time(self):
+        """2-recipe active time excludes SR4 (PASSIVE, 15 min)."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+        assert result.active_time_minutes == 235  # total 250 - PASSIVE 15
+
+
+class TestIntervalIndex:
+    def test_empty_index(self):
+        idx = _IntervalIndex()
+        assert idx.count_overlapping(0, 10) == 0
+        assert idx.min_end_after(0) is None
+        assert len(idx) == 0
+
+    def test_single_interval(self):
+        idx = _IntervalIndex()
+        idx.add(5, 15)
+        assert idx.count_overlapping(0, 10) == 1
+        assert idx.count_overlapping(10, 20) == 1
+        assert idx.count_overlapping(15, 25) == 0  # [15,25) doesn't overlap [5,15)
+        assert idx.count_overlapping(0, 5) == 0  # [0,5) doesn't overlap [5,15)
+
+    def test_multiple_intervals(self):
+        idx = _IntervalIndex()
+        idx.add(0, 10)
+        idx.add(5, 20)
+        idx.add(15, 30)
+        assert idx.count_overlapping(0, 10) == 2  # [0,10) and [5,20)
+        assert idx.count_overlapping(10, 15) == 1  # only [5,20)
+        assert idx.count_overlapping(0, 30) == 3
+
+    def test_min_end_after(self):
+        idx = _IntervalIndex()
+        idx.add(0, 10)
+        idx.add(5, 20)
+        idx.add(15, 30)
+        assert idx.min_end_after(0) == 10
+        assert idx.min_end_after(10) == 20
+        assert idx.min_end_after(25) == 30
+        assert idx.min_end_after(30) is None
+
+    def test_intervals_sorted(self):
+        idx = _IntervalIndex()
+        idx.add(10, 20)
+        idx.add(0, 5)
+        idx.add(5, 15)
+        assert idx.intervals() == [(0, 5), (5, 15), (10, 20)]
+
+
+class TestEquipmentContention:
+    """Equipment-aware scheduling: named equipment pieces have capacity=1."""
+
+    def _make_recipe(self, name, slug, step_id, resource, duration, equipment=None):
+        """Helper to build a minimal recipe with one step."""
+        raw = RawRecipe(
+            name=name,
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=duration,
+            ingredients=[],
+            steps=["do"],
+        )
+        enriched = EnrichedRecipe(
+            source=raw,
+            steps=[
+                RecipeStep(
+                    step_id=step_id,
+                    description=f"use {name}",
+                    duration_minutes=duration,
+                    resource=resource,
+                    required_equipment=equipment or [],
+                ),
+            ],
+        )
+        dag = RecipeDAG(recipe_name=name, recipe_slug=slug, steps=[], edges=[])
+        validated = ValidatedRecipe(source=enriched, validated_at=datetime.now())
+        return dag, validated
+
+    def test_equipment_serialises_steps(self):
+        """Two STOVETOP steps needing the same equipment cannot overlap."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["stand_mixer"])
+        dag_b, val_b = self._make_recipe("B", "b", "b_step_1", Resource.STOVETOP, 20, ["stand_mixer"])
+        kitchen = {"max_burners": 4, "equipment": ["stand_mixer"]}
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], kitchen)
+
+        steps = sorted(result.scheduled_steps, key=lambda s: s.start_at_minute)
+        # Both are STOVETOP (cap=4), so without equipment they'd overlap.
+        # With stand_mixer (cap=1), they must be sequential.
+        assert steps[0].end_at_minute <= steps[1].start_at_minute, (
+            f"Equipment overlap: {steps[0].step_id} [{steps[0].start_at_minute},{steps[0].end_at_minute}) "
+            f"vs {steps[1].step_id} [{steps[1].start_at_minute},{steps[1].end_at_minute})"
+        )
+
+    def test_different_equipment_allows_overlap(self):
+        """Two STOVETOP steps with different equipment CAN overlap."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["stand_mixer"])
+        dag_b, val_b = self._make_recipe("B", "b", "b_step_1", Resource.STOVETOP, 20, ["food_processor"])
+        kitchen = {"max_burners": 4, "equipment": ["stand_mixer", "food_processor"]}
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], kitchen)
+
+        steps = sorted(result.scheduled_steps, key=lambda s: s.start_at_minute)
+        # Different equipment — both should start at T+0
+        assert steps[0].start_at_minute == 0
+        assert steps[1].start_at_minute == 0
+
+    def test_unknown_equipment_unconstrained(self):
+        """Equipment not in kitchen_config is treated as unconstrained."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["sous_vide"])
+        dag_b, val_b = self._make_recipe("B", "b", "b_step_1", Resource.STOVETOP, 20, ["sous_vide"])
+        # No equipment in kitchen config — sous_vide not tracked
+        kitchen = {"max_burners": 4}
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], kitchen)
+
+        steps = sorted(result.scheduled_steps, key=lambda s: s.start_at_minute)
+        # Both should start at T+0 (unconstrained)
+        assert steps[0].start_at_minute == 0
+        assert steps[1].start_at_minute == 0
+
+    def test_equipment_utilisation_populated(self):
+        """equipment_utilisation records intervals for used equipment."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["stand_mixer"])
+        kitchen = {"max_burners": 4, "equipment": ["stand_mixer"]}
+
+        result = _merge_dags([dag_a], [val_a], kitchen)
+
+        assert "stand_mixer" in result.equipment_utilisation
+        assert result.equipment_utilisation["stand_mixer"] == [(0, 30)]
+
+    def test_no_equipment_no_utilisation(self):
+        """Steps without equipment produce empty equipment_utilisation."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30)
+        kitchen = {"max_burners": 4, "equipment": ["stand_mixer"]}
+
+        result = _merge_dags([dag_a], [val_a], kitchen)
+
+        assert result.equipment_utilisation == {}
+
+    def test_existing_fixtures_unaffected(self):
+        """Existing 3-recipe fixtures still produce the same result (no equipment)."""
+        recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
+        validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
+
+        result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
+
+        assert result.equipment_utilisation == {}
+        assert result.total_duration_minutes == MERGED_DAG_FULL.total_duration_minutes

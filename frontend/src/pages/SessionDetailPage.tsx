@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeftIcon, DownloadIcon } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
 import { cancelSession, getSessionResults } from '../api/sessions';
 import { Button } from '../components/shared/Button';
@@ -17,7 +18,7 @@ type Tab = 'schedule' | 'recipes';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { data: session, isPolling } = useSessionStatus(sessionId);
+  const { data: session } = useSessionStatus(sessionId);
   const [results, setResults] = useState<SessionResults | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [tab, setTab] = useState<Tab>('schedule');
@@ -81,10 +82,13 @@ export function SessionDetailPage() {
 
   return (
     <div className={styles.page}>
-      <Link to="/" className={styles.backLink}>&#x2190; Back to sessions</Link>
+      <Link to="/" className={styles.backLink}>
+        <ArrowLeftIcon size={14} />
+        Back to sessions
+      </Link>
 
       <div className={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)', marginBottom: 'var(--space-sm)' }}>
+        <div className={styles.titleRow}>
           <h1 className={styles.title}>Session</h1>
           <StatusBadge status={session.status} />
         </div>
@@ -94,10 +98,10 @@ export function SessionDetailPage() {
       {/* In-progress state */}
       {!isTerminal && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className={styles.progressRow}>
             <PipelineProgress status={session.status} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-              {cancelError && <span style={{ color: 'var(--cost-negative)', fontSize: '0.85rem' }}>{cancelError}</span>}
+              {cancelError && <span className={styles.cancelError}>{cancelError}</span>}
               <Button variant="secondary" size="sm" onClick={handleCancel} disabled={cancelling}>
                 {cancelling ? 'Cancelling...' : 'Cancel'}
               </Button>
@@ -136,6 +140,8 @@ export function SessionDetailPage() {
             </div>
           )}
 
+          <PipelineProgress status={session.status} />
+
           {session.schedule_summary && (
             <div className={styles.summary}>{session.schedule_summary}</div>
           )}
@@ -163,6 +169,7 @@ export function SessionDetailPage() {
                   </button>
                 </div>
                 <Button variant="secondary" size="sm" onClick={handleDownloadPDF} disabled={pdfLoading}>
+                  <DownloadIcon size={14} />
                   {pdfLoading ? 'Generating...' : 'Download PDF'}
                 </Button>
               </div>

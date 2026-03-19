@@ -44,6 +44,7 @@ export interface TokenRequest {
 
 export interface TokenResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
 }
@@ -93,6 +94,7 @@ export interface DinnerConcept {
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions: string[];
+  serving_time: string | null;
 }
 
 export interface CreateSessionRequest {
@@ -101,6 +103,7 @@ export interface CreateSessionRequest {
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];
+  serving_time?: string;
 }
 
 export interface Session {
@@ -111,6 +114,8 @@ export interface Session {
   schedule_summary: string | null;
   total_duration_minutes: number | null;
   error_summary: string | null;
+  result_recipes: ValidatedRecipe[] | null;
+  result_schedule: NaturalLanguageSchedule | null;
   token_usage: TokenUsage | null;
   created_at: string;
   started_at: string | null;
@@ -137,6 +142,7 @@ export interface RecipeStep {
   duration_max: number | null;
   depends_on: string[];
   resource: Resource;
+  required_equipment: string[];
   can_be_done_ahead: boolean;
   prep_ahead_window: string | null;
   prep_ahead_notes: string | null;
@@ -170,12 +176,14 @@ export interface ValidatedRecipe {
 export interface TimelineEntry {
   time_offset_minutes: number;
   label: string;
+  clock_time: string | null;
   step_id: string;
   recipe_name: string;
   action: string;
   resource: Resource;
   duration_minutes: number;
   duration_max: number | null;
+  buffer_minutes: number | null;
   heads_up: string | null;
   is_prep_ahead: boolean;
   prep_ahead_window: string | null;
@@ -183,7 +191,10 @@ export interface TimelineEntry {
 
 export interface NaturalLanguageSchedule {
   timeline: TimelineEntry[];
+  prep_ahead_entries?: TimelineEntry[];
   total_duration_minutes: number;
+  total_duration_minutes_max: number | null;
+  active_time_minutes: number | null;
   summary: string;
   error_summary: string | null;
 }
@@ -206,6 +217,16 @@ export interface BookStatus {
   title: string;
   status: string;
   error?: string;
+}
+
+export interface BookRecord {
+  book_id: string;
+  title: string;
+  author: string;
+  document_type: string | null;
+  total_pages: number;
+  total_chunks: number;
+  created_at: string;
 }
 
 export interface IngestionJob {

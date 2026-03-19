@@ -38,7 +38,7 @@ export function RegisterPage() {
       // Auto-login after registration
       const res = await login(email, password);
       const payload = JSON.parse(atob(res.access_token.split('.')[1]));
-      auth.login(res.access_token, payload.sub);
+      auth.login(res.access_token, res.refresh_token, payload.sub);
       navigate('/', { replace: true });
     } catch (err: any) {
       const detail = err.detail || 'Failed to create account';

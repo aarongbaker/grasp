@@ -57,6 +57,30 @@ async def upload_pdf(
     return {"job_id": str(job.job_id)}
 
 
+@router.get("/cookbooks")
+async def list_cookbooks(db: DBSession, current_user: CurrentUser):
+    """Returns all ingested cookbooks for the current user, newest first."""
+    statement = (
+        select(BookRecord)
+        .where(BookRecord.user_id == current_user.user_id)
+        .order_by(BookRecord.created_at.desc())
+    )
+    results = await db.exec(statement)
+    books = results.all()
+    return [
+        {
+            "book_id": str(b.book_id),
+            "title": b.title,
+            "author": b.author,
+            "document_type": b.document_type.value if b.document_type else None,
+            "total_pages": b.total_pages,
+            "total_chunks": b.total_chunks,
+            "created_at": b.created_at.isoformat(),
+        }
+        for b in books
+    ]
+
+
 @router.get("/{job_id}")
 async def get_ingestion_status(job_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     job = await db.get(IngestionJob, job_id)

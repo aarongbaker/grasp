@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { uploadPdf, getIngestionStatus } from '../api/ingest';
+import { useCallback, useEffect, useState } from 'react';
+import { uploadPdf, getIngestionStatus, listCookbooks } from '../api/ingest';
 import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
 import { usePolling } from '../hooks/usePolling';
-import type { IngestionJob } from '../types/api';
+import type { BookRecord, IngestionJob } from '../types/api';
 import styles from './IngestPage.module.css';
 
 export function IngestPage() {
@@ -11,11 +11,24 @@ export function IngestPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [cookbooks, setCookbooks] = useState<BookRecord[]>([]);
+
+  const fetchCookbooks = useCallback(() => {
+    listCookbooks().then(setCookbooks).catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchCookbooks(); }, [fetchCookbooks]);
 
   const { data: job } = usePolling<IngestionJob>({
     fetcher: () => getIngestionStatus(jobId!),
     interval: 3000,
-    shouldStop: (j) => j.status === 'complete' || j.status === 'failed',
+    shouldStop: (j) => {
+      if (j.status === 'complete' || j.status === 'failed') {
+        if (j.status === 'complete') fetchCookbooks();
+        return true;
+      }
+      return false;
+    },
     enabled: !!jobId,
   });
 
@@ -78,6 +91,34 @@ export function IngestPage() {
           )}
         </div>
       )}
+
+      <div className={styles.library}>
+        <h2 className={styles.libraryTitle}>Your Library</h2>
+        {cookbooks.length === 0 ? (
+          <p className={styles.emptyLibrary}>
+            Your library is empty — upload a cookbook to get started.
+          </p>
+        ) : (
+          <div className={styles.libraryList}>
+            {cookbooks.map((book) => (
+              <div key={book.book_id} className={styles.libraryItem}>
+                <div className={styles.libraryItemHeader}>
+                  <span className={styles.libraryItemTitle}>{book.title}</span>
+                  {book.document_type && (
+                    <span className={styles.libraryItemType}>{book.document_type}</span>
+                  )}
+                </div>
+                <div className={styles.libraryItemMeta}>
+                  {book.author && <span>{book.author}</span>}
+                  <span>{book.total_pages} pages</span>
+                  <span>{book.total_chunks} chunks</span>
+                  <span>{new Date(book.created_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

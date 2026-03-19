@@ -19,9 +19,10 @@ every session.
 """
 
 import operator
+import re
 from typing import Annotated, Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from models.enums import MealType, Occasion
 
@@ -38,6 +39,16 @@ class DinnerConcept(BaseModel):
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
+
+    @field_validator("serving_time")
+    @classmethod
+    def validate_serving_time(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", v):
+            raise ValueError("serving_time must be in HH:MM 24-hour format (e.g. '19:00')")
+        return v
 
 
 # ── GRASPState ────────────────────────────────────────────────────────────────

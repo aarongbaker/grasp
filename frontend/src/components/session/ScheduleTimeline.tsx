@@ -1,6 +1,6 @@
 import { AlertTriangleIcon, ClockIcon } from 'lucide-react';
 import { RESOURCE_LABELS, type NaturalLanguageSchedule, type Resource, type TimelineEntry } from '../../types/api';
-import { CookingGantt } from './CookingGantt';
+import { CookingGantt, LANE_COLORS } from './CookingGantt';
 import styles from './ScheduleTimeline.module.css';
 
 const RESOURCE_BADGE: Record<Resource, string> = {
@@ -60,28 +60,23 @@ function PrepItem({ entry }: { entry: TimelineEntry }) {
   );
 }
 
-function TimelineRow({ entry, isLast }: { entry: TimelineEntry; isLast: boolean }) {
+function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEntry; isLast: boolean; stepNum?: number; stepColor?: string }) {
   return (
     <div className={styles.timelineRow}>
       {/* Time label */}
       <div className={styles.timeLabel}>{entry.label}</div>
 
-      {/* Dot + line */}
-      <div className={styles.connector}>
-        <div className={styles.connectorDotWrap}>
-          <div className={`${styles.connectorDot} ${CONNECTOR_DOT[entry.resource]}`} />
+      {/* Content with colored left border */}
+      <div
+        className={`${styles.rowContent} ${isLast ? styles.rowContentLast : ''}`}
+        style={stepColor ? { borderLeftColor: stepColor } : undefined}
+      >
+        <div className={styles.recipeName}>
+          {stepNum != null && <span className={styles.stepNum} style={stepColor ? { color: stepColor } : undefined}>{stepNum}.</span>}
+          {entry.recipe_name}
         </div>
-        {!isLast && <div className={styles.connectorLine} />}
-      </div>
-
-      {/* Content */}
-      <div className={`${styles.rowContent} ${isLast ? styles.rowContentLast : ''}`}>
-        <div className={styles.recipeName}>{entry.recipe_name}</div>
         <p className={styles.action}>{entry.action}</p>
         <div className={styles.inlineMeta}>
-          <span className={`${styles.resourceBadge} ${RESOURCE_BADGE[entry.resource]}`}>
-            {RESOURCE_LABELS[entry.resource]}
-          </span>
           <span className={styles.durationText}>
             <ClockIcon size={12} />
             {formatDuration(entry.duration_minutes, entry.duration_max)}
@@ -119,23 +114,6 @@ export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedu
         </div>
       </div>
 
-      {/* Resource legend */}
-      <div className={styles.legend}>
-        <span className={styles.legendTitle}>Resources</span>
-        <span className={styles.legendItem}>
-          <span className={`${styles.legendDot} ${styles.legendDotHands}`} /> Hands-on
-        </span>
-        <span className={styles.legendItem}>
-          <span className={`${styles.legendDot} ${styles.legendDotStovetop}`} /> Stovetop
-        </span>
-        <span className={styles.legendItem}>
-          <span className={`${styles.legendDot} ${styles.legendDotOven}`} /> Oven
-        </span>
-        <span className={styles.legendItem}>
-          <span className={`${styles.legendDot} ${styles.legendDotPassive}`} /> Passive
-        </span>
-      </div>
-
       {/* Cooking Gantt chart */}
       <CookingGantt timeline={schedule.timeline.filter((e) => !e.is_prep_ahead)} totalDurationMinutes={schedule.total_duration_minutes} />
 
@@ -151,13 +129,33 @@ export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedu
         </section>
       )}
 
-      {/* Day-Of Timeline */}
-      <section aria-label="Day-of timeline">
-        <h3 className={styles.sectionTitle}>Day-Of Timeline</h3>
+      {/* Day-Of Recipe Steps */}
+      <section aria-label="Day-of recipe steps">
+        <h3 className={styles.sectionTitle}>Day-of Recipe Steps</h3>
         <div>
-          {mainTimeline.map((entry, i) => (
-            <TimelineRow key={entry.step_id} entry={entry} isLast={i === mainTimeline.length - 1} />
-          ))}
+          {(() => {
+            // Build recipe→color map matching the Gantt chart order
+            const colorMap = new Map<string, string>();
+            for (const entry of mainTimeline) {
+              if (!colorMap.has(entry.recipe_name)) {
+                colorMap.set(entry.recipe_name, LANE_COLORS[colorMap.size % LANE_COLORS.length]);
+              }
+            }
+            const counters = new Map<string, number>();
+            return mainTimeline.map((entry, i) => {
+              const count = (counters.get(entry.recipe_name) ?? 0) + 1;
+              counters.set(entry.recipe_name, count);
+              return (
+                <TimelineRow
+                  key={entry.step_id}
+                  entry={entry}
+                  isLast={i === mainTimeline.length - 1}
+                  stepNum={count}
+                  stepColor={colorMap.get(entry.recipe_name)}
+                />
+              );
+            });
+          })()}
         </div>
       </section>
     </div>

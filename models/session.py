@@ -41,6 +41,10 @@ class Session(SQLModel, table=True):
     total_duration_minutes: Optional[int] = None
     error_summary: Optional[str] = None  # populated on PARTIAL outcome
 
+    # Full pipeline results — populated by finalise_session() for fast reads
+    result_recipes: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    result_schedule: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+
     # LLM token usage (observability — no enforcement in V1)
     token_usage: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 

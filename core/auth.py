@@ -24,7 +24,7 @@ from models.user import UserProfile
 
 
 def _decode_jwt(token: str) -> dict:
-    """Decode and validate a JWT token. Raises HTTPException on failure."""
+    """Decode and validate an access JWT token. Raises HTTPException on failure."""
     settings = get_settings()
     try:
         payload = jwt.decode(
@@ -32,11 +32,16 @@ def _decode_jwt(token: str) -> dict:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Reject refresh tokens used as access tokens
+    if payload.get("type") == "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    return payload
 
 
 async def get_current_user(

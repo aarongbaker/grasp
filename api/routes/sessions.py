@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
+
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -34,6 +36,7 @@ class CreateSessionRequest(BaseModel):
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
 
 
 @router.post("", status_code=201)
@@ -48,6 +51,7 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
         meal_type=body.meal_type,
         occasion=body.occasion,
         dietary_restrictions=merged_restrictions,
+        serving_time=body.serving_time,
     )
 
     session = Session(
@@ -178,6 +182,15 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
     if session.status == SessionStatus.FAILED:
         raise HTTPException(status_code=409, detail="Session failed — no results available")
 
+    # Fast path: read from persisted columns (populated by finalise_session)
+    if session.result_schedule and session.result_recipes is not None:
+        return {
+            "schedule": session.result_schedule,
+            "recipes": session.result_recipes,
+            "errors": [],
+        }
+
+    # Slow path (backward compat for sessions finalized before migration)
     from main import get_graph
 
     graph = get_graph()

@@ -6,7 +6,7 @@ interface AuthState {
   userId: string | null;
   user: UserProfile | null;
   isAuthenticated: boolean;
-  login: (token: string, userId: string) => void;
+  login: (token: string, refreshToken: string, userId: string) => void;
   logout: () => void;
   setUser: (user: UserProfile) => void;
 }
@@ -27,8 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('grasp_user_id'));
   const [user, setUser] = useState<UserProfile | null>(null);
 
-  const login = useCallback((newToken: string, newUserId: string) => {
+  const login = useCallback((newToken: string, refreshToken: string, newUserId: string) => {
     localStorage.setItem('grasp_token', newToken);
+    localStorage.setItem('grasp_refresh_token', refreshToken);
     localStorage.setItem('grasp_user_id', newUserId);
     setToken(newToken);
     setUserId(newUserId);
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem('grasp_token');
+    localStorage.removeItem('grasp_refresh_token');
     localStorage.removeItem('grasp_user_id');
     setToken(null);
     setUserId(null);

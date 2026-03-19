@@ -18,6 +18,7 @@ export function NewSessionPage() {
   const [occasion, setOccasion] = useState<Occasion>('dinner_party');
   const [restrictions, setRestrictions] = useState<string[]>([]);
   const [restrictionInput, setRestrictionInput] = useState('');
+  const [servingTime, setServingTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +44,7 @@ export function NewSessionPage() {
         meal_type: mealType,
         occasion,
         dietary_restrictions: restrictions,
+        serving_time: servingTime || undefined,
       });
       await runPipeline(session.session_id);
       navigate(`/sessions/${session.session_id}`);
@@ -84,6 +86,12 @@ export function NewSessionPage() {
             options={mealTypeOptions}
             value={mealType}
             onChange={(e) => setMealType(e.target.value as MealType)}
+          />
+          <Input
+            label="Serving time"
+            type="time"
+            value={servingTime}
+            onChange={(e) => setServingTime(e.target.value)}
           />
         </div>
 

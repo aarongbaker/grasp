@@ -43,6 +43,7 @@ class RecipeStep(BaseModel):
     duration_max: Optional[int] = None  # None = deterministic. Max buffer for heads_up.
     depends_on: list[str] = []  # step_ids that must complete before this
     resource: Resource
+    required_equipment: list[str] = []  # equipment names needed (capacity=1 each)
     can_be_done_ahead: bool = False
     prep_ahead_window: Optional[str] = None  # e.g. "up to 1 week" — used verbatim
     prep_ahead_notes: Optional[str] = None

@@ -27,6 +27,9 @@ class ScheduledStep(BaseModel):
     duration_max: Optional[int] = None
     start_at_minute: int  # absolute offset from T+0
     end_at_minute: int  # start_at_minute + duration_minutes
+    end_at_minute_max: Optional[int] = None  # start + duration_max (worst case)
+    slack_minutes: int = 0  # how much this step can overrun before delaying successors
+    required_equipment: list[str] = []  # equipment names used by this step
     can_be_done_ahead: bool = False
     prep_ahead_window: Optional[str] = None
     prep_ahead_notes: Optional[str] = None
@@ -56,22 +59,28 @@ class MergedDAG(BaseModel):
 
     scheduled_steps: list[ScheduledStep]
     total_duration_minutes: int
+    total_duration_minutes_max: Optional[int] = None  # worst-case total
+    active_time_minutes: Optional[int] = None  # sum of non-PASSIVE step durations
     resource_utilisation: dict[str, list[tuple[int, int]]] = {}
     # resource → list of (start, end) windows. Used for conflict validation.
     # Same JSON round-trip caveat as RecipeDAG.edges — model_validate() to get tuples.
+    equipment_utilisation: dict[str, list[tuple[int, int]]] = {}
+    # equipment_name → list of (start, end) windows.
 
 
 class TimelineEntry(BaseModel):
-    """Single entry in the chef-facing schedule. T+0, T+15, T+30..."""
+    """Single entry in the chef-facing schedule. T+0, T+15, T+30... or clock times."""
 
     time_offset_minutes: int = Field(ge=0)
-    label: str  # e.g. "T+30"
+    label: str  # e.g. "T+30" or "6:30 PM"
+    clock_time: Optional[str] = None  # e.g. "6:30 PM" — populated when serving_time is set
     step_id: str
     recipe_name: str
     action: str  # natural language description
     resource: Resource
     duration_minutes: int
     duration_max: Optional[int] = None
+    buffer_minutes: Optional[int] = None  # duration_max - duration_minutes when applicable
     heads_up: Optional[str] = None  # e.g. "Bake 10–14 min depending on oven"
     is_prep_ahead: bool = False
     prep_ahead_window: Optional[str] = None
@@ -85,6 +94,9 @@ class NaturalLanguageSchedule(BaseModel):
     """
 
     timeline: list[TimelineEntry]
+    prep_ahead_entries: list[TimelineEntry] = []  # prep-ahead steps, separate from day-of
     total_duration_minutes: int
+    total_duration_minutes_max: Optional[int] = None  # worst-case total
+    active_time_minutes: Optional[int] = None  # non-PASSIVE step durations
     summary: str  # one-paragraph overview for session list view
     error_summary: Optional[str] = None  # populated on PARTIAL outcome

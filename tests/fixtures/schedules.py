@@ -62,6 +62,13 @@ from tests.fixtures.recipes import (
     SR_STEP_4,
 )
 
+_RESOURCE_HEADS_UP: dict[Resource, str] = {
+    Resource.OVEN: "oven temperature and size",
+    Resource.STOVETOP: "stovetop heat",
+    Resource.HANDS: "timing",
+    Resource.PASSIVE: "conditions",
+}
+
 # ── Recipe DAGs ───────────────────────────────────────────────────────────────
 # Slugs match _generate_recipe_slug() output from graph/nodes/dag_builder.py
 
@@ -244,6 +251,8 @@ _SCHEDULED_STEPS_FULL = [
 MERGED_DAG_FULL = MergedDAG(
     scheduled_steps=_SCHEDULED_STEPS_FULL,
     total_duration_minutes=195,
+    total_duration_minutes_max=210,
+    active_time_minutes=282,
     resource_utilisation={
         "stovetop": [(0, 10), (0, 20), (0, 30)],
         "hands": [(20, 30), (30, 45), (45, 55), (55, 65), (65, 80)],
@@ -337,6 +346,8 @@ _SCHEDULED_STEPS_TWO = [
 MERGED_DAG_TWO_RECIPE = MergedDAG(
     scheduled_steps=_SCHEDULED_STEPS_TWO,
     total_duration_minutes=195,
+    total_duration_minutes_max=210,
+    active_time_minutes=235,
     resource_utilisation={
         "stovetop": [(0, 20), (0, 30)],
         "hands": [(20, 30), (30, 40), (40, 55)],
@@ -350,8 +361,10 @@ MERGED_DAG_TWO_RECIPE = MergedDAG(
 
 def _make_timeline_entry(step: ScheduledStep) -> TimelineEntry:
     heads_up = None
+    buffer = None
     if step.duration_max and step.duration_max != step.duration_minutes:
-        heads_up = f"{step.duration_minutes}–{step.duration_max} min depending on oven"
+        heads_up = f"{step.duration_minutes}–{step.duration_max} min depending on {_RESOURCE_HEADS_UP[step.resource]}"
+        buffer = step.duration_max - step.duration_minutes
 
     return TimelineEntry(
         time_offset_minutes=step.start_at_minute,
@@ -362,15 +375,35 @@ def _make_timeline_entry(step: ScheduledStep) -> TimelineEntry:
         resource=step.resource,
         duration_minutes=step.duration_minutes,
         duration_max=step.duration_max,
+        buffer_minutes=buffer,
         heads_up=heads_up,
         is_prep_ahead=step.can_be_done_ahead,
         prep_ahead_window=step.prep_ahead_window,
     )
 
 
+def _split_timeline(steps: list[ScheduledStep]) -> tuple[list[TimelineEntry], list[TimelineEntry]]:
+    """Split steps into day-of and prep-ahead timelines, matching renderer logic."""
+    day_of = []
+    prep_ahead = []
+    for step in steps:
+        entry = _make_timeline_entry(step)
+        if step.can_be_done_ahead:
+            entry.label = "Prep"
+            prep_ahead.append(entry)
+        else:
+            day_of.append(entry)
+    return day_of, prep_ahead
+
+
+_TIMELINE_FULL, _PREP_AHEAD_FULL = _split_timeline(_SCHEDULED_STEPS_FULL)
+
 NATURAL_LANGUAGE_SCHEDULE_FULL = NaturalLanguageSchedule(
-    timeline=[_make_timeline_entry(s) for s in _SCHEDULED_STEPS_FULL],
+    timeline=_TIMELINE_FULL,
+    prep_ahead_entries=_PREP_AHEAD_FULL,
     total_duration_minutes=195,
+    total_duration_minutes_max=210,
+    active_time_minutes=282,
     summary=(
         "A three-course dinner party menu for 4 guests. "
         "Short rib braise (3 hours, oven) anchors the schedule — "
@@ -380,9 +413,14 @@ NATURAL_LANGUAGE_SCHEDULE_FULL = NaturalLanguageSchedule(
     ),
 )
 
+_TIMELINE_TWO, _PREP_AHEAD_TWO = _split_timeline(_SCHEDULED_STEPS_TWO)
+
 NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE = NaturalLanguageSchedule(
-    timeline=[_make_timeline_entry(s) for s in _SCHEDULED_STEPS_TWO],
+    timeline=_TIMELINE_TWO,
+    prep_ahead_entries=_PREP_AHEAD_TWO,
     total_duration_minutes=195,
+    total_duration_minutes_max=210,
+    active_time_minutes=235,
     summary=(
         "A two-course dinner for 4 guests (fondant omitted due to RAG retrieval failure). "
         "Short rib braise anchors the schedule; pommes puree finishes during the braise window. "

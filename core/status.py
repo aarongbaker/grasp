@@ -30,6 +30,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from models.enums import SessionStatus
 from models.errors import NodeError
+from models.recipe import ValidatedRecipe
 from models.scheduling import NaturalLanguageSchedule
 from models.session import Session
 
@@ -63,6 +64,13 @@ async def finalise_session(
         result.schedule_summary = schedule.summary
         result.total_duration_minutes = schedule.total_duration_minutes
         result.status = SessionStatus.PARTIAL if has_errors else SessionStatus.COMPLETE
+        # Persist full results for fast reads (avoids checkpoint lookups).
+        # Serialize through Pydantic to ensure JSON-safe types (e.g. datetime → str).
+        result.result_schedule = schedule.model_dump(mode="json")
+        raw_recipes = final_state.get("validated_recipes", [])
+        result.result_recipes = [
+            ValidatedRecipe.model_validate(r).model_dump(mode="json") for r in raw_recipes
+        ]
     else:
         result.status = SessionStatus.FAILED
 

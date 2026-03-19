@@ -17,6 +17,16 @@
   --cost-warning:   #B45309;
   --cost-negative:  #B91C1C;
 
+  /* Resource type colors */
+  --resource-hands-bg: rgba(194, 65, 12, 0.1);
+  --resource-hands-text: var(--accent-warm);
+  --resource-stovetop-bg: rgba(185, 28, 28, 0.1);
+  --resource-stovetop-text: var(--cost-negative);
+  --resource-oven-bg: rgba(180, 83, 9, 0.1);
+  --resource-oven-text: var(--cost-warning);
+  --resource-passive-bg: rgba(54, 83, 20, 0.08);
+  --resource-passive-text: var(--accent-cool);
+
   /* Spacing */
   --space-xs:  4px;
   --space-sm:  8px;

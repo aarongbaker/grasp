@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = _JWT_SECRET_DEFAULT
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
+    jwt_refresh_expire_days: int = 7
 
     @property
     def jwt_secret_is_default(self) -> bool:
