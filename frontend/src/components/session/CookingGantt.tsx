@@ -157,6 +157,14 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
     [timeline],
   );
 
+  // Compute the visible window: from earliest day-of step to end of schedule
+  const windowStart = useMemo(() => {
+    if (dayOfTimeline.length === 0) return 0;
+    return Math.min(...dayOfTimeline.map((e) => e.time_offset_minutes));
+  }, [dayOfTimeline]);
+
+  const windowDuration = totalDurationMinutes - windowStart;
+
   // Build a stable recipe→color mapping
   const recipeColorMap = useMemo(() => {
     const seen = new Map<string, string>();
@@ -183,7 +191,7 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
   }, [dayOfTimeline]);
 
   const timeMarkers = useMemo(() => {
-    const interval = totalDurationMinutes <= 90 ? 15 : totalDurationMinutes <= 240 ? 30 : 60;
+    const interval = windowDuration <= 90 ? 15 : windowDuration <= 240 ? 30 : 60;
     const firstEntry = timeline.find((e) => e.clock_time != null);
     const baseClockTime = firstEntry
       ? (() => {
@@ -214,14 +222,16 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
       : null;
 
     const markers: Array<{ min: number; label: string }> = [];
-    for (let m = 0; m <= totalDurationMinutes; m += interval) {
+    // Snap first marker to nearest interval at or before windowStart
+    const firstMarker = Math.floor(windowStart / interval) * interval;
+    for (let m = firstMarker; m <= totalDurationMinutes; m += interval) {
       const label = baseClockTime
         ? clockTimeAtOffset(baseClockTime, m)
         : formatOffset(m);
       markers.push({ min: m, label });
     }
     return markers;
-  }, [timeline, totalDurationMinutes]);
+  }, [timeline, totalDurationMinutes, windowStart, windowDuration]);
 
   // Step numbering: assign a 1-based index per recipe
   const stepNumbers = useMemo(() => {
@@ -237,7 +247,7 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
 
   if (lanes.length === 0) return null;
 
-  const scrollMinWidth = totalDurationMinutes * PX_PER_MINUTE + 140 + 40; // 140 = lane label width, 40 = right margin
+  const scrollMinWidth = windowDuration * PX_PER_MINUTE + 140 + 40; // 140 = lane label width, 40 = right margin
 
   return (
     <section className={styles.section} aria-label="Cooking overview diagram">
@@ -251,7 +261,7 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
             <div
               key={marker.min}
               className={styles.timeLabel}
-              style={{ left: `${(marker.min / totalDurationMinutes) * 100}%` }}
+              style={{ left: `${((marker.min - windowStart) / windowDuration) * 100}%` }}
             >
               {marker.label}
             </div>
@@ -267,7 +277,7 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
               <div
                 key={marker.min}
                 className={styles.gridLine}
-                style={{ left: `${(marker.min / totalDurationMinutes) * 100}%` }}
+                style={{ left: `${((marker.min - windowStart) / windowDuration) * 100}%` }}
               />
             ))}
             <div className={styles.serveLine} style={{ left: '100%' }} />
@@ -283,11 +293,11 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                   <div className={styles.laneLabel}>{lane.recipe}</div>
                   <div className={styles.barArea}>
                     {segments.map((seg) => {
-                      const leftPct = (seg.startMin / totalDurationMinutes) * 100;
+                      const leftPct = ((seg.startMin - windowStart) / windowDuration) * 100;
                       const solidDur = seg.endMin - seg.startMin;
                       const bufferDur = seg.endWithBuffer - seg.endMin;
-                      const rawSolidPct = (solidDur / totalDurationMinutes) * 100;
-                      const rawBufferPct = (bufferDur / totalDurationMinutes) * 100;
+                      const rawSolidPct = (solidDur / windowDuration) * 100;
+                      const rawBufferPct = (bufferDur / windowDuration) * 100;
                       // Clamp so bars never extend past the serve line
                       const maxWidth = Math.max(0, 100 - leftPct);
                       const totalPct = Math.min(rawSolidPct + rawBufferPct, maxWidth);
