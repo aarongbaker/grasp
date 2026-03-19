@@ -14,8 +14,8 @@
 
 ### Time Axis
 
-- [ ] **TIME-01**: X-axis displays absolute clock times (e.g., "4:00 PM", "4:30 PM") using `clock_time` from `TimelineEntry`
-- [ ] **TIME-02**: Time markers are spaced at sensible intervals based on total duration
+- [x] **TIME-01**: X-axis displays absolute clock times (e.g., "4:00 PM", "4:30 PM") using `clock_time` from `TimelineEntry`
+- [x] **TIME-02**: Time markers are spaced at sensible intervals based on total duration
 
 ### Step Table
 
@@ -46,8 +46,8 @@
 | GANTT-02 | Phase 1 | Complete |
 | GANTT-03 | Phase 1 | Complete |
 | GANTT-04 | Phase 1 | Complete |
-| TIME-01 | Phase 1 | Pending |
-| TIME-02 | Phase 1 | Pending |
+| TIME-01 | Phase 1 | Complete |
+| TIME-02 | Phase 1 | Complete |
 | TABLE-01 | Phase 2 | Pending |
 | TABLE-02 | Phase 2 | Pending |
 
