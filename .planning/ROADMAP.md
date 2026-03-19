@@ -27,7 +27,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Bar horizontal positions reflect step start times accurately relative to each other
   4. Steps with buffer uncertainty show a visually distinct buffer zone on their bar
   5. The x-axis shows absolute clock times (e.g., "4:00 PM", "4:30 PM") at sensible intervals, not relative offsets
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 01-01-PLAN.md — Fix data pipeline and bar rendering (GANTT-01 through GANTT-04)
+- [ ] 01-02-PLAN.md — Add clock-time x-axis with dynamic intervals and horizontal scroll (TIME-01, TIME-02)
 
 ### Phase 2: Step Table
 **Goal**: A companion step table alongside the chart gives the cook a scannable, structured view of the same schedule data
@@ -45,5 +48,5 @@ Phases execute in numeric order: 1 → 2
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Gantt Fix | 0/TBD | Not started | - |
+| 1. Gantt Fix | 0/2 | Not started | - |
 | 2. Step Table | 0/TBD | Not started | - |
