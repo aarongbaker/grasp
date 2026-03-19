@@ -7,10 +7,10 @@
 
 ### Gantt Bars
 
-- [ ] **GANTT-01**: Every `TimelineEntry` in the schedule renders as a visible bar in its recipe lane
-- [ ] **GANTT-02**: Bar width accurately reflects step `duration_minutes` proportional to total timeline span
-- [ ] **GANTT-03**: Bar horizontal position accurately reflects step `time_offset_minutes`
-- [ ] **GANTT-04**: Bars with `buffer_minutes` (duration uncertainty) show buffer zone visually
+- [x] **GANTT-01**: Every `TimelineEntry` in the schedule renders as a visible bar in its recipe lane
+- [x] **GANTT-02**: Bar width accurately reflects step `duration_minutes` proportional to total timeline span
+- [x] **GANTT-03**: Bar horizontal position accurately reflects step `time_offset_minutes`
+- [x] **GANTT-04**: Bars with `buffer_minutes` (duration uncertainty) show buffer zone visually
 
 ### Time Axis
 
@@ -42,10 +42,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GANTT-01 | Phase 1 | Pending |
-| GANTT-02 | Phase 1 | Pending |
-| GANTT-03 | Phase 1 | Pending |
-| GANTT-04 | Phase 1 | Pending |
+| GANTT-01 | Phase 1 | Complete |
+| GANTT-02 | Phase 1 | Complete |
+| GANTT-03 | Phase 1 | Complete |
+| GANTT-04 | Phase 1 | Complete |
 | TIME-01 | Phase 1 | Pending |
 | TIME-02 | Phase 1 | Pending |
 | TABLE-01 | Phase 2 | Pending |
