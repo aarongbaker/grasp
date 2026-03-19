@@ -46,26 +46,6 @@ function formatOffset(minutes: number): string {
   return `+${h}:${String(m).padStart(2, '0')}`;
 }
 
-function formatClockTime(isoOrTime: string): string {
-  // clock_time may be "16:00", "4:00 PM", or ISO "2026-03-18T16:00:00"
-  // Normalize to Date then format as 12-hour
-  let date: Date;
-  if (isoOrTime.includes('T')) {
-    date = new Date(isoOrTime);
-  } else if (isoOrTime.includes('AM') || isoOrTime.includes('PM')) {
-    // Already formatted — return as-is but ensure consistent format
-    return isoOrTime.replace(/\s+/g, ' ').trim();
-  } else {
-    // "HH:MM" 24-hour format
-    const [h, m] = isoOrTime.split(':').map(Number);
-    date = new Date(2000, 0, 1, h, m);
-  }
-  const hours = date.getHours();
-  const minutes = date.getMinutes();
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  const h12 = hours % 12 || 12;
-  return `${h12}:${String(minutes).padStart(2, '0')} ${ampm}`;
-}
 
 function clockTimeAtOffset(baseClockTime: string, offsetMinutes: number): string {
   let baseDate: Date;
@@ -305,6 +285,9 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                       const solidPct = rawSolidPct * scale;
                       const bufferPct = rawBufferPct * scale;
 
+                      const solidWidthPct = solidPct / (solidPct + bufferPct || 1) * 100;
+                      const bufferWidthPct = bufferPct / (solidPct + bufferPct || 1) * 100;
+
                       return (
                         <div
                           key={seg.key}
@@ -315,10 +298,16 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                         >
                           <div
                             className={styles.bar}
-                            style={{ width: '100%', backgroundColor: color }}
+                            style={{ width: `${solidWidthPct}%`, backgroundColor: color }}
                           >
                             <span className={styles.barLabel}>{seg.label}</span>
                           </div>
+                          {bufferPct > 0 && (
+                            <div
+                              className={styles.bufferBar}
+                              style={{ width: `${bufferWidthPct}%`, backgroundColor: color }}
+                            />
+                          )}
                         </div>
                       );
                     })}
