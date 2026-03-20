@@ -1,12 +1,23 @@
-# GRASP — Schedule Visualization
+# GRASP — Deployment & Production Readiness
 
 ## What This Is
 
-The schedule visualization layer of GRASP, a web-based dinner party planning tool. The Gantt chart and timeline components show every cooking step as correctly-sized bars on an absolute clock-time axis, with a unified chronological view that reveals gaps and parallel tasks across recipes.
+A web-based dinner party planning tool for private chefs and home cooks. Wraps LLM-driven menu generation, RAG-backed recipe retrieval, DAG-based schedule optimization, and food costing into a single interface with a Gantt chart timeline view.
 
 ## Core Value
 
 The cook can see at a glance what to do and when — every step visible, accurately timed, in one unified view.
+
+## Current Milestone: v1.1 Deploy to Production
+
+**Goal:** Get GRASP running on a public URL so 2-5 friends can try it out.
+
+**Target features:**
+- Containerized deployment (Docker)
+- Hosted on free-tier platform with public URL
+- PostgreSQL + pgvector, Redis, Celery worker all running
+- Environment/secrets management for API keys
+- Basic production hardening (CORS, HTTPS, error handling)
 
 ## Requirements
 
@@ -23,32 +34,36 @@ The cook can see at a glance what to do and when — every step visible, accurat
 - ✓ Inline prep-ahead tags for steps that can be done ahead — v1.0
 - ✓ Gantt renders all steps with gaps and parallel tasks visible — v1.0
 - ✓ Backend returns unified timeline list — v1.0
+- ✓ Session delete from dashboard — v1.0-hotfix
+- ✓ API error surfacing on dashboard and session detail — v1.0-hotfix
 
 ### Active
 
-(None — next milestone TBD)
+(Defined in REQUIREMENTS.md)
 
 ### Out of Scope
 
 - Drag-to-reschedule — visualization only, not a scheduling editor
-- Day-of Timeline section rewrite — separate component, separate scope
-- Interactive hover with full step details — v2 enhancement
-- Click-to-scroll between Gantt bar and timeline entry — v2 enhancement
-- Responsive layout for smaller screens — v2 enhancement
+- Custom domain setup — platform subdomain is fine for now
+- CI/CD pipeline — manual deploy is fine for 2-5 users
+- Auto-scaling — single instance sufficient for small group
+- Monitoring/alerting — not needed at this scale
 
 ## Context
 
 Shipped v1.0 with 1,667 net lines across 39 files (Python backend + React frontend).
-Tech stack: React with CSS Modules, FastAPI, LangGraph pipeline.
+Tech stack: React with CSS Modules, FastAPI, LangGraph pipeline, PostgreSQL + pgvector, Redis, Celery.
 Full pipeline: generator → enricher → validator → dag_builder → dag_merger → renderer.
 138 tests passing (unit + fixture-based).
+JWT auth with 60-minute access tokens and refresh rotation.
 
 ## Constraints
 
-- **Tech stack**: React with CSS Modules, no new dependencies
-- **Data source**: Works with existing `TimelineEntry` type — no backend schema changes needed
-- **Design**: Follows CLAUDE.md warm editorial aesthetic (dark theme, copper accents, serif headings)
-- **Backwards compat**: Old session data with separate `prep_ahead_entries` handled via frontend merge
+- **Budget**: Free or near-free hosting tiers only
+- **Tech stack**: React with CSS Modules, FastAPI, no new application dependencies
+- **Audience**: 2-5 friends, platform subdomain acceptable
+- **Secrets**: Anthropic API key + Pinecone API key must be securely managed
+- **Database**: Needs pgvector extension for RAG pipeline
 
 ## Key Decisions
 
@@ -56,14 +71,10 @@ Full pipeline: generator → enricher → validator → dag_builder → dag_merg
 |----------|-----------|---------|
 | Use `clock_time` field for x-axis | Already provided by backend, gives absolute times | ✓ Good |
 | Keep lane-per-recipe layout | Steps as individual bars grouped by recipe | ✓ Good |
-| Filter prep-ahead at ScheduleTimeline handoff | Root-cause fix vs filtering in CookingGantt | ✓ Good (superseded by unification) |
-| Dynamic interval logic (15/30/60 min) | Match natural session lengths for private chefs | ✓ Good |
-| Rebase axis to day-of window | Eliminate empty space from prep-ahead offsets | ✓ Good |
-| Time-gate with string contains ("hour"/"day"/"week") | Simpler than regex, handles natural language | ✓ Good |
-| Explicit enricher allow/deny list | Prevents LLM from over-classifying prep-ahead | ✓ Good |
-| Unified timeline (Phase 3) | Prep-ahead steps depend on day-of steps; separate section misleading | ✓ Good |
+| Unified timeline (v1.0 Phase 3) | Prep-ahead steps depend on day-of steps; separate section misleading | ✓ Good |
 | MERGE_GAP_MINUTES = -1 | Each step gets own bar for clear timing visibility | ✓ Good |
-| Legacy merge at render time | Old sessions with prep_ahead_entries still work | ✓ Good |
+| Platform subdomain | Custom domain not needed for small friend group | — Pending |
+| Free-tier hosting | Budget constraint, sufficient for 2-5 users | — Pending |
 
 ---
-*Last updated: 2026-03-20 after v1.0 milestone*
+*Last updated: 2026-03-19 after v1.1 milestone start*
