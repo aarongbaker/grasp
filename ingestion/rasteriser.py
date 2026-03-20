@@ -1,13 +1,14 @@
 """
 ingestion/rasteriser.py
-Phase 2a: PDF → 300 DPI images → Apple Vision OCR → PageCache.
+Phase 2a: PDF → 300 DPI images → OCR → PageCache.
 
-Mac-only in V1. Apple Vision is accessed via PyObjC (Vision framework).
-Tesseract is the V2 cross-platform fallback — deferred by design.
+OCR backend selection (priority order):
+  macOS: Apple Vision (PyObjC) -> Tesseract -> pymupdf text extraction
+  Linux: Tesseract -> pymupdf text extraction
 
-The conditional import pattern: if not on macOS or PyObjC not available,
-falls back to pymupdf text extraction. This allows the prototype to run
-on non-Mac machines with reduced OCR quality (acceptable for development).
+Apple Vision provides best quality for stylised cookbook fonts.
+Tesseract is the cross-platform production backend (Docker/Linux).
+pymupdf text extraction is the last-resort fallback on any platform.
 
 300 DPI is the minimum safe resolution for stylised cookbook fonts and
 dense ingredient lists. No quality branching — always rasterise at 300 DPI.
@@ -27,6 +28,15 @@ from typing import Optional
 import fitz  # pymupdf
 
 logger = logging.getLogger(__name__)
+
+# Detect available OCR backends at import time
+_HAS_TESSERACT = False
+try:
+    import pytesseract
+    pytesseract.get_tesseract_version()
+    _HAS_TESSERACT = True
+except Exception:
+    pass
 
 
 def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
@@ -66,6 +76,27 @@ def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
 
     except Exception as e:
         logger.warning("Apple Vision OCR failed: %s", e)
+        return "", 0.0
+
+
+def _ocr_page_tesseract(image_bytes: bytes) -> tuple[str, float]:
+    """
+    Tesseract OCR. Linux production backend. Returns (text, confidence).
+    Uses pytesseract wrapper. Requires tesseract-ocr system package.
+    Confidence is synthetic (0.85) — Tesseract does not provide per-page
+    confidence in a simple API call, and 0.85 reflects its typical accuracy
+    on clean cookbook scans (between Vision's ~0.95 and pymupdf's 0.7).
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+        import io
+
+        image = Image.open(io.BytesIO(image_bytes))
+        text = pytesseract.image_to_string(image, lang="eng")
+        return text.strip(), 0.85
+    except Exception as e:
+        logger.warning("Tesseract OCR failed: %s", e)
         return "", 0.0
 
 
@@ -119,6 +150,12 @@ async def rasterise_and_ocr_pdf(
 
         if is_mac:
             text, confidence = await asyncio.to_thread(_ocr_page_apple_vision, img_bytes)
+            if not text and _HAS_TESSERACT:
+                text, confidence = await asyncio.to_thread(_ocr_page_tesseract, img_bytes)
+            if not text:
+                text, confidence = _ocr_page_pymupdf_fallback(page)
+        elif _HAS_TESSERACT:
+            text, confidence = await asyncio.to_thread(_ocr_page_tesseract, img_bytes)
             if not text:
                 text, confidence = _ocr_page_pymupdf_fallback(page)
         else:
