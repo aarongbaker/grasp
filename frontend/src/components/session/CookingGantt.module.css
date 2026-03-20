@@ -136,8 +136,8 @@
 /* ── Bar group (positioned absolutely within lane) ── */
 .barGroup {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 2px;
+  bottom: 2px;
   display: flex;
   align-items: stretch;
   min-width: 8px; /* ensure tiny durations are still visible */
@@ -163,6 +163,8 @@
   overflow: hidden;
   opacity: 0.88;
   min-width: 8px;
+  border-right: 2px solid var(--bg-surface);
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.15);
 }
 
 .barLabel {
