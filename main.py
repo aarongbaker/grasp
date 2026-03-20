@@ -58,6 +58,18 @@ async def lifespan(app: FastAPI):
             "JWT_SECRET_KEY is using the default value. Set JWT_SECRET_KEY in .env before deploying to production."
         )
 
+    # ── 0b. Validate CORS origins ──────────────────────────────────────────────
+    _DEV_ORIGINS = {"http://localhost:3000", "http://localhost:8501"}
+    if settings.app_env == "production":
+        configured_origins = set(settings.cors_allowed_origins)
+        if configured_origins == _DEV_ORIGINS or configured_origins <= _DEV_ORIGINS:
+            raise RuntimeError(
+                "CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production. "
+                'Example: CORS_ALLOWED_ORIGINS=\'["https://grasp.pages.dev"]\''
+            )
+    elif set(settings.cors_allowed_origins) != _DEV_ORIGINS:
+        logger.info("CORS origins: %s", settings.cors_allowed_origins)
+
     # ── 1. Run database migrations ────────────────────────────────────────────
     from alembic.config import Config
 
