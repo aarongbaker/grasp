@@ -66,17 +66,35 @@ Deferred to v1.2+.
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
+Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| SEC-01 | Phase 4 | Pending |
+| SEC-02 | Phase 4 | Pending |
+| SEC-03 | Phase 4 | Pending |
+| CONT-02 | Phase 4 | Pending |
+| CONT-03 | Phase 4 | Pending |
+| OCR-01 | Phase 4 | Pending |
+| OCR-02 | Phase 4 | Pending |
+| CONT-01 | Phase 5 | Pending |
+| CONT-04 | Phase 5 | Pending |
+| INFRA-03 | Phase 5 | Pending |
+| INFRA-01 | Phase 6 | Pending |
+| INFRA-02 | Phase 6 | Pending |
+| BACK-01 | Phase 7 | Pending |
+| BACK-02 | Phase 7 | Pending |
+| BACK-03 | Phase 7 | Pending |
+| BACK-04 | Phase 7 | Pending |
+| FRONT-01 | Phase 7 | Pending |
+| FRONT-02 | Phase 7 | Pending |
+| FRONT-03 | Phase 7 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17 ⚠️
+- v1.1 requirements: 19 total
+- Mapped to phases: 19
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-19*
-*Last updated: 2026-03-19 after initial definition*
+*Last updated: 2026-03-19 — traceability populated by roadmapper*
