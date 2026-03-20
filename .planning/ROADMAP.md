@@ -22,7 +22,7 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 **Milestone Goal:** GRASP running on a public URL so 2-5 friends can try it out.
 
-- [x] **Phase 4: Security & Pre-Deploy Hardening** — Remove auth bypass, harden JWT guard, add CORS config, fix Linux OCR compatibility (completed 2026-03-20)
+- [ ] **Phase 4: Security & Pre-Deploy Hardening** — Remove auth bypass, harden JWT guard, add CORS config, fix Linux OCR compatibility
 - [ ] **Phase 5: Containerization** — Multi-stage Dockerfile, production requirements, env documentation
 - [ ] **Phase 6: Infrastructure Provisioning** — Railway project, Postgres+pgvector, Redis, all secrets configured
 - [ ] **Phase 7: Deploy & End-to-End Validation** — Backend and frontend live on public URLs, full pipeline verified
@@ -39,10 +39,11 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   3. API rejects cross-origin requests from any domain other than the configured Cloudflare Pages domain
   4. Docker image builds successfully on linux/amd64 without pyobjc errors
   5. `.dockerignore` excludes node_modules, .venv, .git, and .planning from the image build context
-**Plans**: 2 plans
+**Plans**: 3 plans
 Plans:
-- [ ] 04-01-PLAN.md — Auth hardening (remove X-User-ID bypass, CORS lockdown, test migration)
-- [ ] 04-02-PLAN.md — Linux build readiness (.dockerignore, prod requirements, Tesseract OCR)
+- [x] 04-01-PLAN.md — Auth hardening (remove X-User-ID bypass, CORS lockdown, test migration)
+- [x] 04-02-PLAN.md — Linux build readiness (.dockerignore, prod requirements, Tesseract OCR)
+- [ ] 04-03-PLAN.md — Gap closure: Dockerfile with Tesseract OCR system binary (OCR-02)
 
 ### Phase 5: Containerization
 **Goal**: A single Docker image builds and runs both the API and Celery worker, verifiable locally before touching the cloud
@@ -52,10 +53,7 @@ Plans:
   1. `docker build` succeeds on linux/amd64 from a clean checkout using the multi-stage Dockerfile
   2. The same image starts as the API (`uvicorn`) and as the Celery worker (different start command) without modification
   3. `.env.example` documents every required environment variable so any new developer can configure the app from scratch
-**Plans**: 2 plans
-Plans:
-- [ ] 04-01-PLAN.md — Auth hardening (remove X-User-ID bypass, CORS lockdown, test migration)
-- [ ] 04-02-PLAN.md — Linux build readiness (.dockerignore, prod requirements, Tesseract OCR)
+**Plans**: TBD
 
 ### Phase 6: Infrastructure Provisioning
 **Goal**: All cloud services exist and are configured — Railway project running with Postgres (pgvector enabled), Redis, and all secrets loaded
@@ -65,10 +63,7 @@ Plans:
   1. Railway project has Postgres plugin with pgvector extension enabled (`CREATE EXTENSION vector` succeeds)
   2. Railway project has Redis plugin accessible to both the API and Celery worker services
   3. All six required secrets (JWT_SECRET_KEY, DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, PINECONE_API_KEY, REDIS_URL) are set as Railway environment variables
-**Plans**: 2 plans
-Plans:
-- [ ] 04-01-PLAN.md — Auth hardening (remove X-User-ID bypass, CORS lockdown, test migration)
-- [ ] 04-02-PLAN.md — Linux build readiness (.dockerignore, prod requirements, Tesseract OCR)
+**Plans**: TBD
 
 ### Phase 7: Deploy & End-to-End Validation
 **Goal**: GRASP is live on public URLs — backend and frontend deployed, full pipeline working, friends can register and use the app
@@ -80,10 +75,7 @@ Plans:
   3. A user can register, log in, create a session, run the full generate→enrich→validate→schedule→render pipeline, and view the Gantt result on the public URL
   4. React SPA is served from a Cloudflare Pages URL and all deep-link routes (e.g., `/session/123`) work on hard refresh
   5. The frontend calls the Railway API using an absolute URL configured via VITE_API_URL — no hardcoded localhost references
-**Plans**: 2 plans
-Plans:
-- [ ] 04-01-PLAN.md — Auth hardening (remove X-User-ID bypass, CORS lockdown, test migration)
-- [ ] 04-02-PLAN.md — Linux build readiness (.dockerignore, prod requirements, Tesseract OCR)
+**Plans**: TBD
 
 ## Progress
 
@@ -92,7 +84,7 @@ Plans:
 | 1. Gantt Fix | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 2. Prep-Ahead Fix | v1.0 | 1/1 | Complete | 2026-03-20 |
 | 3. Unified Timeline | v1.0 | 1/1 | Complete | 2026-03-20 |
-| 4. Security & Pre-Deploy Hardening | 2/2 | Complete   | 2026-03-20 | - |
+| 4. Security & Pre-Deploy Hardening | v1.1 | 2/3 | Gap closure | - |
 | 5. Containerization | v1.1 | 0/? | Not started | - |
 | 6. Infrastructure Provisioning | v1.1 | 0/? | Not started | - |
 | 7. Deploy & End-to-End Validation | v1.1 | 0/? | Not started | - |
