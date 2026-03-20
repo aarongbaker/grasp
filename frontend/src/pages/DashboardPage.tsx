@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listSessions } from '../api/sessions';
+import { deleteSession, listSessions } from '../api/sessions';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/shared/Button';
 import { Skeleton } from '../components/shared/Skeleton';
@@ -25,6 +25,15 @@ export function DashboardPage() {
       })
       .finally(() => setLoading(false));
   }, [userId]);
+
+  const handleDelete = useCallback(async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+    }
+  }, []);
 
   useEffect(() => {
     fetchSessions();
@@ -60,7 +69,7 @@ export function DashboardPage() {
       ) : (
         <div className={styles.sessionList}>
           {sessions.map((s) => (
-            <SessionCard key={s.session_id} session={s} />
+            <SessionCard key={s.session_id} session={s} onDelete={handleDelete} />
           ))}
         </div>
       )}

@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { XIcon } from 'lucide-react';
 import { StatusBadge } from '../shared/StatusBadge';
 import { MEAL_TYPE_LABELS, OCCASION_LABELS, type Session } from '../../types/api';
 import styles from './SessionCard.module.css';
@@ -20,14 +22,66 @@ function formatDate(iso: string): string {
   });
 }
 
-export function SessionCard({ session }: { session: Session }) {
+interface SessionCardProps {
+  session: Session;
+  onDelete?: (sessionId: string) => void;
+}
+
+export function SessionCard({ session, onDelete }: SessionCardProps) {
   const { concept_json: c } = session;
+  const [confirming, setConfirming] = useState(false);
+
+  function handleDeleteClick(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirming) {
+      onDelete?.(session.session_id);
+    } else {
+      setConfirming(true);
+    }
+  }
+
+  function handleCancelConfirm(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setConfirming(false);
+  }
 
   return (
     <Link to={`/sessions/${session.session_id}`} className={styles.card}>
       <div className={styles.header}>
         <div className={styles.concept}>{c.free_text}</div>
-        <StatusBadge status={session.status} />
+        <div className={styles.headerActions}>
+          <StatusBadge status={session.status} />
+          {onDelete && (
+            confirming ? (
+              <span className={styles.confirmGroup}>
+                <button
+                  className={styles.confirmBtn}
+                  onClick={handleDeleteClick}
+                  aria-label="Confirm delete session"
+                >
+                  Delete
+                </button>
+                <button
+                  className={styles.cancelBtn}
+                  onClick={handleCancelConfirm}
+                  aria-label="Cancel delete"
+                >
+                  Keep
+                </button>
+              </span>
+            ) : (
+              <button
+                className={styles.deleteBtn}
+                onClick={handleDeleteClick}
+                aria-label="Delete session"
+              >
+                <XIcon size={14} />
+              </button>
+            )
+          )}
+        </div>
       </div>
       <div className={styles.meta}>
         <span className={styles.pill}>{MEAL_TYPE_LABELS[c.meal_type]}</span>

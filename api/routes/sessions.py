@@ -133,6 +133,17 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
     return {"session_id": str(session_id), "status": "cancelled"}
 
 
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await db.delete(session)
+    await db.commit()
+
+
 @router.get("/{session_id}")
 async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     """
