@@ -132,21 +132,27 @@ def _build_timeline_entry(
 def _build_timeline(
     merged_dag: MergedDAG,
     serving_time: str | None = None,
-) -> list[TimelineEntry]:
-    """Build a unified timeline from a MergedDAG. Deterministic ordering.
+) -> tuple[list[TimelineEntry], list[TimelineEntry]]:
+    """Build a split timeline from a MergedDAG. Deterministic ordering.
 
-    All entries live in a single list. Consumers filter on ``is_prep_ahead``
-    when they need to separate day-of from prep-ahead steps.
+    Returns ``(day_of, prep_ahead)`` — prep-ahead entries are given
+    ``label="Prep"`` and are separated from the day-of schedule.
+    Only steps passing the time-gate (hours/days window) enter prep_ahead.
     """
     start_time = None
     if serving_time:
         start_time = _parse_start_time(serving_time, merged_dag.total_duration_minutes)
 
-    entries: list[TimelineEntry] = []
+    day_of: list[TimelineEntry] = []
+    prep_ahead: list[TimelineEntry] = []
     for step in merged_dag.scheduled_steps:
         entry = _build_timeline_entry(step, start_time)
-        entries.append(entry)
-    return entries
+        if entry.is_prep_ahead:
+            entry.label = "Prep"
+            prep_ahead.append(entry)
+        else:
+            day_of.append(entry)
+    return day_of, prep_ahead
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
@@ -319,10 +325,8 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
     serving_time = concept_dict.get("serving_time")
 
     # Deterministic timeline construction — split day-of from prep-ahead
-    all_entries = _build_timeline(merged_dag, serving_time)
-    timeline = [e for e in all_entries if not e.is_prep_ahead]
-    prep_ahead = [e for e in all_entries if e.is_prep_ahead]
-    total_entries = len(all_entries)
+    timeline, prep_ahead = _build_timeline(merged_dag, serving_time)
+    total_entries = len(timeline) + len(prep_ahead)
 
     # LLM summary generation (with fallback)
     try:

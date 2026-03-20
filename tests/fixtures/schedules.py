@@ -62,6 +62,16 @@ from tests.fixtures.recipes import (
     SR_STEP_4,
 )
 
+def _is_meaningful_prep_ahead(step: ScheduledStep) -> bool:
+    """Mirror renderer time-gate: prep-ahead only when window contains 'hour', 'day', or 'week'."""
+    if not step.can_be_done_ahead:
+        return False
+    if not step.prep_ahead_window:
+        return False
+    window = step.prep_ahead_window.lower()
+    return "hour" in window or "day" in window or "week" in window
+
+
 _RESOURCE_HEADS_UP: dict[Resource, str] = {
     Resource.OVEN: "oven temperature and size",
     Resource.STOVETOP: "stovetop heat",
@@ -377,7 +387,7 @@ def _make_timeline_entry(step: ScheduledStep) -> TimelineEntry:
         duration_max=step.duration_max,
         buffer_minutes=buffer,
         heads_up=heads_up,
-        is_prep_ahead=step.can_be_done_ahead,
+        is_prep_ahead=_is_meaningful_prep_ahead(step),
         prep_ahead_window=step.prep_ahead_window,
     )
 
@@ -388,7 +398,7 @@ def _split_timeline(steps: list[ScheduledStep]) -> tuple[list[TimelineEntry], li
     prep_ahead = []
     for step in steps:
         entry = _make_timeline_entry(step)
-        if step.can_be_done_ahead:
+        if _is_meaningful_prep_ahead(step):
             entry.label = "Prep"
             prep_ahead.append(entry)
         else:
