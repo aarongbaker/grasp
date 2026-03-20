@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-01-PLAN.md — Phase 02 prep-ahead-fix complete
-last_updated: "2026-03-20T00:10:37.002Z"
+stopped_at: Completed 03-01-PLAN.md — Phase 03 unified-timeline complete
+last_updated: "2026-03-20T00:34:04.694Z"
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
 ---
 
 # Project State
@@ -19,31 +19,31 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The Gantt chart must accurately show every cooking step as a correctly-sized bar on an absolute clock-time axis
-**Current focus:** All phases complete
+**Current focus:** Phase 03 — unified-timeline
 
 ## Current Position
 
-Phase: 02 (prep-ahead-fix) — COMPLETE
-Plan: 1 of 1 (complete)
+Phase: 03 (unified-timeline) — COMPLETE
+Plan: 1 of 1 — DONE
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: 0 hours
+- Total plans completed: 4
+- Average duration: ~5 min
+- Total execution time: ~20 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| Phase 03 P01 | 1 | 5 min | 5 min |
 
 **Recent Trend:**
 
-- Last 5 plans: —
-- Trend: —
+- Last 5 plans: see phase summaries
+- Trend: on track
 
 *Updated after each plan completion*
 
@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - [02-01]: Time-gate uses "hour"/"day"/"week" string check on prep_ahead_window — simpler than regex, handles natural language correctly
 - [02-01]: _build_timeline() returns (day_of, prep_ahead) tuple — split at construction time, not at consumer
 - [02-01]: Enricher deny-list explicit: herb rubs, chopping, toasting, vinaigrette, blanching, tempering never count as prep-ahead
+- [Phase 03]: _build_timeline() returns single list — no tuple split at construction time
+- [Phase 03]: prep_ahead_entries=[] on NaturalLanguageSchedule — all entries in timeline, field kept for backwards compat
+- [Phase 03]: Legacy session data backwards compat: merge+sort prep_ahead_entries at render time in ScheduleTimeline and RecipePDF
 
 ### Pending Todos
 
@@ -75,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T00:15:00Z
-Stopped at: Completed 02-01-PLAN.md — Phase 02 prep-ahead-fix complete
-Resume file: .planning/phases/02-prep-ahead-fix/02-01-PLAN.md
+Last session: 2026-03-20T00:34:04.690Z
+Stopped at: Completed 03-01-PLAN.md — Phase 03 unified-timeline complete
+Resume file: None

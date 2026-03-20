@@ -25,10 +25,10 @@
 
 ### Unified Timeline
 
-- [ ] **UNIFY-01**: All steps (including those with `can_be_done_ahead=true`) render in one chronological list — no separate "Prep Ahead" section
-- [ ] **UNIFY-02**: Steps with `can_be_done_ahead=true` display an inline tag showing their `prep_ahead_window` (e.g. "can be done up to 24 hours ahead")
-- [ ] **UNIFY-03**: Gantt chart renders all steps from the unified timeline, showing gaps between steps and parallel tasks across recipes
-- [ ] **UNIFY-04**: Backend renderer returns a single timeline list (no separate `prep_ahead_entries` split)
+- [x] **UNIFY-01**: All steps (including those with `can_be_done_ahead=true`) render in one chronological list — no separate "Prep Ahead" section
+- [x] **UNIFY-02**: Steps with `can_be_done_ahead=true` display an inline tag showing their `prep_ahead_window` (e.g. "can be done up to 24 hours ahead")
+- [x] **UNIFY-03**: Gantt chart renders all steps from the unified timeline, showing gaps between steps and parallel tasks across recipes
+- [x] **UNIFY-04**: Backend renderer returns a single timeline list (no separate `prep_ahead_entries` split)
 
 ## v2 Requirements
 
@@ -58,10 +58,10 @@
 | PREP-01 | Phase 2 | Complete |
 | PREP-02 | Phase 2 | Complete |
 | PREP-03 | Phase 2 | Complete |
-| UNIFY-01 | Phase 3 | Pending |
-| UNIFY-02 | Phase 3 | Pending |
-| UNIFY-03 | Phase 3 | Pending |
-| UNIFY-04 | Phase 3 | Pending |
+| UNIFY-01 | Phase 3 | Complete |
+| UNIFY-02 | Phase 3 | Complete |
+| UNIFY-03 | Phase 3 | Complete |
+| UNIFY-04 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total
