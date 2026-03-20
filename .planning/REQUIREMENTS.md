@@ -16,8 +16,8 @@ Requirements for production deployment. Each maps to roadmap phases.
 ### Containerization
 
 - [ ] **CONT-01**: Single multi-stage Dockerfile builds API and worker from one image
-- [ ] **CONT-02**: Production requirements file excludes macOS-only packages (pyobjc-*)
-- [ ] **CONT-03**: `.dockerignore` excludes node_modules, .venv, .git, .planning
+- [x] **CONT-02**: Production requirements file excludes macOS-only packages (pyobjc-*)
+- [x] **CONT-03**: `.dockerignore` excludes node_modules, .venv, .git, .planning
 - [ ] **CONT-04**: Image builds and runs successfully on linux/amd64
 
 ### Infrastructure
@@ -41,8 +41,8 @@ Requirements for production deployment. Each maps to roadmap phases.
 
 ### OCR
 
-- [ ] **OCR-01**: PDF ingestion uses Tesseract on Linux instead of macOS Vision framework
-- [ ] **OCR-02**: Tesseract installed in Docker image with required language packs
+- [x] **OCR-01**: PDF ingestion uses Tesseract on Linux instead of macOS Vision framework
+- [x] **OCR-02**: Tesseract installed in Docker image with required language packs
 
 ## Future Requirements
 
@@ -73,10 +73,10 @@ Which phases cover which requirements.
 | SEC-01 | Phase 4 | Pending |
 | SEC-02 | Phase 4 | Pending |
 | SEC-03 | Phase 4 | Pending |
-| CONT-02 | Phase 4 | Pending |
-| CONT-03 | Phase 4 | Pending |
-| OCR-01 | Phase 4 | Pending |
-| OCR-02 | Phase 4 | Pending |
+| CONT-02 | Phase 4 | Complete |
+| CONT-03 | Phase 4 | Complete |
+| OCR-01 | Phase 4 | Complete |
+| OCR-02 | Phase 4 | Complete |
 | CONT-01 | Phase 5 | Pending |
 | CONT-04 | Phase 5 | Pending |
 | INFRA-03 | Phase 5 | Pending |

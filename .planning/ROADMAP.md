@@ -92,7 +92,7 @@ Plans:
 | 1. Gantt Fix | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 2. Prep-Ahead Fix | v1.0 | 1/1 | Complete | 2026-03-20 |
 | 3. Unified Timeline | v1.0 | 1/1 | Complete | 2026-03-20 |
-| 4. Security & Pre-Deploy Hardening | v1.1 | 0/2 | Planning | - |
+| 4. Security & Pre-Deploy Hardening | 1/2 | In Progress|  | - |
 | 5. Containerization | v1.1 | 0/? | Not started | - |
 | 6. Infrastructure Provisioning | v1.1 | 0/? | Not started | - |
 | 7. Deploy & End-to-End Validation | v1.1 | 0/? | Not started | - |
