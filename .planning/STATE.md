@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Completed 01-02-PLAN.md — Phase 01 gantt-fix complete
-last_updated: "2026-03-19T23:43:42.076Z"
+status: complete
+stopped_at: Completed 02-01-PLAN.md — Phase 02 prep-ahead-fix complete
+last_updated: "2026-03-19T00:15:00Z"
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 3
+  completed_plans: 3
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The Gantt chart must accurately show every cooking step as a correctly-sized bar on an absolute clock-time axis
-**Current focus:** Phase 01 — gantt-fix
+**Current focus:** All phases complete
 
 ## Current Position
 
-Phase: 01 (gantt-fix) — COMPLETE
-Plan: 2 of 2 (all complete)
+Phase: 02 (prep-ahead-fix) — COMPLETE
+Plan: 1 of 1 (complete)
 
 ## Performance Metrics
 
@@ -61,6 +61,9 @@ Recent decisions affecting current work:
 - [01-02]: Dynamic interval logic: 15/30/60 min based on totalDurationMinutes thresholds (90, 240)
 - [01-02]: PX_PER_MINUTE = 4 for scrollContent min-width; lane label 140px + 40px right margin
 - [01-02]: Rebase axis to day-of window — exclude prep-ahead entries when computing axis start offset to eliminate empty leading space
+- [02-01]: Time-gate uses "hour"/"day"/"week" string check on prep_ahead_window — simpler than regex, handles natural language correctly
+- [02-01]: _build_timeline() returns (day_of, prep_ahead) tuple — split at construction time, not at consumer
+- [02-01]: Enricher deny-list explicit: herb rubs, chopping, toasting, vinaigrette, blanching, tempering never count as prep-ahead
 
 ### Pending Todos
 
@@ -72,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T23:00:00Z
-Stopped at: Completed 01-02-PLAN.md — Phase 01 gantt-fix complete
-Resume file: .planning/phases/01-gantt-fix/01-02-PLAN.md
+Last session: 2026-03-19T00:15:00Z
+Stopped at: Completed 02-01-PLAN.md — Phase 02 prep-ahead-fix complete
+Resume file: .planning/phases/02-prep-ahead-fix/02-01-PLAN.md

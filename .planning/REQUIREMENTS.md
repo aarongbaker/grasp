@@ -19,9 +19,9 @@
 
 ### Prep-Ahead Classification
 
-- [ ] **PREP-01**: Enricher prompt restricts `can_be_done_ahead=true` to steps requiring extended lead time — brining, marinating (4+ hours), stock-making, dough proofing, curing, setting gelatin, fermenting — not quick tasks like herb rubs, chopping, or mixing
-- [ ] **PREP-02**: Renderer applies a time-gate: only steps with `prep_ahead_window` containing "hours" or "days" are marked `is_prep_ahead`; steps with short windows stay day-of
-- [ ] **PREP-03**: Test fixtures reflect tightened criteria with correct prep-ahead expectations
+- [x] **PREP-01**: Enricher prompt restricts `can_be_done_ahead=true` to steps requiring extended lead time — brining, marinating (4+ hours), stock-making, dough proofing, curing, setting gelatin, fermenting — not quick tasks like herb rubs, chopping, or mixing
+- [x] **PREP-02**: Renderer applies a time-gate: only steps with `prep_ahead_window` containing "hours" or "days" are marked `is_prep_ahead`; steps with short windows stay day-of
+- [x] **PREP-03**: Test fixtures reflect tightened criteria with correct prep-ahead expectations
 
 ## v2 Requirements
 
@@ -48,9 +48,9 @@
 | GANTT-04 | Phase 1 | Complete |
 | TIME-01 | Phase 1 | Complete |
 | TIME-02 | Phase 1 | Complete |
-| PREP-01 | Phase 2 | Pending |
-| PREP-02 | Phase 2 | Pending |
-| PREP-03 | Phase 2 | Pending |
+| PREP-01 | Phase 2 | Complete |
+| PREP-02 | Phase 2 | Complete |
+| PREP-03 | Phase 2 | Complete |
 
 **Coverage:**
 - v1 requirements: 9 total

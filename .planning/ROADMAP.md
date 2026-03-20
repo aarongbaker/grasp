@@ -13,7 +13,7 @@ Fix the schedule visualization and data pipeline. Phase 1 fixed the Gantt chart 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Gantt Fix** - Fix bar sizing, positioning, missing bars, and switch x-axis to absolute clock times
-- [ ] **Phase 2: Prep-Ahead Fix** - Tighten prep-ahead classification so only long-lead tasks are separated from day-of
+- [x] **Phase 2: Prep-Ahead Fix** - Tighten prep-ahead classification so only long-lead tasks are separated from day-of (completed 2026-03-20)
 
 ## Phase Details
 
@@ -43,7 +43,7 @@ Plans:
   1. The enricher prompt restricts `can_be_done_ahead=true` to steps requiring extended lead time (hours/days), not quick prep tasks
   2. The renderer applies a time-gate so only steps with meaningful prep-ahead windows (hours/days) are marked `is_prep_ahead`
   3. Test fixtures and expectations reflect the tightened criteria
-**Plans:** 0
+**Plans:** 1/1 plans complete
 **Status:** Not started
 
 ## Progress
@@ -54,4 +54,4 @@ Phases execute in numeric order: 1 → 2
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gantt Fix | 2/2 | Complete   | 2026-03-19 |
-| 2. Prep-Ahead Fix | 0 | Not started | — |
+| 2. Prep-Ahead Fix | 1/1 | Complete   | 2026-03-20 |
