@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Deploy to Production
 status: unknown
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-03-20T03:23:14.485Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-20T03:23:43.656Z"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -44,6 +44,7 @@ Plan: 1 of 2
 
 **Recent Trend:** Stable ~45 min/plan
 | Phase 04-security-pre-deploy-hardening P02 | 2 | 2 tasks | 3 files |
+| Phase 04 P01 | 2 | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -55,6 +56,8 @@ Plan: 1 of 2
 - [v1.1 planning]: Cookbook ingestion disabled/stubbed for v1.1 to unblock Linux containerization
 - [Phase 04-security-pre-deploy-hardening]: pytesseract conditional import at function level for graceful degradation without Tesseract on macOS dev
 - [Phase 04-security-pre-deploy-hardening]: requirements-prod.txt as standalone production manifest without pyobjc/dev packages, includes pytesseract==0.3.10
+- [Phase 04]: Generic 401 message extracted to _AUTH_ERROR constant — all error paths return identical text, preventing info leakage and accidental divergence
+- [Phase 04]: CORS check uses set subset comparison (<=) to catch partial dev-origin sets, not just exact match
 
 ### Pending Todos
 
@@ -68,6 +71,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-20T03:23:14.483Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-03-20T03:23:43.654Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

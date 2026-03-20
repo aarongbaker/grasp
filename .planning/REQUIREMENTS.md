@@ -9,9 +9,9 @@ Requirements for production deployment. Each maps to roadmap phases.
 
 ### Security
 
-- [ ] **SEC-01**: X-User-ID auth bypass is removed — all endpoints require valid JWT
-- [ ] **SEC-02**: API rejects startup if JWT secret is the default value when APP_ENV=production
-- [ ] **SEC-03**: CORS allows only the Cloudflare Pages domain in production
+- [x] **SEC-01**: X-User-ID auth bypass is removed — all endpoints require valid JWT
+- [x] **SEC-02**: API rejects startup if JWT secret is the default value when APP_ENV=production
+- [x] **SEC-03**: CORS allows only the Cloudflare Pages domain in production
 
 ### Containerization
 
@@ -70,9 +70,9 @@ Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEC-01 | Phase 4 | Pending |
-| SEC-02 | Phase 4 | Pending |
-| SEC-03 | Phase 4 | Pending |
+| SEC-01 | Phase 4 | Complete |
+| SEC-02 | Phase 4 | Complete |
+| SEC-03 | Phase 4 | Complete |
 | CONT-02 | Phase 4 | Complete |
 | CONT-03 | Phase 4 | Complete |
 | OCR-01 | Phase 4 | Complete |

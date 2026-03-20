@@ -22,7 +22,7 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 **Milestone Goal:** GRASP running on a public URL so 2-5 friends can try it out.
 
-- [ ] **Phase 4: Security & Pre-Deploy Hardening** — Remove auth bypass, harden JWT guard, add CORS config, fix Linux OCR compatibility
+- [x] **Phase 4: Security & Pre-Deploy Hardening** — Remove auth bypass, harden JWT guard, add CORS config, fix Linux OCR compatibility (completed 2026-03-20)
 - [ ] **Phase 5: Containerization** — Multi-stage Dockerfile, production requirements, env documentation
 - [ ] **Phase 6: Infrastructure Provisioning** — Railway project, Postgres+pgvector, Redis, all secrets configured
 - [ ] **Phase 7: Deploy & End-to-End Validation** — Backend and frontend live on public URLs, full pipeline verified
@@ -92,7 +92,7 @@ Plans:
 | 1. Gantt Fix | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 2. Prep-Ahead Fix | v1.0 | 1/1 | Complete | 2026-03-20 |
 | 3. Unified Timeline | v1.0 | 1/1 | Complete | 2026-03-20 |
-| 4. Security & Pre-Deploy Hardening | 1/2 | In Progress|  | - |
+| 4. Security & Pre-Deploy Hardening | 2/2 | Complete   | 2026-03-20 | - |
 | 5. Containerization | v1.1 | 0/? | Not started | - |
 | 6. Infrastructure Provisioning | v1.1 | 0/? | Not started | - |
 | 7. Deploy & End-to-End Validation | v1.1 | 0/? | Not started | - |
