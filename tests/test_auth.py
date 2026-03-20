@@ -1,11 +1,11 @@
 """
 tests/test_auth.py
-Tests for JWT bearer token auth and legacy X-User-ID fallback.
+Tests for JWT bearer token auth (JWT-only).
 """
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
@@ -48,7 +48,6 @@ async def test_jwt_bearer_auth_valid():
 
     result = await get_current_user(
         authorization=f"Bearer {token}",
-        x_user_id=None,
         db=mock_db,
     )
     assert result.user_id == user_id
@@ -56,7 +55,7 @@ async def test_jwt_bearer_auth_valid():
 
 @pytest.mark.asyncio
 async def test_jwt_bearer_auth_expired():
-    """Expired JWT token should return 401."""
+    """Expired JWT token should return 401 with generic error message."""
     from fastapi import HTTPException
 
     from core.auth import get_current_user
@@ -66,11 +65,10 @@ async def test_jwt_bearer_auth_expired():
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
             authorization=f"Bearer {token}",
-            x_user_id=None,
             db=AsyncMock(),
         )
     assert exc_info.value.status_code == 401
-    assert "expired" in exc_info.value.detail.lower()
+    assert exc_info.value.detail == "Missing or invalid authentication token."
 
 
 @pytest.mark.asyncio
@@ -83,36 +81,14 @@ async def test_jwt_bearer_auth_malformed():
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
             authorization="Bearer not-a-valid-token",
-            x_user_id=None,
             db=AsyncMock(),
         )
     assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_legacy_x_user_id_still_works():
-    """Legacy X-User-ID header should still authenticate."""
-    from core.auth import get_current_user
-
-    user_id = uuid.uuid4()
-    mock_user = _mock_user(user_id)
-
-    mock_db = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.first.return_value = mock_user
-    mock_db.exec.return_value = mock_result
-
-    result = await get_current_user(
-        authorization=None,
-        x_user_id=str(user_id),
-        db=mock_db,
-    )
-    assert result.user_id == user_id
-
-
-@pytest.mark.asyncio
 async def test_no_auth_headers_returns_401():
-    """Missing both auth headers should return 401."""
+    """Missing auth header should return 401 with generic error message."""
     from fastapi import HTTPException
 
     from core.auth import get_current_user
@@ -120,33 +96,10 @@ async def test_no_auth_headers_returns_401():
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
             authorization=None,
-            x_user_id=None,
             db=AsyncMock(),
         )
     assert exc_info.value.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_jwt_takes_priority_over_x_user_id():
-    """When both headers present, JWT should be used."""
-    from core.auth import get_current_user
-
-    jwt_user_id = uuid.uuid4()
-    legacy_user_id = uuid.uuid4()
-    token = _make_token(str(jwt_user_id))
-
-    mock_user = _mock_user(jwt_user_id)
-    mock_db = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.first.return_value = mock_user
-    mock_db.exec.return_value = mock_result
-
-    result = await get_current_user(
-        authorization=f"Bearer {token}",
-        x_user_id=str(legacy_user_id),
-        db=mock_db,
-    )
-    assert result.user_id == jwt_user_id
+    assert exc_info.value.detail == "Missing or invalid authentication token."
 
 
 @pytest.mark.asyncio
@@ -166,7 +119,31 @@ async def test_jwt_user_not_found_returns_404():
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
             authorization=f"Bearer {token}",
-            x_user_id=None,
             db=mock_db,
         )
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_jwt_bearer_auth_generic_error_message():
+    """All auth failures return the same generic message to prevent info leakage."""
+    from fastapi import HTTPException
+    from core.auth import get_current_user
+
+    generic_msg = "Missing or invalid authentication token."
+
+    # Expired token
+    token = _make_token(str(uuid.uuid4()), expired=True)
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(authorization=f"Bearer {token}", db=AsyncMock())
+    assert exc_info.value.detail == generic_msg
+
+    # Malformed token
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(authorization="Bearer garbage", db=AsyncMock())
+    assert exc_info.value.detail == generic_msg
+
+    # No auth at all
+    with pytest.raises(HTTPException) as exc_info:
+        await get_current_user(authorization=None, db=AsyncMock())
+    assert exc_info.value.detail == generic_msg

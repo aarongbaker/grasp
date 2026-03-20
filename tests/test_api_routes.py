@@ -3,7 +3,7 @@ tests/test_api_routes.py
 HTTP-level tests for FastAPI routes using httpx AsyncClient.
 
 Tests cover:
-  - Auth: invalid UUID → 400, unknown UUID → 404 (Fix #10)
+  - Auth: malformed JWT → 401, valid JWT unknown user → 404
   - Sessions: create, run (409 guard, 403 ownership), get status (Fix #7)
   - Ingest: PDF-only validation (400), ownership on status poll (Fix #7)
 
@@ -122,13 +122,13 @@ def app_with_overrides(mock_db, test_user):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Auth edge cases (Fix #10)
+# Auth edge cases
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_auth_invalid_uuid_returns_400():
-    """X-User-ID with a non-UUID value should return 400."""
+async def test_auth_invalid_token_returns_401():
+    """Malformed JWT token should return 401."""
     from db.session import get_session
 
     app = _create_test_app()
@@ -143,16 +143,29 @@ async def test_auth_invalid_uuid_returns_400():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get(
             "/api/v1/sessions/00000000-0000-0000-0000-000000000000",
-            headers={"X-User-ID": "not-a-uuid"},
+            headers={"Authorization": "Bearer not-a-valid-token"},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Missing or invalid authentication token."
     app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
-async def test_auth_unknown_uuid_returns_404():
-    """X-User-ID with a valid but nonexistent UUID should return 404."""
+async def test_auth_valid_token_unknown_user_returns_404():
+    """Valid JWT for nonexistent user should return 404."""
+    import jwt as pyjwt
+    from datetime import datetime, timedelta, timezone
+    from core.settings import get_settings
     from db.session import get_session
+
+    settings = get_settings()
+    fake_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    token = pyjwt.encode(
+        {"sub": fake_id, "iat": now, "exp": now + timedelta(hours=1)},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
 
     app = _create_test_app()
     mock_db = MockDBSession()
@@ -164,10 +177,9 @@ async def test_auth_unknown_uuid_returns_404():
     # Real auth runs — mock_db.exec returns None for select query
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        fake_id = str(uuid.uuid4())
         resp = await ac.get(
             "/api/v1/sessions/00000000-0000-0000-0000-000000000000",
-            headers={"X-User-ID": fake_id},
+            headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 404
     app.dependency_overrides.clear()
