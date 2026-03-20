@@ -21,6 +21,7 @@ export function SessionDetailPage() {
   const { data: session } = useSessionStatus(sessionId);
   const [results, setResults] = useState<SessionResults | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('schedule');
   const [pdfLoading, setPdfLoading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -63,9 +64,12 @@ export function SessionDetailPage() {
   useEffect(() => {
     if (!sessionId || !isTerminal || isFailed) return;
     setResultsLoading(true);
+    setResultsError(null);
     getSessionResults(sessionId)
       .then(setResults)
-      .catch(() => {})
+      .catch((err) => {
+        setResultsError(err instanceof Error ? err.message : 'Failed to load results');
+      })
       .finally(() => setResultsLoading(false));
   }, [sessionId, isTerminal, isFailed]);
 
@@ -150,6 +154,26 @@ export function SessionDetailPage() {
             <div className={styles.loadingContent}>
               <Skeleton variant="timeline" count={4} />
               <Skeleton variant="card" count={2} />
+            </div>
+          ) : resultsError ? (
+            <div className={styles.errorBanner}>
+              <div className={styles.errorTitle}>Could not load results</div>
+              {resultsError}
+              <div style={{ marginTop: 'var(--space-sm)' }}>
+                <Button variant="secondary" size="sm" onClick={() => {
+                  if (!sessionId) return;
+                  setResultsLoading(true);
+                  setResultsError(null);
+                  getSessionResults(sessionId)
+                    .then(setResults)
+                    .catch((err) => {
+                      setResultsError(err instanceof Error ? err.message : 'Failed to load results');
+                    })
+                    .finally(() => setResultsLoading(false));
+                }}>
+                  Try again
+                </Button>
+              </div>
             </div>
           ) : results ? (
             <>

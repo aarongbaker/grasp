@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSessions } from '../api/sessions';
 import { useAuth } from '../context/AuthContext';
@@ -12,14 +12,23 @@ export function DashboardPage() {
   const { userId } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchSessions = useCallback(() => {
     if (!userId) return;
+    setLoading(true);
+    setError(null);
     listSessions(userId)
       .then(setSessions)
-      .catch(() => {})
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load sessions');
+      })
       .finally(() => setLoading(false));
   }, [userId]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   return (
     <div>
@@ -33,6 +42,11 @@ export function DashboardPage() {
       {loading ? (
         <div className={styles.loadingList}>
           <Skeleton variant="card" count={3} />
+        </div>
+      ) : error ? (
+        <div className={styles.errorState}>
+          <p className={styles.errorText}>{error}</p>
+          <Button variant="secondary" onClick={fetchSessions}>Try again</Button>
         </div>
       ) : sessions.length === 0 ? (
         <div className={styles.empty}>

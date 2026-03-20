@@ -51,3 +51,17 @@
   flex-direction: column;
   gap: var(--space-md);
 }
+
+.errorState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-2xl) var(--space-xl);
+  text-align: center;
+}
+
+.errorText {
+  font-size: var(--text-sm);
+  color: var(--cost-negative);
+}
