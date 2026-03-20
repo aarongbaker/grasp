@@ -2,9 +2,8 @@
 core/auth.py
 Authentication dependency for FastAPI routes.
 
-Supports two auth methods (checked in order):
-  1. Authorization: Bearer <jwt> — production method
-  2. X-User-ID: <uuid> — legacy dev method (deprecated, will be removed)
+Supports JWT Bearer token authentication:
+  Authorization: Bearer <jwt>
 
 The dependency injection pattern means NO route changes are needed.
 Every route uses CurrentUser from core/deps.py, which calls get_current_user().
@@ -22,6 +21,8 @@ from core.settings import get_settings
 from db.session import get_session
 from models.user import UserProfile
 
+_AUTH_ERROR = "Missing or invalid authentication token."
+
 
 def _decode_jwt(token: str) -> dict:
     """Decode and validate an access JWT token. Raises HTTPException on failure."""
@@ -33,52 +34,41 @@ def _decode_jwt(token: str) -> dict:
             algorithms=[settings.jwt_algorithm],
         )
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=401, detail=_AUTH_ERROR)
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail=_AUTH_ERROR)
 
     # Reject refresh tokens used as access tokens
     if payload.get("type") == "refresh":
-        raise HTTPException(status_code=401, detail="Invalid token type")
+        raise HTTPException(status_code=401, detail=_AUTH_ERROR)
 
     return payload
 
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_session),
 ) -> UserProfile:
     """
-    Auth dependency. Tries JWT Bearer first, falls back to X-User-ID.
+    Auth dependency. Requires a valid JWT Bearer token.
     Returns the authenticated UserProfile.
     """
     user_id: Optional[uuid.UUID] = None
 
-    # 1. Try JWT Bearer token
+    # Require JWT Bearer token
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
         payload = _decode_jwt(token)
         sub = payload.get("sub")
         if not sub:
-            raise HTTPException(status_code=401, detail="Token missing 'sub' claim")
+            raise HTTPException(status_code=401, detail=_AUTH_ERROR)
         try:
             user_id = uuid.UUID(sub)
         except ValueError:
-            raise HTTPException(status_code=401, detail="Token 'sub' is not a valid UUID")
-
-    # 2. Fall back to legacy X-User-ID header
-    elif x_user_id:
-        try:
-            user_id = uuid.UUID(x_user_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="X-User-ID must be a valid UUID")
+            raise HTTPException(status_code=401, detail=_AUTH_ERROR)
 
     else:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication. Provide Authorization: Bearer <token> or X-User-ID header.",
-        )
+        raise HTTPException(status_code=401, detail=_AUTH_ERROR)
 
     result = await db.exec(select(UserProfile).where(UserProfile.user_id == user_id))
     user = result.first()
