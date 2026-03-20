@@ -193,10 +193,24 @@ Assign exactly one resource per step:
 - The sum of critical-path durations should approximate the recipe's estimated_total_minutes ({raw_recipe.estimated_total_minutes} min).
 
 ## PREP-AHEAD IDENTIFICATION
-- `can_be_done_ahead`: true if the step result can be prepared hours/days in advance.
-- `prep_ahead_window`: e.g. "up to 24 hours", "up to 2 days". Only set if can_be_done_ahead is true.
-- `prep_ahead_notes`: brief instructions for storing/reheating. Only set if can_be_done_ahead is true.
-- Common prep-ahead steps: marinades, doughs, sauces, stocks, chilling/setting steps.
+- `can_be_done_ahead`: true ONLY for steps that REQUIRE or STRONGLY BENEFIT from extended lead time:
+  - Brining (4+ hours immersion)
+  - Marinating (4+ hours to penetrate)
+  - Making stock, broth, or demi-glace
+  - Proofing/fermenting dough
+  - Setting gelatin, custard, or ganache overnight
+  - Curing or dry-aging
+  - Braising that can be done a day ahead and reheated
+- `can_be_done_ahead` is FALSE for quick prep tasks — even if they COULD be done ahead:
+  - Herb rubs, spice mixes, compound butters
+  - Chopping, slicing, dicing vegetables
+  - Mixing dry ingredients
+  - Toasting spices or nuts
+  - Making vinaigrette or simple pan sauces
+  - Blanching vegetables
+  - Tempering chocolate (must be used immediately)
+- `prep_ahead_window`: e.g. "up to 24 hours", "up to 3 days". Only set if can_be_done_ahead is true. Must express hours or days, never minutes.
+- `prep_ahead_notes`: brief storage/reheating instructions. Only set if can_be_done_ahead is true.
 
 ## CHEF'S COOKBOOK CONTEXT
 {rag_text}

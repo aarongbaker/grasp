@@ -82,6 +82,16 @@ def _parse_start_time(
 # ── Deterministic timeline construction ──────────────────────────────────────
 
 
+def _is_meaningful_prep_ahead(step: ScheduledStep) -> bool:
+    """Only classify as prep-ahead if the window is hours or days, not minutes."""
+    if not step.can_be_done_ahead:
+        return False
+    if not step.prep_ahead_window:
+        return False
+    window = step.prep_ahead_window.lower()
+    return "hour" in window or "day" in window or "week" in window
+
+
 def _build_timeline_entry(
     step: ScheduledStep,
     start_time: tuple[int, int] | None = None,
@@ -114,7 +124,7 @@ def _build_timeline_entry(
         duration_max=step.duration_max,
         buffer_minutes=buffer,
         heads_up=heads_up,
-        is_prep_ahead=step.can_be_done_ahead,
+        is_prep_ahead=_is_meaningful_prep_ahead(step),
         prep_ahead_window=step.prep_ahead_window,
     )
 
