@@ -175,46 +175,46 @@ class TestBuildTimelineEntry:
 
 class TestBuildTimeline:
     def test_full_timeline_length(self):
-        """Full 3-recipe merged DAG produces 10 day-of + 2 prep-ahead entries."""
-        day_of, prep_ahead = _build_timeline(MERGED_DAG_FULL)
-        assert len(day_of) == 10
-        assert len(prep_ahead) == 2
+        """Full 3-recipe merged DAG produces 12 entries (10 day-of + 2 prep-ahead, unified)."""
+        timeline = _build_timeline(MERGED_DAG_FULL)
+        assert len(timeline) == 12
+        prep_ahead_count = sum(1 for e in timeline if e.is_prep_ahead)
+        assert prep_ahead_count == 2
 
     def test_two_recipe_timeline_length(self):
-        """2-recipe merged DAG produces 6 day-of + 1 prep-ahead entries."""
-        day_of, prep_ahead = _build_timeline(MERGED_DAG_TWO_RECIPE)
-        assert len(day_of) == 6
-        assert len(prep_ahead) == 1
+        """2-recipe merged DAG produces 7 entries (6 day-of + 1 prep-ahead, unified)."""
+        timeline = _build_timeline(MERGED_DAG_TWO_RECIPE)
+        assert len(timeline) == 7
+        prep_ahead_count = sum(1 for e in timeline if e.is_prep_ahead)
+        assert prep_ahead_count == 1
 
     def test_timeline_ordering_preserved(self):
-        """Timeline entries match MergedDAG step order (by start_at_minute)."""
-        day_of, _ = _build_timeline(MERGED_DAG_FULL)
-        offsets = [e.time_offset_minutes for e in day_of]
+        """Timeline entries are in chronological order (by start_at_minute)."""
+        timeline = _build_timeline(MERGED_DAG_FULL)
+        offsets = [e.time_offset_minutes for e in timeline]
         assert offsets == sorted(offsets)
 
-    def test_prep_ahead_entries_have_prep_label(self):
-        """Prep-ahead entries get label='Prep' instead of T+X."""
-        _, prep_ahead = _build_timeline(MERGED_DAG_FULL)
-        for entry in prep_ahead:
-            assert entry.label == "Prep"
+    def test_prep_ahead_entries_retain_flag(self):
+        """Prep-ahead entries retain is_prep_ahead=True flag (no longer have Prep label)."""
+        timeline = _build_timeline(MERGED_DAG_FULL)
+        prep_entries = [e for e in timeline if e.is_prep_ahead]
+        assert len(prep_entries) == 2
+        for entry in prep_entries:
             assert entry.is_prep_ahead is True
+            # Label is T+{offset}, not "Prep" — prep-ahead entries stay in-line
+            assert entry.label.startswith("T+")
 
     def test_fixture_timeline_matches(self):
         """Our deterministic _build_timeline matches the fixture timeline."""
-        day_of, prep_ahead = _build_timeline(MERGED_DAG_FULL)
+        timeline = _build_timeline(MERGED_DAG_FULL)
         fixture_timeline = NATURAL_LANGUAGE_SCHEDULE_FULL.timeline
-        fixture_prep = NATURAL_LANGUAGE_SCHEDULE_FULL.prep_ahead_entries
 
-        assert len(day_of) == len(fixture_timeline)
-        for built, fixture in zip(day_of, fixture_timeline):
+        assert len(timeline) == len(fixture_timeline)
+        for built, fixture in zip(timeline, fixture_timeline):
             assert built.step_id == fixture.step_id
             assert built.time_offset_minutes == fixture.time_offset_minutes
             assert built.resource == fixture.resource
             assert built.recipe_name == fixture.recipe_name
-
-        assert len(prep_ahead) == len(fixture_prep)
-        for built, fixture in zip(prep_ahead, fixture_prep):
-            assert built.step_id == fixture.step_id
 
 
 # ── Fallback Summary ────────────────────────────────────────────────────────
@@ -345,8 +345,9 @@ class TestScheduleRendererNode:
         assert "errors" not in result
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
-        assert len(schedule.timeline) == 10  # day-of only
-        assert len(schedule.prep_ahead_entries) == 2
+        assert len(schedule.timeline) == 12  # all entries unified (10 day-of + 2 prep-ahead)
+        assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
+        assert sum(1 for e in schedule.timeline if e.is_prep_ahead) == 2
         assert schedule.total_duration_minutes == 195
         assert schedule.active_time_minutes == 282
         assert schedule.summary == "A three-course dinner party menu."
@@ -382,8 +383,8 @@ class TestScheduleRendererNode:
             result = await schedule_renderer_node(state)
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
-        assert len(schedule.timeline) == 6  # day-of only
-        assert len(schedule.prep_ahead_entries) == 1
+        assert len(schedule.timeline) == 7  # all entries unified (6 day-of + 1 prep-ahead)
+        assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
         assert schedule.error_summary == "Chocolate Fondant dropped due to enrichment failure."
 
     @pytest.mark.asyncio
@@ -416,8 +417,8 @@ class TestScheduleRendererNode:
         # Should still have a schedule (with fallback summary)
         assert "schedule" in result
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
-        assert len(schedule.timeline) == 10  # day-of only
-        assert len(schedule.prep_ahead_entries) == 2
+        assert len(schedule.timeline) == 12  # all entries unified
+        assert len(schedule.prep_ahead_entries) == 0
         assert "3 course(s)" in schedule.summary
 
         # Should have a recoverable error

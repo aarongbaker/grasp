@@ -392,25 +392,16 @@ def _make_timeline_entry(step: ScheduledStep) -> TimelineEntry:
     )
 
 
-def _split_timeline(steps: list[ScheduledStep]) -> tuple[list[TimelineEntry], list[TimelineEntry]]:
-    """Split steps into day-of and prep-ahead timelines, matching renderer logic."""
-    day_of = []
-    prep_ahead = []
-    for step in steps:
-        entry = _make_timeline_entry(step)
-        if _is_meaningful_prep_ahead(step):
-            entry.label = "Prep"
-            prep_ahead.append(entry)
-        else:
-            day_of.append(entry)
-    return day_of, prep_ahead
+def _build_unified_timeline(steps: list[ScheduledStep]) -> list[TimelineEntry]:
+    """Build unified timeline matching renderer logic — all steps in a single list."""
+    return [_make_timeline_entry(step) for step in steps]
 
 
-_TIMELINE_FULL, _PREP_AHEAD_FULL = _split_timeline(_SCHEDULED_STEPS_FULL)
+_TIMELINE_FULL = _build_unified_timeline(_SCHEDULED_STEPS_FULL)
 
 NATURAL_LANGUAGE_SCHEDULE_FULL = NaturalLanguageSchedule(
     timeline=_TIMELINE_FULL,
-    prep_ahead_entries=_PREP_AHEAD_FULL,
+    prep_ahead_entries=[],
     total_duration_minutes=195,
     total_duration_minutes_max=210,
     active_time_minutes=282,
@@ -423,11 +414,11 @@ NATURAL_LANGUAGE_SCHEDULE_FULL = NaturalLanguageSchedule(
     ),
 )
 
-_TIMELINE_TWO, _PREP_AHEAD_TWO = _split_timeline(_SCHEDULED_STEPS_TWO)
+_TIMELINE_TWO = _build_unified_timeline(_SCHEDULED_STEPS_TWO)
 
 NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE = NaturalLanguageSchedule(
     timeline=_TIMELINE_TWO,
-    prep_ahead_entries=_PREP_AHEAD_TWO,
+    prep_ahead_entries=[],
     total_duration_minutes=195,
     total_duration_minutes_max=210,
     active_time_minutes=235,
