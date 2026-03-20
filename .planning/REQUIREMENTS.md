@@ -23,6 +23,13 @@
 - [x] **PREP-02**: Renderer applies a time-gate: only steps with `prep_ahead_window` containing "hours" or "days" are marked `is_prep_ahead`; steps with short windows stay day-of
 - [x] **PREP-03**: Test fixtures reflect tightened criteria with correct prep-ahead expectations
 
+### Unified Timeline
+
+- [ ] **UNIFY-01**: All steps (including those with `can_be_done_ahead=true`) render in one chronological list — no separate "Prep Ahead" section
+- [ ] **UNIFY-02**: Steps with `can_be_done_ahead=true` display an inline tag showing their `prep_ahead_window` (e.g. "can be done up to 24 hours ahead")
+- [ ] **UNIFY-03**: Gantt chart renders all steps from the unified timeline, showing gaps between steps and parallel tasks across recipes
+- [ ] **UNIFY-04**: Backend renderer returns a single timeline list (no separate `prep_ahead_entries` split)
+
 ## v2 Requirements
 
 ### Enhancements
@@ -51,10 +58,14 @@
 | PREP-01 | Phase 2 | Complete |
 | PREP-02 | Phase 2 | Complete |
 | PREP-03 | Phase 2 | Complete |
+| UNIFY-01 | Phase 3 | Pending |
+| UNIFY-02 | Phase 3 | Pending |
+| UNIFY-03 | Phase 3 | Pending |
+| UNIFY-04 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 9 total
-- Mapped to phases: 9
+- v1 requirements: 13 total
+- Mapped to phases: 13
 - Unmapped: 0 ✓
 
 ---

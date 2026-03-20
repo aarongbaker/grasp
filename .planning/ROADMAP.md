@@ -14,6 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Gantt Fix** - Fix bar sizing, positioning, missing bars, and switch x-axis to absolute clock times
 - [x] **Phase 2: Prep-Ahead Fix** - Tighten prep-ahead classification so only long-lead tasks are separated from day-of (completed 2026-03-20)
+- [ ] **Phase 3: Unified Timeline** - Merge prep-ahead into day-of timeline with inline tags; Gantt shows all steps
 
 ## Phase Details
 
@@ -49,9 +50,22 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2
+Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gantt Fix | 2/2 | Complete   | 2026-03-19 |
 | 2. Prep-Ahead Fix | 1/1 | Complete   | 2026-03-20 |
+| 3. Unified Timeline | 0 | Not started | — |
+
+### Phase 3: Unified Timeline
+**Goal**: All cooking steps appear in a single timeline — no separate prep-ahead section. Steps that can be done ahead get an inline tag. The Gantt chart shows every step with accurate timing, gaps, and parallel tasks visible.
+**Depends on**: Phase 2
+**Requirements**: UNIFY-01, UNIFY-02, UNIFY-03, UNIFY-04
+**Success Criteria** (what must be TRUE):
+  1. No separate "Prep Ahead" section — all steps render in one chronological list
+  2. Steps with `can_be_done_ahead=true` show an inline tag with their prep_ahead_window
+  3. The Gantt chart renders ALL steps (not just day-of), showing gaps and parallel tasks
+  4. The renderer returns a single unified timeline (no split into prep_ahead_entries)
+**Plans:** 0
+**Status:** Not started
