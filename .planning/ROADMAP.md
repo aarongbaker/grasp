@@ -1,8 +1,8 @@
-# Roadmap: GRASP — Gantt Chart Fix
+# Roadmap: GRASP — Schedule UI & Pipeline Fixes
 
 ## Overview
 
-Two-phase fix for the `CookingGantt` component. Phase 1 corrects the chart itself — bars must render with accurate sizing, positioning, and an absolute clock-time x-axis. Phase 2 adds the companion step table that surfaces the same data in tabular form alongside the chart.
+Fix the schedule visualization and data pipeline. Phase 1 fixed the Gantt chart rendering. Phase 2 tightens prep-ahead classification so only long-lead tasks (brining, marinating, stock-making) are separated from the day-of timeline.
 
 ## Phases
 
@@ -13,7 +13,7 @@ Two-phase fix for the `CookingGantt` component. Phase 1 corrects the chart itsel
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Gantt Fix** - Fix bar sizing, positioning, missing bars, and switch x-axis to absolute clock times
-- [x] **Phase 2: Step Table** - Add companion table showing step name, start time, end time, and duration per step
+- [ ] **Phase 2: Prep-Ahead Fix** - Tighten prep-ahead classification so only long-lead tasks are separated from day-of
 
 ## Phase Details
 
@@ -33,19 +33,18 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Fix data pipeline and bar rendering (GANTT-01 through GANTT-04)
 - [x] 01-02-PLAN.md — Add clock-time x-axis with dynamic intervals and horizontal scroll (TIME-01, TIME-02)
-**Notes:** Phase evolved significantly during execution. Beyond the original plans, the Gantt was redesigned with merged activity bars, step numbering, no-scroll fit, and the Day-of Recipe Steps section was overhauled with recipe-colored borders and step numbers — effectively delivering Phase 2's goals.
+**Notes:** Phase evolved significantly during execution. Beyond the original plans, the Gantt was redesigned with merged activity bars, step numbering, no-scroll fit, and the Day-of Recipe Steps section was overhauled with recipe-colored borders and step numbers.
 
-### Phase 2: Step Table
-**Goal**: A companion step table alongside the chart gives the cook a scannable, structured view of the same schedule data
+### Phase 2: Prep-Ahead Fix
+**Goal**: Only long-lead tasks (brining, marinating, stock-making, dough proofing, curing) are classified as prep-ahead; quick prep tasks stay in the day-of timeline
 **Depends on**: Phase 1
-**Requirements**: TABLE-01, TABLE-02
+**Requirements**: PREP-01, PREP-02, PREP-03
 **Success Criteria** (what must be TRUE):
-  1. A table appears alongside the Gantt chart listing each step with its name, start time, end time, and duration
-  2. Table rows are grouped or color-coded by recipe, matching the lane colors in the chart above
-**Plans**: Skipped — delivered by Phase 1
-**Status:** Complete (subsumed by Phase 1)
-**Completed:** 2026-03-19
-**Notes:** The "Day-of Recipe Steps" section built during Phase 1 serves this purpose: steps are listed with numbered prefixes, recipe-colored left borders matching the Gantt lanes, action text, and durations.
+  1. The enricher prompt restricts `can_be_done_ahead=true` to steps requiring extended lead time (hours/days), not quick prep tasks
+  2. The renderer applies a time-gate so only steps with meaningful prep-ahead windows (hours/days) are marked `is_prep_ahead`
+  3. Test fixtures and expectations reflect the tightened criteria
+**Plans:** 0
+**Status:** Not started
 
 ## Progress
 
@@ -55,4 +54,4 @@ Phases execute in numeric order: 1 → 2
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gantt Fix | 2/2 | Complete   | 2026-03-19 |
-| 2. Step Table | N/A | Complete (subsumed) | 2026-03-19 |
+| 2. Prep-Ahead Fix | 0 | Not started | — |
