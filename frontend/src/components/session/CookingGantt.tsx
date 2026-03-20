@@ -35,7 +35,7 @@ export const LANE_COLORS = [
   '#5c8a6a',
 ];
 
-const MERGE_GAP_MINUTES = 5; // merge tasks within this gap into activity blocks
+const MERGE_GAP_MINUTES = -1; // each step gets its own bar — no merging
 const PX_PER_MINUTE = 4; // pixels per minute for scroll width calculation
 
 function formatOffset(minutes: number): string {
