@@ -107,7 +107,24 @@ async def get_profile(user_id: uuid.UUID, db: DBSession, current_user: CurrentUs
     return data
 
 
-@router.get("/{user_id}/sessions")
+class SessionListItem(BaseModel):
+    """Lightweight response for the session list — excludes heavy result columns."""
+    model_config = {"from_attributes": True}
+
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    status: str
+    concept_json: dict
+    schedule_summary: str | None = None
+    total_duration_minutes: int | None = None
+    error_summary: str | None = None
+    celery_task_id: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+@router.get("/{user_id}/sessions", response_model=list[SessionListItem])
 async def list_sessions(user_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     if current_user.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
