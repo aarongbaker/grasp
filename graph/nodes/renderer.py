@@ -132,27 +132,22 @@ def _build_timeline_entry(
 def _build_timeline(
     merged_dag: MergedDAG,
     serving_time: str | None = None,
-) -> tuple[list[TimelineEntry], list[TimelineEntry]]:
-    """Build a split timeline from a MergedDAG. Deterministic ordering.
+) -> list[TimelineEntry]:
+    """Build a unified timeline from a MergedDAG. Deterministic ordering.
 
-    Returns ``(day_of, prep_ahead)`` — prep-ahead entries are given
-    ``label="Prep"`` and are separated from the day-of schedule.
-    Only steps passing the time-gate (hours/days window) enter prep_ahead.
+    Returns a single sorted list of all TimelineEntry objects.
+    Steps with ``is_prep_ahead=True`` retain the flag for data integrity but
+    are no longer separated — all entries appear in chronological order.
     """
     start_time = None
     if serving_time:
         start_time = _parse_start_time(serving_time, merged_dag.total_duration_minutes)
 
-    day_of: list[TimelineEntry] = []
-    prep_ahead: list[TimelineEntry] = []
+    entries: list[TimelineEntry] = []
     for step in merged_dag.scheduled_steps:
         entry = _build_timeline_entry(step, start_time)
-        if entry.is_prep_ahead:
-            entry.label = "Prep"
-            prep_ahead.append(entry)
-        else:
-            day_of.append(entry)
-    return day_of, prep_ahead
+        entries.append(entry)
+    return entries
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
@@ -167,8 +162,8 @@ def _format_schedule_for_prompt(merged_dag: MergedDAG) -> str:
             f"  T+{step.start_at_minute}: {step.recipe_name} — "
             f"{step.description} ({resource_label}, {step.duration_minutes} min)"
         )
-        if step.can_be_done_ahead:
-            line += f" [prep-ahead: {step.prep_ahead_window}]"
+        if step.can_be_done_ahead and step.prep_ahead_window:
+            line += f" [can do ahead: {step.prep_ahead_window}]"
         lines.append(line)
     return "\n".join(lines)
 
@@ -324,9 +319,9 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
     concept_dict = state.get("concept", {})
     serving_time = concept_dict.get("serving_time")
 
-    # Deterministic timeline construction — split day-of from prep-ahead
-    timeline, prep_ahead = _build_timeline(merged_dag, serving_time)
-    total_entries = len(timeline) + len(prep_ahead)
+    # Deterministic timeline construction — single unified list
+    timeline = _build_timeline(merged_dag, serving_time)
+    total_entries = len(timeline)
 
     # LLM summary generation (with fallback)
     try:
@@ -356,9 +351,9 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
         usage = extract_token_usage(result, "schedule_renderer")
 
         logger.info(
-            "Rendered schedule: %d day-of + %d prep-ahead entries, %d min total",
+            "Rendered schedule: %d entries (%d prep-ahead), %d min total",
             len(timeline),
-            len(prep_ahead),
+            sum(1 for e in timeline if e.is_prep_ahead),
             merged_dag.total_duration_minutes,
         )
 
@@ -379,7 +374,7 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
 
         schedule = NaturalLanguageSchedule(
             timeline=timeline,
-            prep_ahead_entries=prep_ahead,
+            prep_ahead_entries=[],
             total_duration_minutes=merged_dag.total_duration_minutes,
             total_duration_minutes_max=merged_dag.total_duration_minutes_max,
             active_time_minutes=merged_dag.active_time_minutes,
@@ -393,7 +388,7 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
 
     schedule = NaturalLanguageSchedule(
         timeline=timeline,
-        prep_ahead_entries=prep_ahead,
+        prep_ahead_entries=[],
         total_duration_minutes=merged_dag.total_duration_minutes,
         active_time_minutes=merged_dag.active_time_minutes,
         summary=summary,
