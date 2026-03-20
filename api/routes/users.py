@@ -1,10 +1,13 @@
 """api/routes/users.py — User profile CRUD"""
 
+import logging
 import uuid
 from datetime import datetime
 
 import bcrypt
 from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
@@ -130,8 +133,14 @@ async def list_sessions(user_id: uuid.UUID, db: DBSession, current_user: Current
         raise HTTPException(status_code=403, detail="Access denied")
     from models.session import Session
 
-    result = await db.exec(select(Session).where(Session.user_id == user_id).order_by(Session.created_at.desc()))
-    return result.all()
+    try:
+        result = await db.exec(select(Session).where(Session.user_id == user_id).order_by(Session.created_at.desc()))
+        sessions = result.all()
+        logger.info("list_sessions: found %d sessions for user %s", len(sessions), user_id)
+        return sessions
+    except Exception:
+        logger.exception("list_sessions failed for user %s", user_id)
+        raise
 
 
 @router.patch("/{user_id}/kitchen")

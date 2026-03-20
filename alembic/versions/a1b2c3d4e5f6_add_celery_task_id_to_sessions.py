@@ -22,7 +22,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("sessions", sa.Column("celery_task_id", sa.String(), nullable=True))
-    op.execute("ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'cancelled'")
+    op.execute("ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'CANCELLED'")
 
 
 def downgrade() -> None:
