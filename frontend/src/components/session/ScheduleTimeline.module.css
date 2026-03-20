@@ -165,6 +165,19 @@
   color: var(--text-secondary);
 }
 
+/* Inline prep-ahead tag shown in TimelineRow for steps with prep_ahead_window */
+.prepAheadTag {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--accent-cool);
+  background: rgba(106, 143, 163, 0.10);
+  border: 1px solid rgba(106, 143, 163, 0.20);
+  padding: 1px var(--space-sm);
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+}
+
 /* Day-of Recipe Steps */
 .timelineRow {
   display: grid;

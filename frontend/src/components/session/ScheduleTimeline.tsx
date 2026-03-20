@@ -10,13 +10,6 @@ const RESOURCE_BADGE: Record<Resource, string> = {
   passive: styles.resourcePassive,
 };
 
-const CONNECTOR_DOT: Record<Resource, string> = {
-  hands: styles.connectorDotHands,
-  stovetop: styles.connectorDotStovetop,
-  oven: styles.connectorDotOven,
-  passive: styles.connectorDotPassive,
-};
-
 function formatDuration(min: number, max: number | null): string {
   if (max && max !== min) return `${min}–${max} min`;
   return `${min} min`;
@@ -35,27 +28,6 @@ function HeadsUpCallout({ text }: { text: string }) {
     <div className={styles.headsUp}>
       <AlertTriangleIcon size={14} className={styles.headsUpIcon} />
       <span className={styles.headsUpText}>{text}</span>
-    </div>
-  );
-}
-
-function PrepItem({ entry }: { entry: TimelineEntry }) {
-  return (
-    <div className={styles.prepItem}>
-      {entry.prep_ahead_window && (
-        <span className={styles.prepWindow}>{entry.prep_ahead_window}</span>
-      )}
-      <div className={styles.prepRecipeName}>{entry.recipe_name}</div>
-      <p className={styles.prepAction}>{entry.action}</p>
-      <div className={styles.inlineMeta}>
-        <span className={`${styles.resourceBadge} ${RESOURCE_BADGE[entry.resource]}`}>
-          {RESOURCE_LABELS[entry.resource]}
-        </span>
-        <span className={styles.durationText}>
-          <ClockIcon size={12} />
-          {formatDuration(entry.duration_minutes, entry.duration_max)}
-        </span>
-      </div>
     </div>
   );
 }
@@ -81,6 +53,11 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
             <ClockIcon size={12} />
             {formatDuration(entry.duration_minutes, entry.duration_max)}
           </span>
+          {entry.prep_ahead_window && (
+            <span className={styles.prepAheadTag} title="This step can be done ahead of time">
+              up to {entry.prep_ahead_window}
+            </span>
+          )}
         </div>
         {entry.heads_up && <HeadsUpCallout text={entry.heads_up} />}
       </div>
@@ -89,12 +66,17 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
 }
 
 export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedule }) {
-  const prepAhead = schedule.prep_ahead_entries?.length
-    ? schedule.prep_ahead_entries
-    : schedule.timeline.filter((e) => e.is_prep_ahead);
-  const mainTimeline = schedule.prep_ahead_entries?.length
-    ? schedule.timeline
-    : schedule.timeline.filter((e) => !e.is_prep_ahead);
+  // Combine timeline with any legacy prep_ahead_entries (backwards compat with old session data)
+  const allEntries = (() => {
+    const legacyPrepAhead = schedule.prep_ahead_entries ?? [];
+    if (legacyPrepAhead.length > 0) {
+      // Old session data: timeline contains day-of only, prep_ahead_entries are separate
+      const merged = [...schedule.timeline, ...legacyPrepAhead];
+      return merged.sort((a, b) => a.time_offset_minutes - b.time_offset_minutes);
+    }
+    // New data: timeline already contains everything
+    return schedule.timeline;
+  })();
 
   return (
     <div className={styles.timeline}>
@@ -114,42 +96,30 @@ export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedu
         </div>
       </div>
 
-      {/* Cooking Gantt chart */}
-      <CookingGantt timeline={schedule.timeline.filter((e) => !e.is_prep_ahead)} totalDurationMinutes={schedule.total_duration_minutes} />
+      {/* Cooking Gantt chart — receives the full timeline */}
+      <CookingGantt timeline={allEntries} totalDurationMinutes={schedule.total_duration_minutes} />
 
-      {/* Prep Ahead */}
-      {prepAhead.length > 0 && (
-        <section className={styles.section} aria-label="Prep ahead tasks">
-          <h3 className={styles.sectionTitle}>Prep Ahead</h3>
-          <div className={styles.prepAheadList}>
-            {prepAhead.map((entry) => (
-              <PrepItem key={entry.step_id} entry={entry} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Day-Of Recipe Steps */}
-      <section aria-label="Day-of recipe steps">
-        <h3 className={styles.sectionTitle}>Day-of Recipe Steps</h3>
+      {/* Recipe Steps — single unified section */}
+      <section aria-label="Recipe steps">
+        <h3 className={styles.sectionTitle}>Recipe Steps</h3>
         <div>
           {(() => {
             // Build recipe→color map matching the Gantt chart order
             const colorMap = new Map<string, string>();
-            for (const entry of mainTimeline) {
+            for (const entry of allEntries) {
               if (!colorMap.has(entry.recipe_name)) {
                 colorMap.set(entry.recipe_name, LANE_COLORS[colorMap.size % LANE_COLORS.length]);
               }
             }
             const counters = new Map<string, number>();
-            return mainTimeline.map((entry, i) => {
+            return allEntries.map((entry, i) => {
               const count = (counters.get(entry.recipe_name) ?? 0) + 1;
               counters.set(entry.recipe_name, count);
               return (
                 <TimelineRow
                   key={entry.step_id}
                   entry={entry}
-                  isLast={i === mainTimeline.length - 1}
+                  isLast={i === allEntries.length - 1}
                   stepNum={count}
                   stepColor={colorMap.get(entry.recipe_name)}
                 />

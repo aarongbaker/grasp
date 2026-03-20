@@ -131,34 +131,28 @@ function buildSegment(tasks: TimelineEntry[], stepNumberMap: Map<string, number>
 }
 
 export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttProps) {
-  // Defensive filter: exclude any prep-ahead entries that slip through
-  const dayOfTimeline = useMemo(
-    () => timeline.filter((e) => !e.is_prep_ahead),
-    [timeline],
-  );
-
-  // Compute the visible window: from earliest day-of step to end of schedule
+  // Compute the visible window: from earliest step to end of schedule
   const windowStart = useMemo(() => {
-    if (dayOfTimeline.length === 0) return 0;
-    return Math.min(...dayOfTimeline.map((e) => e.time_offset_minutes));
-  }, [dayOfTimeline]);
+    if (timeline.length === 0) return 0;
+    return Math.min(...timeline.map((e) => e.time_offset_minutes));
+  }, [timeline]);
 
   const windowDuration = totalDurationMinutes - windowStart;
 
   // Build a stable recipe→color mapping
   const recipeColorMap = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const entry of dayOfTimeline) {
+    for (const entry of timeline) {
       if (!seen.has(entry.recipe_name)) {
         seen.set(entry.recipe_name, LANE_COLORS[seen.size % LANE_COLORS.length]);
       }
     }
     return seen;
-  }, [dayOfTimeline]);
+  }, [timeline]);
 
   const lanes = useMemo(() => {
     const map = new Map<string, TimelineEntry[]>();
-    for (const entry of dayOfTimeline) {
+    for (const entry of timeline) {
       const existing = map.get(entry.recipe_name);
       if (existing) existing.push(entry);
       else map.set(entry.recipe_name, [entry]);
@@ -168,7 +162,7 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
       result.push({ recipe, tasks });
     }
     return result;
-  }, [dayOfTimeline]);
+  }, [timeline]);
 
   const timeMarkers = useMemo(() => {
     const interval = windowDuration <= 90 ? 15 : windowDuration <= 240 ? 30 : 60;
@@ -217,13 +211,13 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
   const stepNumbers = useMemo(() => {
     const map = new Map<string, number>();
     const counters = new Map<string, number>();
-    for (const entry of dayOfTimeline.slice().sort((a, b) => a.time_offset_minutes - b.time_offset_minutes)) {
+    for (const entry of timeline.slice().sort((a, b) => a.time_offset_minutes - b.time_offset_minutes)) {
       const count = (counters.get(entry.recipe_name) ?? 0) + 1;
       counters.set(entry.recipe_name, count);
       map.set(entry.step_id, count);
     }
     return map;
-  }, [dayOfTimeline]);
+  }, [timeline]);
 
   if (lanes.length === 0) return null;
 
