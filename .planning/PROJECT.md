@@ -41,6 +41,12 @@ The cook can see at a glance what to do and when — every step visible, accurat
 
 (Defined in REQUIREMENTS.md)
 
+### Recently Validated (v1.1)
+
+- ✓ Auth bypass removed, JWT-only endpoints, CORS lockdown — Phase 4
+- ✓ Docker image builds on linux/amd64, dual-mode API + Celery — Phase 5
+- ✓ .env.example documents all required environment variables — Phase 5
+
 ### Out of Scope
 
 - Drag-to-reschedule — visualization only, not a scheduling editor
@@ -77,4 +83,4 @@ JWT auth with 60-minute access tokens and refresh rotation.
 | Free-tier hosting | Budget constraint, sufficient for 2-5 users | — Pending |
 
 ---
-*Last updated: 2026-03-19 after v1.1 milestone start*
+*Last updated: 2026-03-21 after Phase 5 (Containerization) complete*
