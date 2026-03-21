@@ -53,7 +53,9 @@ Plans:
   1. `docker build` succeeds on linux/amd64 from a clean checkout using the multi-stage Dockerfile
   2. The same image starts as the API (`uvicorn`) and as the Celery worker (different start command) without modification
   3. `.env.example` documents every required environment variable so any new developer can configure the app from scratch
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 05-01-PLAN.md — Dockerfile dual-mode verification and .env.example completeness
 
 ### Phase 6: Infrastructure Provisioning
 **Goal**: All cloud services exist and are configured — Railway project running with Postgres (pgvector enabled), Redis, and all secrets loaded
@@ -85,6 +87,6 @@ Plans:
 | 2. Prep-Ahead Fix | v1.0 | 1/1 | Complete | 2026-03-20 |
 | 3. Unified Timeline | v1.0 | 1/1 | Complete | 2026-03-20 |
 | 4. Security & Pre-Deploy Hardening | v1.1 | 2/3 | Gap closure | - |
-| 5. Containerization | v1.1 | 0/? | Not started | - |
+| 5. Containerization | v1.1 | 0/1 | Planned | - |
 | 6. Infrastructure Provisioning | v1.1 | 0/? | Not started | - |
 | 7. Deploy & End-to-End Validation | v1.1 | 0/? | Not started | - |
