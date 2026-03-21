@@ -15,16 +15,16 @@ Requirements for production deployment. Each maps to roadmap phases.
 
 ### Containerization
 
-- [ ] **CONT-01**: Single multi-stage Dockerfile builds API and worker from one image
+- [x] **CONT-01**: Single multi-stage Dockerfile builds API and worker from one image
 - [x] **CONT-02**: Production requirements file excludes macOS-only packages (pyobjc-*)
 - [x] **CONT-03**: `.dockerignore` excludes node_modules, .venv, .git, .planning
-- [ ] **CONT-04**: Image builds and runs successfully on linux/amd64
+- [x] **CONT-04**: Image builds and runs successfully on linux/amd64
 
 ### Infrastructure
 
 - [ ] **INFRA-01**: Railway project provisioned with Postgres (pgvector enabled) and Redis
 - [ ] **INFRA-02**: All secrets (JWT_SECRET_KEY, DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, PINECONE_API_KEY, REDIS_URL) configured as Railway env vars
-- [ ] **INFRA-03**: `.env.example` documents all required environment variables
+- [x] **INFRA-03**: `.env.example` documents all required environment variables
 
 ### Backend
 
@@ -77,9 +77,9 @@ Which phases cover which requirements.
 | CONT-03 | Phase 4 | Complete |
 | OCR-01 | Phase 4 | Complete |
 | OCR-02 | Phase 4 | Complete |
-| CONT-01 | Phase 5 | Pending |
-| CONT-04 | Phase 5 | Pending |
-| INFRA-03 | Phase 5 | Pending |
+| CONT-01 | Phase 5 | Complete |
+| CONT-04 | Phase 5 | Complete |
+| INFRA-03 | Phase 5 | Complete |
 | INFRA-01 | Phase 6 | Pending |
 | INFRA-02 | Phase 6 | Pending |
 | BACK-01 | Phase 7 | Pending |

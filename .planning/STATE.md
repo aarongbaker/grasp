@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Deploy to Production
 status: unknown
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-21T20:32:45.678Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-21T20:39:09.731Z"
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 2
+  total_plans: 4
+  completed_plans: 4
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** The cook can see at a glance what to do and when — every step visible, accurately timed, in one unified view.
-**Current focus:** Phase 04 — security-pre-deploy-hardening
+**Current focus:** Phase 05 — containerization
 
 ## Current Position
 
-Phase: 04 (security-pre-deploy-hardening) — EXECUTING
-Plan: 1 of 3
+Phase: 05 (containerization) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Plan: 1 of 3
 **Recent Trend:** Stable ~45 min/plan
 | Phase 04-security-pre-deploy-hardening P02 | 2 | 2 tasks | 3 files |
 | Phase 04 P01 | 2 | 3 tasks | 4 files |
+| Phase 05 P01 | 1m 38s | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -58,6 +59,8 @@ Plan: 1 of 3
 - [Phase 04-security-pre-deploy-hardening]: requirements-prod.txt as standalone production manifest without pyobjc/dev packages, includes pytesseract==0.3.10
 - [Phase 04]: Generic 401 message extracted to _AUTH_ERROR constant — all error paths return identical text, preventing info leakage and accidental divergence
 - [Phase 04]: CORS check uses set subset comparison (<=) to catch partial dev-origin sets, not just exact match
+- [Phase 05]: Celery module path must be workers.celery_app (not celery_app) because WORKDIR=/app and file is at workers/celery_app.py
+- [Phase 05]: TEST_* env vars moved to commented-out Test-Only section in .env.example so deployers skip them by default
 
 ### Pending Todos
 
@@ -71,6 +74,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-21T20:32:45.676Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-containerization/05-CONTEXT.md
+Last session: 2026-03-21T20:39:09.729Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
