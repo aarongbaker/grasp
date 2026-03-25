@@ -117,6 +117,10 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
     import uuid as uuid_lib
     from datetime import datetime, timezone
 
+    # Import all related SQLModel tables so foreign keys resolve in the worker
+    import app.models.ingestion  # noqa: F401
+    import app.models.user  # noqa: F401
+
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
 
