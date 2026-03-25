@@ -24,7 +24,6 @@ from sqlalchemy import JSON, String
 from sqlmodel import Column, Field, SQLModel
 
 from app.models.enums import ChunkType, DocumentType, IngestionStatus
-from app.models.user import UserProfile
 
 
 class BookRecord(SQLModel, table=True):
@@ -76,10 +75,9 @@ class CookbookChunk(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def to_pinecone_metadata(self) -> dict:
-        """Metadata envelope for Pinecone upsert. user_id enables per-chef isolation."""
+        """Metadata envelope for Pinecone upsert. Stable owner key is attached by the embedder."""
         return {
             "user_id": str(self.user_id),
-            "rag_owner_key": UserProfile.build_rag_owner_key(self.user.email if self.user else str(self.user_id)),
             "book_id": str(self.book_id),
             "chunk_id": str(self.chunk_id),
             "chunk_type": self.chunk_type.value,
