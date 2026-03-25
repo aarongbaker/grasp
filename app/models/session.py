@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, String
 from sqlmodel import Column, Field, SQLModel
 
 from app.models.enums import SessionStatus
@@ -31,7 +31,7 @@ class Session(SQLModel, table=True):
 
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
-    status: SessionStatus = Field(default=SessionStatus.PENDING, index=True)
+    status: SessionStatus = Field(default=SessionStatus.PENDING, sa_column=Column(String, nullable=False, index=True))
 
     # DinnerConcept stored as JSON — pure Pydantic, not a separate table
     concept_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
