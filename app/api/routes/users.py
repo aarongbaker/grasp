@@ -7,6 +7,7 @@ from datetime import datetime
 import bcrypt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
@@ -62,8 +63,10 @@ class EquipmentRequest(BaseModel):
 
 @router.post("", status_code=201, response_model=UserResponse)
 async def create_user(body: CreateUserRequest, db: DBSession):
+    email = body.email.strip().lower()
+
     # Check for duplicate email before attempting insert
-    existing = await db.exec(select(UserProfile).where(UserProfile.email == body.email))
+    existing = await db.exec(select(UserProfile).where(UserProfile.email == email))
     if existing.first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
@@ -76,14 +79,21 @@ async def create_user(body: CreateUserRequest, db: DBSession):
     await db.flush()
 
     user = UserProfile(
-        name=body.name,
-        email=body.email,
+        name=body.name.strip(),
+        email=email,
+        rag_owner_key=UserProfile.build_rag_owner_key(email),
         password_hash=_hash_password(body.password),
         kitchen_config_id=kitchen.kitchen_config_id,
         dietary_defaults=body.dietary_defaults,
     )
     db.add(user)
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
     await db.refresh(user)
     return user
 
