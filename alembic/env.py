@@ -12,9 +12,9 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 # Import all table models to register them with SQLModel.metadata
-import models.ingestion  # noqa: F401
-import models.session  # noqa: F401
-import models.user  # noqa: F401
+import app.models.ingestion  # noqa: F401
+import app.models.session  # noqa: F401
+import app.models.user  # noqa: F401
 from alembic import context
 
 # Alembic Config object
@@ -29,7 +29,7 @@ if config.config_file_name is not None:
 # alembic.ini intentionally carries a localhost dev fallback, but production
 # deploys must not use it. Read the async SQLAlchemy URL from settings and
 # convert it to a sync psycopg URL for Alembic.
-from core.settings import get_settings
+from app.core.settings import get_settings
 
 settings = get_settings()
 # Alembic needs a sync driver — use psycopg3 (already installed)

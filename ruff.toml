@@ -1,5 +1,6 @@
 target-version = "py312"
 line-length = 120
+src = [".", "app"]
 
 [lint]
 select = ["E", "F", "W", "I"]
@@ -11,10 +12,9 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"main.py" = ["E402"]              # routers imported after app creation
-"streamlit_app.py" = ["E402"]     # dotenv loaded before imports
-"models/pipeline.py" = ["E402"]   # TypedDict section after Pydantic models
+"app/main.py" = ["E402"]              # routers imported after app creation
+"app/models/pipeline.py" = ["E402"]   # TypedDict section after Pydantic models
 "alembic/versions/*.py" = ["W291", "I001"]  # auto-generated migration files
 
 [lint.isort]
-known-first-party = ["api", "core", "db", "graph", "models", "workers", "tests"]
+known-first-party = ["app", "tests"]
