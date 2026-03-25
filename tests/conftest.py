@@ -211,10 +211,10 @@ async def compiled_graph(test_checkpointer):
 
     # ── Build graph with all mocks active ────────────────────────────────────
     with (
-        patch("graph.nodes.generator._create_llm", return_value=gen_mock_llm),
-        patch("graph.nodes.enricher._create_llm", return_value=enricher_mock_llm),
-        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
-        patch("graph.nodes.renderer._create_llm", return_value=renderer_mock_llm),
+        patch("app.graph.nodes.generator._create_llm", return_value=gen_mock_llm),
+        patch("app.graph.nodes.enricher._create_llm", return_value=enricher_mock_llm),
+        patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+        patch("app.graph.nodes.renderer._create_llm", return_value=renderer_mock_llm),
     ):
         from app.graph.graph import build_grasp_graph
 
@@ -255,9 +255,9 @@ async def test_db_engine():
     engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
     # Import all SQLModel table models to register metadata
-    import models.ingestion  # noqa: F401
-    import models.session  # noqa: F401
-    import models.user  # noqa: F401
+    import app.models.ingestion  # noqa: F401
+    import app.models.session  # noqa: F401
+    import app.models.user  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)

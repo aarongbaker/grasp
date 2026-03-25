@@ -62,6 +62,7 @@ from tests.fixtures.recipes import (
     SR_STEP_4,
 )
 
+
 def _is_meaningful_prep_ahead(step: ScheduledStep) -> bool:
     """Mirror renderer time-gate: prep-ahead only when window contains 'hour', 'day', or 'week'."""
     if not step.can_be_done_ahead:

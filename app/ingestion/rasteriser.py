@@ -88,9 +88,10 @@ def _ocr_page_tesseract(image_bytes: bytes) -> tuple[str, float]:
     on clean cookbook scans (between Vision's ~0.95 and pymupdf's 0.7).
     """
     try:
+        import io
+
         import pytesseract
         from PIL import Image
-        import io
 
         image = Image.open(io.BytesIO(image_bytes))
         text = pytesseract.image_to_string(image, lang="eng")

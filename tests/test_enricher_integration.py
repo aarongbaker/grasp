@@ -164,8 +164,8 @@ async def test_enricher_per_recipe_error_keeps_survivors():
     }
 
     with (
-        patch("graph.nodes.enricher._create_llm", return_value=mock_llm),
-        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+        patch("app.graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]),
     ):
         result = await rag_enricher_node(state)
 
@@ -193,8 +193,8 @@ async def test_enricher_all_fail_is_fatal():
     }
 
     with (
-        patch("graph.nodes.enricher._create_llm", return_value=mock_llm),
-        patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
+        patch("app.graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]),
     ):
         result = await rag_enricher_node(state)
 
@@ -226,7 +226,7 @@ async def test_enricher_node_produces_valid_enriched_recipes(sample_state):
     if not os.environ.get("ANTHROPIC_API_KEY"):
         pytest.skip(SKIP_REASON)
 
-    with patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+    with patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]):
         result = await rag_enricher_node(sample_state)
 
     # Should not have errors

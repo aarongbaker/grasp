@@ -128,6 +128,7 @@ async def test_jwt_user_not_found_returns_404():
 async def test_jwt_bearer_auth_generic_error_message():
     """All auth failures return the same generic message to prevent info leakage."""
     from fastapi import HTTPException
+
     from app.core.auth import get_current_user
 
     generic_msg = "Missing or invalid authentication token."

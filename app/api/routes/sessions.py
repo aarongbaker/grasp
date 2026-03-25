@@ -12,10 +12,9 @@ by status_projection(). This is the V1.6 single-source-of-truth contract.
 
 import uuid
 from datetime import datetime, timezone
-
-from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address

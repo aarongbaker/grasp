@@ -153,8 +153,10 @@ async def test_auth_invalid_token_returns_401():
 @pytest.mark.asyncio
 async def test_auth_valid_token_unknown_user_returns_404():
     """Valid JWT for nonexistent user should return 404."""
+    from datetime import timedelta
+
     import jwt as pyjwt
-    from datetime import datetime, timedelta, timezone
+
     from app.core.settings import get_settings
     from app.db.session import get_session
 
@@ -325,7 +327,7 @@ async def test_run_pipeline_202_enqueues(app_with_overrides, mock_db, test_user)
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Patch at workers.tasks — the route imports from there at call time
-        with patch("workers.tasks.run_grasp_pipeline") as mock_task:
+        with patch("app.workers.tasks.run_grasp_pipeline") as mock_task:
             mock_task.delay = MagicMock()
             resp = await ac.post(f"/api/v1/sessions/{session_id}/run")
 
@@ -357,7 +359,7 @@ async def test_upload_pdf_returns_202(app_with_overrides):
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Patch at workers.tasks — the route imports from there at call time
-        with patch("workers.tasks.ingest_cookbook") as mock_task:
+        with patch("app.workers.tasks.ingest_cookbook") as mock_task:
             mock_task.delay = MagicMock()
             resp = await ac.post(
                 "/api/v1/ingest",

@@ -6,14 +6,14 @@ from datetime import datetime
 
 import bcrypt
 from fastapi import APIRouter, HTTPException
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
 from app.models.enums import EquipmentCategory
 from app.models.user import Equipment, KitchenConfig, UserProfile
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users")
 

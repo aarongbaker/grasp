@@ -54,7 +54,7 @@ async def test_run1_happy_path_complete(
     Full pipeline: all 6 mock nodes succeed.
     Expected outcome: COMPLETE, 3 recipes scheduled, no errors.
     """
-    import models.session as session_model
+    import app.models.session as session_model
     from app.core.status import finalise_session
     from app.models.enums import SessionStatus
     from app.models.session import Session

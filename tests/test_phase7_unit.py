@@ -338,7 +338,7 @@ class TestScheduleRendererNode:
             merged_dag=MERGED_DAG_FULL.model_dump(),
         )
 
-        with patch("graph.nodes.renderer._create_llm", return_value=mock_llm):
+        with patch("app.graph.nodes.renderer._create_llm", return_value=mock_llm):
             result = await schedule_renderer_node(state)
 
         assert "schedule" in result
@@ -379,7 +379,7 @@ class TestScheduleRendererNode:
             errors=errors,
         )
 
-        with patch("graph.nodes.renderer._create_llm", return_value=mock_llm):
+        with patch("app.graph.nodes.renderer._create_llm", return_value=mock_llm):
             result = await schedule_renderer_node(state)
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
@@ -411,7 +411,7 @@ class TestScheduleRendererNode:
             merged_dag=MERGED_DAG_FULL.model_dump(),
         )
 
-        with patch("graph.nodes.renderer._create_llm", return_value=mock_llm):
+        with patch("app.graph.nodes.renderer._create_llm", return_value=mock_llm):
             result = await schedule_renderer_node(state)
 
         # Should still have a schedule (with fallback summary)
@@ -450,7 +450,7 @@ class TestScheduleRendererNode:
             errors=errors,
         )
 
-        with patch("graph.nodes.renderer._create_llm", return_value=mock_llm):
+        with patch("app.graph.nodes.renderer._create_llm", return_value=mock_llm):
             result = await schedule_renderer_node(state)
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
@@ -479,7 +479,7 @@ class TestScheduleRendererNode:
 
         state = _make_state(merged_dag=MERGED_DAG_FULL.model_dump())
 
-        with patch("graph.nodes.renderer._create_llm", return_value=mock_llm):
+        with patch("app.graph.nodes.renderer._create_llm", return_value=mock_llm):
             result1 = await schedule_renderer_node(state)
             result2 = await schedule_renderer_node(state)
 
