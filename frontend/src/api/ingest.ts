@@ -17,3 +17,9 @@ export function getIngestionStatus(jobId: string): Promise<IngestionJob> {
 export function listCookbooks(): Promise<BookRecord[]> {
   return apiFetch<BookRecord[]>('/ingest/cookbooks');
 }
+
+export function deleteCookbook(bookId: string): Promise<void> {
+  return apiFetch<void>(`/ingest/cookbooks/${bookId}`, {
+    method: 'DELETE',
+  });
+}

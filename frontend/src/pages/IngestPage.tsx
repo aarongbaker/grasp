@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { uploadPdf, getIngestionStatus, listCookbooks } from '../api/ingest';
+import { uploadPdf, getIngestionStatus, listCookbooks, deleteCookbook } from '../api/ingest';
 import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
 import { usePolling } from '../hooks/usePolling';
@@ -24,7 +24,12 @@ export function IngestPage() {
     }
   }, []);
 
-  useEffect(() => { fetchCookbooks(); }, [fetchCookbooks]);
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      void fetchCookbooks();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [fetchCookbooks]);
 
   const { data: job } = usePolling<IngestionJob>({
     fetcher: () => getIngestionStatus(jobId!),
@@ -54,6 +59,16 @@ export function IngestPage() {
       setError(getErrorMessage(err, 'Upload failed'));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleDelete(bookId: string) {
+    setError('');
+    try {
+      await deleteCookbook(bookId);
+      setCookbooks((prev) => prev.filter((book) => book.book_id !== bookId));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Could not delete cookbook'));
     }
   }
 
@@ -115,9 +130,19 @@ export function IngestPage() {
               <div key={book.book_id} className={styles.libraryItem}>
                 <div className={styles.libraryItemHeader}>
                   <span className={styles.libraryItemTitle}>{book.title}</span>
-                  {book.document_type && (
-                    <span className={styles.libraryItemType}>{book.document_type}</span>
-                  )}
+                  <div className={styles.libraryItemActions}>
+                    {book.document_type && (
+                      <span className={styles.libraryItemType}>{book.document_type}</span>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(book.book_id)}
+                      aria-label={`Delete ${book.title}`}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
                 <div className={styles.libraryItemMeta}>
                   {book.author && <span>{book.author}</span>}
