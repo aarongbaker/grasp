@@ -67,6 +67,12 @@ def setup_logging() -> None:
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
 
+    if settings.app_env == "production":
+        # Railway log quotas get overwhelmed by per-request access logs during
+        # polling-heavy UI flows. Keep application errors, drop routine 2xx noise.
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+        logging.getLogger("uvicorn.error").setLevel(log_level)
+
 
 def bind_session_context(session_id: str) -> None:
     """Bind session_id to structlog context vars for correlation."""
