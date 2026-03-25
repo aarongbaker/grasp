@@ -14,8 +14,14 @@ export function IngestPage() {
   const [error, setError] = useState('');
   const [cookbooks, setCookbooks] = useState<BookRecord[]>([]);
 
-  const fetchCookbooks = useCallback(() => {
-    listCookbooks().then(setCookbooks).catch(() => {});
+  const fetchCookbooks = useCallback(async () => {
+    try {
+      const books = await listCookbooks();
+      setCookbooks(books);
+      setError('');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Could not load your cookbook library'));
+    }
   }, []);
 
   useEffect(() => { fetchCookbooks(); }, [fetchCookbooks]);
@@ -25,7 +31,11 @@ export function IngestPage() {
     interval: 3000,
     shouldStop: (j) => {
       if (j.status === 'complete' || j.status === 'failed') {
-        if (j.status === 'complete') fetchCookbooks();
+        if (j.status === 'complete') {
+          setFile(null);
+          void fetchCookbooks();
+        }
+        setJobId(null);
         return true;
       }
       return false;
