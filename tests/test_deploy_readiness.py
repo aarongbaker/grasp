@@ -33,6 +33,8 @@ def test_main_fails_fast_on_checkpoint_init_in_production() -> None:
     assert 'if settings.app_env == "production":' in main_source
     assert "async def get_graph():" in main_source
     assert "Graph initialisation is lazy" in main_source
+    assert 'command.upgrade(alembic_cfg, "head")' not in main_source
+    assert "Migrations run in deploy/pre-deploy, not app startup" in main_source
 
 
 def test_railway_docs_use_real_worker_module_path() -> None:

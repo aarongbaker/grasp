@@ -98,14 +98,7 @@ async def lifespan(app: FastAPI):
     elif set(settings.cors_allowed_origins) != _DEV_ORIGINS:
         logger.info("CORS origins: %s", settings.cors_allowed_origins)
 
-    # ── 1. Run database migrations ────────────────────────────────────────────
-    from alembic.config import Config
-
-    from alembic import command
-
-    alembic_cfg = Config("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-
+    # ── 1. Migrations run in deploy/pre-deploy, not app startup ─────────────
     # ── 2. Initialise Pinecone ────────────────────────────────────────────────
     try:
         from pinecone import Pinecone
