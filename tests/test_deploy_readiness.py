@@ -56,3 +56,17 @@ def test_deploy_docs_reference_frontend_api_base_env() -> None:
 
     assert "VITE_API_URL" in guide
     assert "VITE_API_URL" in checklist
+
+
+def test_fresh_db_migrations_guard_missing_sessionstatus_enum() -> None:
+    add_celery_migration = (
+        REPO_ROOT / "alembic" / "versions" / "a1b2c3d4e5f6_add_celery_task_id_to_sessions.py"
+    ).read_text()
+    fix_case_migration = (
+        REPO_ROOT / "alembic" / "versions" / "c4d5e6f7a8b9_fix_cancelled_enum_case.py"
+    ).read_text()
+
+    assert "IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sessionstatus')" in add_celery_migration
+    assert "ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'CANCELLED'" in add_celery_migration
+    assert "IF EXISTS (" in fix_case_migration
+    assert "typname = 'sessionstatus'" in fix_case_migration

@@ -35,4 +35,17 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Revert to lowercase (not recommended)."""
-    op.execute("ALTER TYPE sessionstatus RENAME VALUE 'CANCELLED' TO 'cancelled'")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_enum
+                WHERE enumlabel = 'CANCELLED'
+                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'sessionstatus')
+            ) THEN
+                ALTER TYPE sessionstatus RENAME VALUE 'CANCELLED' TO 'cancelled';
+            END IF;
+        END $$;
+        """
+    )

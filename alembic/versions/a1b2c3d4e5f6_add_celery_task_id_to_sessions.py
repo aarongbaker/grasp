@@ -22,7 +22,16 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("sessions", sa.Column("celery_task_id", sa.String(), nullable=True))
-    op.execute("ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'CANCELLED'")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sessionstatus') THEN
+                ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'CANCELLED';
+            END IF;
+        END $$;
+        """
+    )
 
 
 def downgrade() -> None:
