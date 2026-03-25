@@ -29,6 +29,10 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
 
 
+def _session_status(value: SessionStatus | str) -> SessionStatus:
+    return value if isinstance(value, SessionStatus) else SessionStatus(value)
+
+
 class CreateSessionRequest(BaseModel):
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
@@ -79,7 +83,8 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    if session.status != SessionStatus.PENDING:
+    session_status = _session_status(session.status)
+    if session_status != SessionStatus.PENDING:
         raise HTTPException(status_code=409, detail=f"Session is already {session.status}")
 
     # Direct DB write — the one exception to the checkpoint-derived rule
@@ -110,9 +115,10 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    if session.status == SessionStatus.CANCELLED:
+    session_status = _session_status(session.status)
+    if session_status == SessionStatus.CANCELLED:
         return {"session_id": str(session_id), "status": "cancelled"}
-    if not session.status.is_in_progress:
+    if not session_status.is_in_progress:
         raise HTTPException(status_code=409, detail=f"Session is {session.status}, not in progress")
 
     # Revoke the Celery task (best-effort — don't fail cancel if revoke fails)
@@ -156,11 +162,12 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
     if session.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    if session.status.is_terminal:
+    session_status = _session_status(session.status)
+    if session_status.is_terminal:
         # Fast path: read the DB row directly
         return session
 
-    if session.status.is_in_progress:
+    if session_status.is_in_progress:
         # Slow path: derive live status from checkpoint
         from app.core.status import status_projection
         from app.main import get_graph  # injected at startup
@@ -187,9 +194,10 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not session.status.is_terminal:
+    session_status = _session_status(session.status)
+    if not session_status.is_terminal:
         raise HTTPException(status_code=409, detail="Session is not yet complete")
-    if session.status == SessionStatus.FAILED:
+    if session_status == SessionStatus.FAILED:
         raise HTTPException(status_code=409, detail="Session failed — no results available")
 
     # Fast path: read from persisted columns (populated by finalise_session)
