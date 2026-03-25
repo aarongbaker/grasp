@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { deleteSession, listSessions } from '../api/sessions';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { Button } from '../components/shared/Button';
 import { Skeleton } from '../components/shared/Skeleton';
 import { SessionCard } from '../components/session/SessionCard';
@@ -14,16 +14,18 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSessions = useCallback(() => {
+  const fetchSessions = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
     setError(null);
-    listSessions(userId)
-      .then(setSessions)
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to load sessions');
-      })
-      .finally(() => setLoading(false));
+    try {
+      const data = await listSessions(userId);
+      setSessions(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load sessions');
+    } finally {
+      setLoading(false);
+    }
   }, [userId]);
 
   const handleDelete = useCallback(async (sessionId: string) => {
@@ -36,7 +38,7 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchSessions();
+    void fetchSessions();
   }, [fetchSessions]);
 
   return (
@@ -55,7 +57,7 @@ export function DashboardPage() {
       ) : error ? (
         <div className={styles.errorState}>
           <p className={styles.errorText}>{error}</p>
-          <Button variant="secondary" onClick={fetchSessions}>Try again</Button>
+          <Button variant="secondary" onClick={() => void fetchSessions()}>Try again</Button>
         </div>
       ) : sessions.length === 0 ? (
         <div className={styles.empty}>

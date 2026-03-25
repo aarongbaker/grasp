@@ -5,6 +5,7 @@ import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
 import { MEAL_TYPE_LABELS, OCCASION_LABELS, type MealType, type Occasion } from '../types/api';
+import { getErrorMessage } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
@@ -48,8 +49,8 @@ export function NewSessionPage() {
       });
       await runPipeline(session.session_id);
       navigate(`/sessions/${session.session_id}`);
-    } catch (err: any) {
-      setError(err.detail || err.message || 'Something went wrong — please try again');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Something went wrong — please try again'));
     } finally {
       setLoading(false);
     }

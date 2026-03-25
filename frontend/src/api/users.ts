@@ -7,7 +7,7 @@ export function getProfile(userId: string): Promise<UserProfile> {
 
 export function updateKitchen(
   userId: string,
-  data: Partial<Pick<KitchenConfig, 'max_burners' | 'max_oven_racks' | 'has_second_oven'>>,
+  data: Partial<Pick<KitchenConfig, 'max_burners' | 'max_oven_racks' | 'has_second_oven' | 'max_second_oven_racks'>>,
 ): Promise<KitchenConfig> {
   return apiFetch<KitchenConfig>(`/users/${userId}/kitchen`, {
     method: 'PATCH',

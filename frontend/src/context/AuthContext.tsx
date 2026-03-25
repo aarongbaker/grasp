@@ -1,17 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { UserProfile } from '../types/api';
-
-interface AuthState {
-  token: string | null;
-  userId: string | null;
-  user: UserProfile | null;
-  isAuthenticated: boolean;
-  login: (token: string, refreshToken: string, userId: string) => void;
-  logout: () => void;
-  setUser: (user: UserProfile) => void;
-}
-
-const AuthContext = createContext<AuthState | null>(null);
+import { AuthContext } from './auth-context';
 
 function decodeUserId(token: string): string | null {
   try {
@@ -22,9 +11,30 @@ function decodeUserId(token: string): string | null {
   }
 }
 
+function getInitialToken(): string | null {
+  return localStorage.getItem('grasp_token');
+}
+
+function getInitialUserId(token: string | null): string | null {
+  const storedUserId = localStorage.getItem('grasp_user_id');
+  if (storedUserId) return storedUserId;
+
+  if (!token) return null;
+
+  const decoded = decodeUserId(token);
+  if (decoded) {
+    localStorage.setItem('grasp_user_id', decoded);
+    return decoded;
+  }
+
+  localStorage.removeItem('grasp_token');
+  localStorage.removeItem('grasp_refresh_token');
+  return null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('grasp_token'));
-  const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('grasp_user_id'));
+  const [token, setToken] = useState<string | null>(() => getInitialToken());
+  const [userId, setUserId] = useState<string | null>(() => getInitialUserId(getInitialToken()));
   const [user, setUser] = useState<UserProfile | null>(null);
 
   const login = useCallback((newToken: string, refreshToken: string, newUserId: string) => {
@@ -44,25 +54,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  // Listen for auth expiry events from API client
   useEffect(() => {
     const handler = () => logout();
     window.addEventListener('grasp:auth-expired', handler);
     return () => window.removeEventListener('grasp:auth-expired', handler);
   }, [logout]);
-
-  // Validate token on mount
-  useEffect(() => {
-    if (token && !userId) {
-      const decoded = decodeUserId(token);
-      if (decoded) {
-        setUserId(decoded);
-        localStorage.setItem('grasp_user_id', decoded);
-      } else {
-        logout();
-      }
-    }
-  }, [token, userId, logout]);
 
   return (
     <AuthContext.Provider
@@ -79,10 +75,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth(): AuthState {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

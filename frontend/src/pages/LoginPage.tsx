@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { login } from '../api/auth';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { Button } from '../components/shared/Button';
 import { Input } from '../components/shared/Input';
+import { getErrorMessage } from '../utils/errors';
 import styles from './LoginPage.module.css';
 
 export function LoginPage() {
@@ -23,8 +24,8 @@ export function LoginPage() {
       const payload = JSON.parse(atob(res.access_token.split('.')[1]));
       auth.login(res.access_token, res.refresh_token, payload.sub);
       navigate('/', { replace: true });
-    } catch (err: any) {
-      setError(err.detail || 'Failed to sign in');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to sign in'));
     } finally {
       setLoading(false);
     }

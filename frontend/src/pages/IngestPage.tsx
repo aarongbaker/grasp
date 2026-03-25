@@ -4,6 +4,7 @@ import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
 import { usePolling } from '../hooks/usePolling';
 import type { BookRecord, IngestionJob } from '../types/api';
+import { getErrorMessage } from '../utils/errors';
 import styles from './IngestPage.module.css';
 
 export function IngestPage() {
@@ -39,8 +40,8 @@ export function IngestPage() {
     try {
       const res = await uploadPdf(file);
       setJobId(res.job_id);
-    } catch (err: any) {
-      setError(err.detail || 'Upload failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Upload failed'));
     } finally {
       setUploading(false);
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { updateKitchen, updateDietaryDefaults, addEquipment, deleteEquipment, getProfile } from '../api/users';
 import { Skeleton } from '../components/shared/Skeleton';
 import { Button } from '../components/shared/Button';
@@ -21,7 +21,7 @@ const EQUIPMENT_CATEGORIES: { value: EquipmentCategory; label: string }[] = [
 export function ProfilePage() {
   const { user, userId, setUser } = useAuth();
   const [saving, setSaving] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Equipment add form
   const [showAddForm, setShowAddForm] = useState(false);

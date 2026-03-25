@@ -1,12 +1,14 @@
 const API_BASE = '/api/v1';
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public detail: string,
-  ) {
+  status: number;
+  detail: string;
+
+  constructor(status: number, detail: string) {
     super(detail);
     this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -45,7 +47,7 @@ async function attemptRefresh(): Promise<boolean> {
   return refreshPromise;
 }
 
-async function rawFetch<T>(
+async function rawFetch(
   path: string,
   options: RequestInit & { timeout?: number } = {},
 ): Promise<{ res: Response; status: number }> {
@@ -59,7 +61,6 @@ async function rawFetch<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Don't set Content-Type for FormData (browser sets multipart boundary)
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
@@ -75,7 +76,7 @@ async function rawFetch<T>(
       headers,
       signal: controller.signal,
     });
-  } catch (err) {
+  } catch {
     clearTimeout(timer);
     if (controller.signal.aborted) {
       throw new ApiError(0, 'Request timed out — is the server running?');
@@ -91,13 +92,12 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit & { timeout?: number } = {},
 ): Promise<T> {
-  let { res, status } = await rawFetch<T>(path, options);
+  let { res, status } = await rawFetch(path, options);
 
-  // On 401, attempt a silent token refresh and retry once
   if (status === 401) {
     const refreshed = await attemptRefresh();
     if (refreshed) {
-      ({ res, status } = await rawFetch<T>(path, options));
+      ({ res, status } = await rawFetch(path, options));
     }
   }
 

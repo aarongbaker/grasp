@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { register, login } from '../api/auth';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { Button } from '../components/shared/Button';
 import { Input } from '../components/shared/Input';
+import { getErrorMessage } from '../utils/errors';
 import styles from './LoginPage.module.css'; // Reuse login styles
 
 export function RegisterPage() {
@@ -35,13 +36,12 @@ export function RegisterPage() {
         max_burners: maxBurners,
         max_oven_racks: maxOvenRacks,
       });
-      // Auto-login after registration
       const res = await login(email, password);
       const payload = JSON.parse(atob(res.access_token.split('.')[1]));
       auth.login(res.access_token, res.refresh_token, payload.sub);
       navigate('/', { replace: true });
-    } catch (err: any) {
-      const detail = err.detail || 'Failed to create account';
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err, 'Failed to create account');
       if (detail.includes('already exists')) {
         setError('An account with this email already exists. Try signing in instead.');
       } else {

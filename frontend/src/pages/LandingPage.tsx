@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { LandingNav } from '../components/landing/LandingNav';
 import { Hero } from '../components/landing/Hero';
 import { Pipeline } from '../components/landing/Pipeline';

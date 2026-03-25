@@ -1,14 +1,8 @@
 import { AlertTriangleIcon, ClockIcon } from 'lucide-react';
-import { RESOURCE_LABELS, type NaturalLanguageSchedule, type Resource, type TimelineEntry } from '../../types/api';
-import { CookingGantt, LANE_COLORS } from './CookingGantt';
+import { type NaturalLanguageSchedule, type TimelineEntry } from '../../types/api';
+import { CookingGantt } from './CookingGantt';
+import { LANE_COLORS } from './colors';
 import styles from './ScheduleTimeline.module.css';
-
-const RESOURCE_BADGE: Record<Resource, string> = {
-  hands: styles.resourceHands,
-  stovetop: styles.resourceStovetop,
-  oven: styles.resourceOven,
-  passive: styles.resourcePassive,
-};
 
 function formatDuration(min: number, max: number | null): string {
   if (max && max !== min) return `${min}–${max} min`;
