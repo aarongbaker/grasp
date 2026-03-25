@@ -7,6 +7,7 @@ build/
 .venv/
 venv/
 .claude/
+.gsd/
 
 # Env
 .env*
@@ -25,3 +26,22 @@ venv/
 
 # Docker volumes
 pgdata/
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+Thumbs.db
+*.swp
+*.swo
+*~
+*.code-workspace
+.env
+.env.*
+node_modules/
+.next/
+*.pyc
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/
