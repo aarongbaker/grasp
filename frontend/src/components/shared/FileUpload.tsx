@@ -8,7 +8,7 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
-export function FileUpload({ accept = '.pdf', maxSizeMB = 50, onFile, disabled }: FileUploadProps) {
+export function FileUpload({ accept = '.pdf', maxSizeMB = 100, onFile, disabled }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

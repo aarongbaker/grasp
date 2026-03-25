@@ -15,7 +15,7 @@ from app.models.ingestion import BookRecord, IngestionJob
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/ingest")
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 @router.post("", status_code=202)
