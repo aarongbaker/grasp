@@ -68,6 +68,17 @@ async def get_graph():
         return _graph
 
 
+async def ensure_checkpoint_tables() -> None:
+    """Create LangGraph checkpoint tables if missing."""
+    from app.core.settings import get_settings
+
+    settings = get_settings()
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    async with AsyncPostgresSaver.from_conn_string(settings.langgraph_checkpoint_url) as checkpointer:
+        await checkpointer.setup()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _checkpointer_cm
@@ -112,9 +123,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Pinecone init failed (%s). Ingestion will not work.", e)
 
-    # ── 3. Graph initialisation is lazy ──────────────────────────────────────
-    # Avoid blocking container readiness on checkpoint setup. The graph is
-    # initialised on first route access that needs it.
+    # ── 3. Graph initialisation is lazy, but checkpoint tables must exist ───
+    # This retires fresh-database failures where Celery reaches LangGraph before
+    # any route has lazily initialised the PostgresSaver tables.
+    try:
+        await ensure_checkpoint_tables()
+    except Exception as e:
+        if settings.app_env == "production":
+            raise RuntimeError(
+                "LangGraph checkpoint table setup failed in production. "
+                "Check LANGGRAPH_CHECKPOINT_URL and Postgres permissions."
+            ) from e
+        logger.warning("Checkpoint table setup failed (%s). Lazy graph init may fall back later.", e)
+
+    # Graph compilation itself remains lazy to avoid blocking readiness on the
+    # full LangGraph build path.
 
     yield
 

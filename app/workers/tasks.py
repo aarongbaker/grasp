@@ -38,8 +38,8 @@ async def _run_pipeline_async(session_id: str, user_id: str):
     from app.models.session import Session
     from app.models.user import Equipment, KitchenConfig, UserProfile
 
-    # Build per-worker graph + checkpointer
     async with AsyncPostgresSaver.from_conn_string(settings.langgraph_checkpoint_url) as checkpointer:
+        await checkpointer.setup()
         graph = build_grasp_graph(checkpointer)
 
         engine = create_async_engine(settings.database_url)
