@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, String
 from sqlmodel import Column, Field, SQLModel
 
 from app.models.enums import ChunkType, DocumentType, IngestionStatus
@@ -35,7 +35,7 @@ class BookRecord(SQLModel, table=True):
     title: str
     author: str = ""
     # None until classifier runs — chef can always override via UI
-    document_type: Optional[DocumentType] = None
+    document_type: Optional[DocumentType] = Field(default=None, sa_column=Column(String, nullable=True))
     total_pages: int = 0
     total_chunks: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
@@ -68,7 +68,7 @@ class CookbookChunk(SQLModel, table=True):
     # Denormalised for Pinecone metadata — needed for per-chef filter without joins
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
     text: str
-    chunk_type: ChunkType
+    chunk_type: ChunkType = Field(sa_column=Column(String, nullable=False))
     chapter: str = ""
     page_number: int = 0
     token_count: int = 0
@@ -99,7 +99,7 @@ class IngestionJob(SQLModel, table=True):
 
     job_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
-    status: IngestionStatus = Field(default=IngestionStatus.PENDING)
+    status: IngestionStatus = Field(default=IngestionStatus.PENDING, sa_column=Column(String, nullable=False))
     book_count: int = 0
     completed: int = 0
     failed: int = 0
