@@ -4,6 +4,7 @@ import base64
 import uuid
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from sqlalchemy import delete
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlmodel import select
@@ -101,14 +102,10 @@ async def delete_cookbook(book_id: uuid.UUID, db: DBSession, current_user: Curre
     chunk_results = await db.exec(select(CookbookChunk).where(CookbookChunk.book_id == book_id))
     chunks = chunk_results.all()
     vector_ids = [str(chunk.chunk_id) for chunk in chunks]
-    for chunk in chunks:
-        await db.delete(chunk)
 
-    page_results = await db.exec(select(PageCache).where(PageCache.book_id == book_id))
-    for page in page_results.all():
-        await db.delete(page)
-
-    await db.delete(book)
+    await db.exec(delete(CookbookChunk).where(CookbookChunk.book_id == book_id))
+    await db.exec(delete(PageCache).where(PageCache.book_id == book_id))
+    await db.exec(delete(BookRecord).where(BookRecord.book_id == book_id))
     await db.commit()
 
     if vector_ids:
