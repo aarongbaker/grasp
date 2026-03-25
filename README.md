@@ -11,6 +11,13 @@ GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbo
 
 ## Quick Start
 
+GRASP supports two local workflows:
+
+- **Host-run app**: run FastAPI/Streamlit on your machine, use Docker only for Postgres/Redis
+- **Docker-run app**: run API, worker, Postgres, and Redis together in Docker Compose
+
+### Option A — Host-run app
+
 ```bash
 # 1. Clone and enter the repo
 git clone <repo-url> && cd grasp
@@ -29,11 +36,37 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 # 5. Start Postgres and Redis
 docker compose up -d postgres redis
 
-# 6. Ingest your cookbooks (see "Ingest Your Cookbooks" below)
+# 6. Start the API
+.venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# 7. Launch the UI
+# 7. In another shell, start the UI if needed
 .venv/bin/streamlit run streamlit_app.py
 ```
+
+### Option B — Docker-run app
+
+```bash
+# 1. Clone and enter the repo
+git clone <repo-url> && cd grasp
+
+# 2. Copy the example env and fill in your API keys
+cp .env.example .env
+
+# 3. Generate a JWT secret key and add it to .env
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+# Copy the output into .env as JWT_SECRET_KEY=...
+
+# 4. Build and run the local stack
+docker compose up --build
+```
+
+This starts:
+- `app` → FastAPI on `http://localhost:8000`
+- `worker` → Celery worker (`--pool=solo --concurrency=1`)
+- `postgres` → local dev database on `localhost:5432`
+- `redis` → local Redis on `localhost:6379`
+
+> The checked-in `.env.example` is written for **host-run development** (`localhost` URLs). In Docker Compose, the `app` and `worker` services override those connection URLs to use Docker service names (`postgres`, `redis`) so the same `.env` still works locally.
 
 ## API Keys
 
@@ -62,21 +95,39 @@ The remaining `.env` values (database URLs, Redis, Celery) can be left at their 
 
 ## Infrastructure
 
-Start the local services:
+### Local host-run infrastructure
+
+Start only Postgres and Redis:
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-This launches:
-- **Postgres** on port 5432 — stores user profiles, sessions, and ingested book records
-- **Redis** on port 6379 — Celery task broker (used by the FastAPI server, not needed for Streamlit)
+### Local full Docker stack
 
-Database migrations run automatically on app startup via Alembic. You can also run them manually:
+Run the full stack in containers:
+
+```bash
+docker compose up --build
+```
+
+This launches:
+- **app** on port 8000 — FastAPI API server
+- **worker** — Celery background worker with memory-safe local settings
+- **Postgres** on port 5432 — stores users, sessions, and ingestion records
+- **Redis** on port 6379 — Celery broker/result backend and rate-limit storage
+
+Database migrations run automatically on app startup via Alembic. You can also run them manually in a host-run environment:
 
 ```bash
 .venv/bin/alembic upgrade head
 ```
+
+### Deployment notes
+
+- **Railway**: deploy the Docker image. Railway injects `PORT`, and the Dockerfile uses that value at runtime.
+- **Cloudflare**: set `CORS_ALLOWED_ORIGINS` to your Cloudflare-hosted frontend origin(s) as a JSON array string.
+- Keep environment variables for deploy targets in the platform environment, not in your local `.env`.
 
 ## Ingest Your Cookbooks
 

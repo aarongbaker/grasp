@@ -24,14 +24,17 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set sqlalchemy.url from settings if not already set via CLI
-if not config.get_main_option("sqlalchemy.url"):
-    from core.settings import get_settings
+# Always set sqlalchemy.url from settings.
+#
+# alembic.ini intentionally carries a localhost dev fallback, but production
+# deploys must not use it. Read the async SQLAlchemy URL from settings and
+# convert it to a sync psycopg URL for Alembic.
+from core.settings import get_settings
 
-    settings = get_settings()
-    # Alembic needs a sync driver — use psycopg3 (already installed)
-    sync_url = settings.database_url.replace("+asyncpg", "+psycopg")
-    config.set_main_option("sqlalchemy.url", sync_url)
+settings = get_settings()
+# Alembic needs a sync driver — use psycopg3 (already installed)
+sync_url = settings.database_url.replace("+asyncpg", "+psycopg")
+config.set_main_option("sqlalchemy.url", sync_url)
 
 target_metadata = SQLModel.metadata
 

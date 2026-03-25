@@ -1,7 +1,7 @@
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
 # Install Python dependencies into /install prefix so they can be
 # copied cleanly to the runtime stage without build tools.
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements-prod.txt
 # Lean runtime image with Tesseract OCR system binary installed.
 # pytesseract (in requirements-prod.txt) is a thin wrapper that shells out
 # to this binary — both must be present for OCR to work on Linux.
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # System packages:
 #   tesseract-ocr     — OCR binary that pytesseract calls at runtime
@@ -40,5 +40,5 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 # API server (default)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
 # Celery worker: docker run <image> celery -A workers.celery_app worker --concurrency=1 --pool=solo
