@@ -67,12 +67,18 @@ async def list_cookbooks(db: DBSession, current_user: CurrentUser):
     )
     results = await db.exec(statement)
     books = results.all()
+
+    def _document_type_value(value):
+        if value is None:
+            return None
+        return getattr(value, "value", value)
+
     return [
         {
             "book_id": str(b.book_id),
             "title": b.title,
             "author": b.author,
-            "document_type": b.document_type.value if b.document_type else None,
+            "document_type": _document_type_value(b.document_type),
             "total_pages": b.total_pages,
             "total_chunks": b.total_chunks,
             "created_at": b.created_at.isoformat(),
