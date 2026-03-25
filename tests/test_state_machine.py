@@ -11,7 +11,7 @@ Tests cover:
   - Multiple transitions on the same page
 """
 
-from ingestion.state_machine import CookbookState, _tripwire_check, run_state_machine
+from app.ingestion.state_machine import CookbookState, _tripwire_check, run_state_machine
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Empty / minimal input

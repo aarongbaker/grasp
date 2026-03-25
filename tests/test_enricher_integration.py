@@ -16,16 +16,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graph.nodes.enricher import (
+from app.graph.nodes.enricher import (
     StepEnrichmentOutput,
     _build_enrichment_prompt,
     _format_rag_context,
     _generate_recipe_slug,
     rag_enricher_node,
 )
-from models.enums import ErrorType, MealType, Occasion, Resource
-from models.pipeline import DinnerConcept
-from models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
+from app.models.enums import ErrorType, MealType, Occasion, Resource
+from app.models.pipeline import DinnerConcept
+from app.models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 

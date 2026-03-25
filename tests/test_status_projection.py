@@ -20,8 +20,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.status import status_projection
-from models.enums import SessionStatus
+from app.core.status import status_projection
+from app.models.enums import SessionStatus
 
 
 def _make_mock_graph(state_values: dict):

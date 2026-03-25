@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
-from core.settings import get_settings
+from app.core.settings import get_settings
 
 settings = get_settings()
 
@@ -100,9 +100,9 @@ async def compiled_graph(test_checkpointer):
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from graph.nodes.enricher import StepEnrichmentOutput
-    from graph.nodes.generator import RecipeGenerationOutput
-    from graph.nodes.renderer import ScheduleSummaryOutput
+    from app.graph.nodes.enricher import StepEnrichmentOutput
+    from app.graph.nodes.generator import RecipeGenerationOutput
+    from app.graph.nodes.renderer import ScheduleSummaryOutput
     from tests.fixtures.recipes import (
         CYCLIC_STEPS_FONDANT,
         CYCLIC_STEPS_POMMES_PUREE,
@@ -216,7 +216,7 @@ async def compiled_graph(test_checkpointer):
         patch("graph.nodes.enricher._retrieve_rag_context", return_value=[]),
         patch("graph.nodes.renderer._create_llm", return_value=renderer_mock_llm),
     ):
-        from graph.graph import build_grasp_graph
+        from app.graph.graph import build_grasp_graph
 
         graph = build_grasp_graph(test_checkpointer)
         yield graph
@@ -290,7 +290,7 @@ async def test_db_session(test_db_engine):
 async def test_user_id(test_db_session):
     """Creates a UserProfile in the test DB and returns the user_id.
     Required because sessions.user_id has a FK to user_profiles."""
-    from models.user import UserProfile
+    from app.models.user import UserProfile
 
     user_id = uuid.uuid4()
     user = UserProfile(
@@ -318,8 +318,8 @@ def base_initial_state() -> dict:
     Base GRASPState for all Phase 3 tests. Uses fixture dinner concept.
     Nodes populate raw_recipes, enriched_recipes, etc. from here.
     """
-    from models.enums import MealType, Occasion
-    from models.pipeline import DinnerConcept
+    from app.models.enums import MealType, Occasion
+    from app.models.pipeline import DinnerConcept
 
     concept = DinnerConcept(
         free_text="A special dinner party with short ribs, potato puree, and chocolate fondant.",

@@ -19,10 +19,10 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from models.enums import IngestionStatus, SessionStatus
-from models.ingestion import IngestionJob
-from models.session import Session
-from models.user import KitchenConfig, UserProfile
+from app.models.enums import IngestionStatus, SessionStatus
+from app.models.ingestion import IngestionJob
+from app.models.session import Session
+from app.models.user import KitchenConfig, UserProfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test app + fixtures
@@ -31,10 +31,10 @@ from models.user import KitchenConfig, UserProfile
 
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
-    from api.routes.health import router as health_router
-    from api.routes.ingest import router as ingest_router
-    from api.routes.sessions import router as sessions_router
-    from api.routes.users import router as users_router
+    from app.api.routes.health import router as health_router
+    from app.api.routes.ingest import router as ingest_router
+    from app.api.routes.sessions import router as sessions_router
+    from app.api.routes.users import router as users_router
 
     app = FastAPI()
     app.include_router(health_router, prefix="/api/v1")
@@ -105,8 +105,8 @@ def mock_db():
 @pytest.fixture
 def app_with_overrides(mock_db, test_user):
     """App with auth + DB overridden."""
-    from core.auth import get_current_user
-    from db.session import get_session
+    from app.core.auth import get_current_user
+    from app.db.session import get_session
 
     app = _create_test_app()
 
@@ -129,7 +129,7 @@ def app_with_overrides(mock_db, test_user):
 @pytest.mark.asyncio
 async def test_auth_invalid_token_returns_401():
     """Malformed JWT token should return 401."""
-    from db.session import get_session
+    from app.db.session import get_session
 
     app = _create_test_app()
     mock_db = MockDBSession()
@@ -155,8 +155,8 @@ async def test_auth_valid_token_unknown_user_returns_404():
     """Valid JWT for nonexistent user should return 404."""
     import jwt as pyjwt
     from datetime import datetime, timedelta, timezone
-    from core.settings import get_settings
-    from db.session import get_session
+    from app.core.settings import get_settings
+    from app.db.session import get_session
 
     settings = get_settings()
     fake_id = str(uuid.uuid4())

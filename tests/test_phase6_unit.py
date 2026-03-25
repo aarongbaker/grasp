@@ -13,23 +13,23 @@ from datetime import datetime
 
 import pytest
 
-from graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
-from graph.nodes.dag_merger import (
+from app.graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
+from app.graph.nodes.dag_merger import (
     ResourceConflictError,
     _compute_critical_paths,
     _IntervalIndex,
     _merge_dags,
     _StepInfo,
 )
-from models.enums import Resource
-from models.recipe import (
+from app.models.enums import Resource
+from app.models.recipe import (
     EnrichedRecipe,
     Ingredient,
     RawRecipe,
     RecipeStep,
     ValidatedRecipe,
 )
-from models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
+from app.models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
 from tests.fixtures.recipes import (
     CYCLIC_STEPS_SHORT_RIBS,
     ENRICHED_CHOCOLATE_FONDANT,

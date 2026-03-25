@@ -39,8 +39,8 @@ Cross-recipe parallelism is enforced by the merger's resource contention rules,
 not by explicit cross-recipe depends_on edges.
 """
 
-from models.enums import Resource
-from models.scheduling import (
+from app.models.enums import Resource
+from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
     RecipeDAG,

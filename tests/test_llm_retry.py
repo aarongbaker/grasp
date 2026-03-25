@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from anthropic import APIConnectionError, APITimeoutError, RateLimitError
 
-from core.llm import is_timeout_error, llm_retry
+from app.core.llm import is_timeout_error, llm_retry
 
 # ── is_timeout_error ─────────────────────────────────────────────────────────
 

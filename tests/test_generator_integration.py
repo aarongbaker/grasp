@@ -14,15 +14,15 @@ import os
 import pytest
 import pytest_asyncio
 
-from graph.nodes.generator import (
+from app.graph.nodes.generator import (
     RecipeGenerationOutput,
     _build_system_prompt,
     _derive_recipe_count,
     recipe_generator_node,
 )
-from models.enums import MealType, Occasion
-from models.pipeline import DinnerConcept
-from models.recipe import RawRecipe
+from app.models.enums import MealType, Occasion
+from app.models.pipeline import DinnerConcept
+from app.models.recipe import RawRecipe
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 

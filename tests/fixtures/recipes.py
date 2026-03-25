@@ -15,8 +15,8 @@ Three dishes chosen to demonstrate PASSIVE parallelism:
 This menu is the Phase 6 known-correct answer validation baseline.
 """
 
-from models.enums import Resource
-from models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
+from app.models.enums import Resource
+from app.models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
 
 # ── Step IDs ─────────────────────────────────────────────────────────────────
 # Defined as constants so schedules.py can import them instead of using magic strings.

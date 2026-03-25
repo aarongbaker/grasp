@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from core.settings import get_settings
+from app.core.settings import get_settings
 
 settings = get_settings()
 
@@ -35,7 +35,7 @@ def _mock_user(user_id: uuid.UUID):
 @pytest.mark.asyncio
 async def test_jwt_bearer_auth_valid():
     """Valid JWT token should authenticate successfully."""
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     user_id = uuid.uuid4()
     token = _make_token(str(user_id))
@@ -58,7 +58,7 @@ async def test_jwt_bearer_auth_expired():
     """Expired JWT token should return 401 with generic error message."""
     from fastapi import HTTPException
 
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     token = _make_token(str(uuid.uuid4()), expired=True)
 
@@ -76,7 +76,7 @@ async def test_jwt_bearer_auth_malformed():
     """Malformed JWT token should return 401."""
     from fastapi import HTTPException
 
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
@@ -91,7 +91,7 @@ async def test_no_auth_headers_returns_401():
     """Missing auth header should return 401 with generic error message."""
     from fastapi import HTTPException
 
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(
@@ -107,7 +107,7 @@ async def test_jwt_user_not_found_returns_404():
     """Valid JWT but user doesn't exist should return 404."""
     from fastapi import HTTPException
 
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     token = _make_token(str(uuid.uuid4()))
 
@@ -128,7 +128,7 @@ async def test_jwt_user_not_found_returns_404():
 async def test_jwt_bearer_auth_generic_error_message():
     """All auth failures return the same generic message to prevent info leakage."""
     from fastapi import HTTPException
-    from core.auth import get_current_user
+    from app.core.auth import get_current_user
 
     generic_msg = "Missing or invalid authentication token."
 

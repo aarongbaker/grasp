@@ -35,7 +35,7 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from models.enums import ErrorType, SessionStatus
+from app.models.enums import ErrorType, SessionStatus
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Run 1: Happy Path
@@ -55,9 +55,9 @@ async def test_run1_happy_path_complete(
     Expected outcome: COMPLETE, 3 recipes scheduled, no errors.
     """
     import models.session as session_model
-    from core.status import finalise_session
-    from models.enums import SessionStatus
-    from models.session import Session
+    from app.core.status import finalise_session
+    from app.models.enums import SessionStatus
+    from app.models.session import Session
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
     initial_state = {**base_initial_state, "test_mode": None}
@@ -158,8 +158,8 @@ async def test_run2_recoverable_error_partial(
     Phase 5: enricher_fail_fondant fixture replaces the old test_mode
     mechanism that lived in mock_enricher.py.
     """
-    from core.status import finalise_session
-    from models.session import Session
+    from app.core.status import finalise_session
+    from app.models.session import Session
 
     session_row = Session(
         session_id=unique_session_id,
@@ -239,8 +239,8 @@ async def test_run3_fatal_error_failed(
     All 3 fail → fatal error (recoverable=False).
     error_router → handle_fatal_error → END. No schedule produced.
     """
-    from core.status import finalise_session
-    from models.session import Session
+    from app.core.status import finalise_session
+    from app.models.session import Session
 
     session_row = Session(
         session_id=unique_session_id,
@@ -315,8 +315,8 @@ async def test_run4_checkpoint_resume(
     If generator had run twice, it would still have 3 (replace semantics).
     This test verifies via checkpoint inspection that generator ran once.
     """
-    from core.status import finalise_session
-    from models.session import Session
+    from app.core.status import finalise_session
+    from app.models.session import Session
 
     session_row = Session(
         session_id=unique_session_id,
@@ -397,7 +397,7 @@ async def test_status_projection_derives_enriching(
     After generator runs and checkpoints, status_projection should return ENRICHING.
     This validates the two-tier polling logic for in-progress sessions.
     """
-    from core.status import status_projection
+    from app.core.status import status_projection
 
     # We can't easily interrupt after exactly one node in integration test.
     # Instead, test that an empty checkpoint → GENERATING

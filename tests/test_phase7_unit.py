@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graph.nodes.renderer import (
+from app.graph.nodes.renderer import (
     ScheduleSummaryOutput,
     _build_summary_prompt,
     _build_timeline,
@@ -23,9 +23,9 @@ from graph.nodes.renderer import (
     _fallback_summary,
     schedule_renderer_node,
 )
-from models.enums import ErrorType, MealType, Occasion, Resource
-from models.pipeline import DinnerConcept
-from models.scheduling import (
+from app.models.enums import ErrorType, MealType, Occasion, Resource
+from app.models.pipeline import DinnerConcept
+from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
     ScheduledStep,
