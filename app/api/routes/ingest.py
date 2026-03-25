@@ -90,9 +90,6 @@ async def list_cookbooks(db: DBSession, current_user: CurrentUser):
 @router.delete("/cookbooks/{book_id}", status_code=204)
 async def delete_cookbook(book_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     """Delete a cookbook and its associated chunk/page metadata for the current user."""
-    from pinecone import Pinecone
-
-    from app.core.settings import get_settings
     from app.models.ingestion import CookbookChunk, PageCache
 
     book = await db.get(BookRecord, book_id)
@@ -101,18 +98,10 @@ async def delete_cookbook(book_id: uuid.UUID, db: DBSession, current_user: Curre
     if book.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    settings = get_settings()
-    if settings.pinecone_api_key:
-        try:
-            pc = Pinecone(api_key=settings.pinecone_api_key)
-            index = pc.Index(settings.pinecone_index_name)
-            index.delete(filter={"book_id": {"$eq": str(book_id)}})
-        except Exception:
-            # Best effort cleanup — relational delete still proceeds.
-            pass
-
     chunk_results = await db.exec(select(CookbookChunk).where(CookbookChunk.book_id == book_id))
-    for chunk in chunk_results.all():
+    chunks = chunk_results.all()
+    vector_ids = [str(chunk.chunk_id) for chunk in chunks]
+    for chunk in chunks:
         await db.delete(chunk)
 
     page_results = await db.exec(select(PageCache).where(PageCache.book_id == book_id))
@@ -121,6 +110,15 @@ async def delete_cookbook(book_id: uuid.UUID, db: DBSession, current_user: Curre
 
     await db.delete(book)
     await db.commit()
+
+    if vector_ids:
+        try:
+            from app.workers.tasks import delete_cookbook_vectors
+
+            delete_cookbook_vectors.delay(str(book_id), vector_ids)
+        except Exception:
+            # Relational delete already succeeded. Vector cleanup is best-effort.
+            pass
 
 
 @router.get("/{job_id}")

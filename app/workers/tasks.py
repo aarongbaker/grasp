@@ -104,6 +104,22 @@ async def _run_pipeline_async(session_id: str, user_id: str):
         await engine.dispose()
 
 
+@celery_app.task(name="grasp.delete_cookbook_vectors")
+def delete_cookbook_vectors(book_id: str, vector_ids: list[str]):
+    """Best-effort Pinecone cleanup for a deleted cookbook. Runs out-of-band from the API request."""
+    from pinecone import Pinecone
+
+    if not settings.pinecone_api_key or not vector_ids:
+        return
+
+    pc = Pinecone(api_key=settings.pinecone_api_key)
+    index = pc.Index(settings.pinecone_index_name)
+
+    batch_size = 100
+    for i in range(0, len(vector_ids), batch_size):
+        index.delete(ids=vector_ids[i : i + batch_size])
+
+
 @celery_app.task(name="grasp.ingest_cookbook")
 def ingest_cookbook(job_id: str, user_id: str, pdf_bytes_b64: str, filename: str):
     """Ingestion pipeline task. pdf_bytes_b64 is base64-encoded (JSON-safe)."""
