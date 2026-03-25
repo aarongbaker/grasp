@@ -297,6 +297,7 @@ async def test_user_id(test_db_session):
         user_id=user_id,
         name="Test Chef",
         email=f"chef-{user_id}@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key(f"chef-{user_id}@test.com"),
     )
     test_db_session.add(user)
     await test_db_session.commit()

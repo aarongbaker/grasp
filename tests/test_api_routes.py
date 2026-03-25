@@ -50,6 +50,7 @@ def _make_test_user() -> UserProfile:
         user_id=uuid.uuid4(),
         name="Test Chef",
         email="chef@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("chef@test.com"),
         dietary_defaults=["gluten-free"],
     )
     return user

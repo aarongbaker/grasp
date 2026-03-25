@@ -68,7 +68,7 @@ def _generate_recipe_slug(name: str) -> str:
 # ── RAG retrieval (mockable seam) ────────────────────────────────────────────
 
 
-def _retrieve_rag_context(query: str, user_id: str) -> list[dict]:
+def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> list[dict]:
     """
     Embed query with OpenAI and search Pinecone for relevant cookbook chunks.
     Returns list of chunk dicts with 'text', 'chunk_type', 'chunk_id' keys.
@@ -96,10 +96,16 @@ def _retrieve_rag_context(query: str, user_id: str) -> list[dict]:
         pc = Pinecone(api_key=settings.pinecone_api_key)
         index = pc.Index(settings.pinecone_index_name)
 
+        owner_filter = {}
+        if rag_owner_key:
+            owner_filter = {"rag_owner_key": {"$eq": rag_owner_key}}
+        elif user_id:
+            owner_filter = {"user_id": {"$eq": user_id}}
+
         results = index.query(
             vector=query_embedding,
             top_k=settings.rag_retrieval_top_k,
-            filter={"user_id": {"$eq": user_id}} if user_id else {},
+            filter=owner_filter,
             include_metadata=True,
         )
 
@@ -244,6 +250,7 @@ def _create_llm() -> ChatAnthropic:
 async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
     user_id: str,
+    rag_owner_key: str,
 ) -> tuple[EnrichedRecipe, dict]:
     """
     Enrich a single RawRecipe: RAG retrieval + LLM structured output.
@@ -254,7 +261,7 @@ async def _enrich_single_recipe(
 
     # RAG retrieval (graceful degradation — returns [] on failure)
     rag_query = f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
-    rag_chunks = await asyncio.to_thread(_retrieve_rag_context, rag_query, user_id)
+    rag_chunks = await asyncio.to_thread(_retrieve_rag_context, rag_query, user_id, rag_owner_key)
 
     # Build prompt
     system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
@@ -302,6 +309,7 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     """
     raw_recipe_dicts: list[dict] = state.get("raw_recipes", [])
     user_id: str = state.get("user_id", "")
+    rag_owner_key: str = state.get("rag_owner_key", "")
 
     logger.info("Enriching %d raw recipes", len(raw_recipe_dicts))
 
@@ -314,7 +322,7 @@ async def rag_enricher_node(state: GRASPState) -> dict:
         recipe_name = recipe_dict.get("name", "unknown")
         try:
             raw_recipe = RawRecipe.model_validate(recipe_dict)
-            enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id)
+            enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id, rag_owner_key)
             logger.info(
                 "Enriched recipe: %s (%d steps, %d RAG sources)",
                 recipe_name,

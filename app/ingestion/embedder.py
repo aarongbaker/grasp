@@ -57,6 +57,7 @@ async def embed_and_upsert_chunks(
 
     from app.models.enums import ChunkType
     from app.models.ingestion import CookbookChunk
+    from app.models.user import UserProfile
 
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     pc = Pinecone(api_key=settings.pinecone_api_key)
@@ -68,6 +69,10 @@ async def embed_and_upsert_chunks(
     old_chunks = await db.execute(select(CookbookChunk).where(CookbookChunk.book_id == uuid.UUID(book_id)))
     for old in old_chunks.scalars().all():
         await db.delete(old)
+
+    user_result = await db.execute(select(UserProfile).where(UserProfile.user_id == uuid.UUID(user_id)))
+    user = user_result.scalars().first()
+    rag_owner_key = user.rag_owner_key if user else UserProfile.build_rag_owner_key(user_id)
 
     total_upserted = 0
 
@@ -119,7 +124,10 @@ async def embed_and_upsert_chunks(
                 {
                     "id": str(chunk_id),
                     "values": embedding,
-                    "metadata": chunk_obj.to_pinecone_metadata(),
+                    "metadata": {
+                        **chunk_obj.to_pinecone_metadata(),
+                        "rag_owner_key": rag_owner_key,
+                    },
                 }
             )
 

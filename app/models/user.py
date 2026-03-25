@@ -10,6 +10,7 @@ KitchenConfig is snapshotted into GRASPState at session start so a
 config change mid-run cannot corrupt an in-progress schedule.
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -50,9 +51,17 @@ class KitchenConfig(SQLModel, table=True):
 class UserProfile(SQLModel, table=True):
     __tablename__ = "user_profiles"
 
+    @staticmethod
+    def build_rag_owner_key(email: str) -> str:
+        """Stable, environment-portable identity for Pinecone ownership filtering."""
+        normalized = email.strip().lower()
+        slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+        return f"email:{slug}"
+
     user_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     name: str
     email: str = Field(unique=True, index=True)
+    rag_owner_key: str = Field(index=True)
     password_hash: str = Field(default="")
     kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
     # Merged into every DinnerConcept at session creation

@@ -24,6 +24,7 @@ from sqlalchemy import JSON
 from sqlmodel import Column, Field, SQLModel
 
 from app.models.enums import ChunkType, DocumentType, IngestionStatus
+from app.models.user import UserProfile
 
 
 class BookRecord(SQLModel, table=True):
@@ -78,11 +79,13 @@ class CookbookChunk(SQLModel, table=True):
         """Metadata envelope for Pinecone upsert. user_id enables per-chef isolation."""
         return {
             "user_id": str(self.user_id),
+            "rag_owner_key": UserProfile.build_rag_owner_key(self.user.email if self.user else str(self.user_id)),
             "book_id": str(self.book_id),
             "chunk_id": str(self.chunk_id),
             "chunk_type": self.chunk_type.value,
             "chapter": self.chapter,
             "page_number": self.page_number,
+            "text": self.text,
         }
 
 

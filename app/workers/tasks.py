@@ -69,6 +69,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
                 "kitchen_config": kitchen.model_dump() if kitchen else {},
                 "equipment": [e.model_dump() for e in equipment_rows],
                 "user_id": user_id,
+                "rag_owner_key": user.rag_owner_key,
                 "raw_recipes": [],
                 "enriched_recipes": [],
                 "validated_recipes": [],

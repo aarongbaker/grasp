@@ -70,7 +70,8 @@ class GRASPState(TypedDict, total=False):
     concept: dict  # DinnerConcept.model_dump()
     kitchen_config: dict  # KitchenConfig fields
     equipment: list[dict]  # List[Equipment-like dicts] snapshotted at session start
-    user_id: str  # UUID string for Pinecone RAG filtering
+    user_id: str  # UUID string for relational ownership
+    rag_owner_key: str  # Stable Pinecone ownership key portable across DB migrations
     raw_recipes: list[dict]  # List[RawRecipe.model_dump()]
     enriched_recipes: list[dict]  # List[EnrichedRecipe.model_dump()]
     validated_recipes: list[dict]  # List[ValidatedRecipe.model_dump()]
