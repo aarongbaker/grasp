@@ -10,14 +10,17 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import DBSession
 from app.core.settings import get_settings
 from app.models.user import UserProfile
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/auth")
 
 
@@ -64,7 +67,8 @@ def _build_refresh_token(user_id: str, settings) -> str:
 
 
 @router.post("/token", response_model=TokenResponse)
-async def issue_token(body: TokenRequest, db: DBSession):
+@limiter.limit("5/minute")
+async def issue_token(request: Request, body: TokenRequest, db: DBSession):
     """
     Issue a JWT for a registered user. Validates email + password.
     Returns access_token and refresh_token.
@@ -90,7 +94,8 @@ async def issue_token(body: TokenRequest, db: DBSession):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(body: RefreshRequest, db: DBSession):
+@limiter.limit("10/minute")
+async def refresh_token(request: Request, body: RefreshRequest, db: DBSession):
     """
     Exchange a valid refresh token for a new access + refresh token pair.
     """

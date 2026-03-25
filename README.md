@@ -37,10 +37,10 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 docker compose up -d postgres redis
 
 # 6. Start the API
-.venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 7. In another shell, start the UI if needed
-.venv/bin/streamlit run streamlit_app.py
+# 7. In another shell, start the archived Streamlit UI if needed
+.venv/bin/streamlit run scripts/streamlit_app.py
 ```
 
 ### Option B — Docker-run app
@@ -125,9 +125,11 @@ Database migrations run automatically on app startup via Alembic. You can also r
 
 ### Deployment notes
 
-- **Railway**: deploy the Docker image. Railway injects `PORT`, and the Dockerfile uses that value at runtime.
+- **Railway API service**: start command `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
+- **Railway worker service**: start command `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
 - **Cloudflare**: set `CORS_ALLOWED_ORIGINS` to your Cloudflare-hosted frontend origin(s) as a JSON array string.
 - Keep environment variables for deploy targets in the platform environment, not in your local `.env`.
+- Full checklist: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
 
 ## Ingest Your Cookbooks
 
@@ -137,7 +139,7 @@ Before generating meals, ingest your cookbook PDFs so the RAG pipeline can draw 
 
 ```bash
 # Ingest all PDFs in a folder
-.venv/bin/python ingest_folder.py ~/path/to/your/cookbooks/
+.venv/bin/python scripts/ingest_folder.py ~/path/to/your/cookbooks/
 ```
 
 This will:
@@ -145,10 +147,10 @@ This will:
 2. Process each PDF: OCR, classify, chunk, embed
 3. Print a summary with page/chunk counts and your user ID
 
-### Option B: Streamlit UI
+### Option B: Archived Streamlit UI
 
 ```bash
-.venv/bin/streamlit run streamlit_app.py
+.venv/bin/streamlit run scripts/streamlit_app.py
 ```
 
 Go to the **"Ingest Cookbooks"** tab, upload your PDFs, and click **Ingest**. The UI shows progress and a summary when done.
@@ -157,10 +159,10 @@ Go to the **"Ingest Cookbooks"** tab, upload your PDFs, and click **Ingest**. Th
 
 ## Generate Meal Schedules
 
-Launch the Streamlit UI:
+Launch the archived Streamlit UI:
 
 ```bash
-.venv/bin/streamlit run streamlit_app.py
+.venv/bin/streamlit run scripts/streamlit_app.py
 ```
 
 In the **"Plan a Meal"** tab:
@@ -187,17 +189,17 @@ The pipeline will generate recipes, enrich them with your cookbook knowledge, va
 
 ```
 grasp/
-├── graph/              # LangGraph state machine & pipeline nodes
-│   ├── graph.py        # Graph topology
-│   └── nodes/          # generator, enricher, validator, dag_builder, dag_merger, renderer
-├── models/             # Pydantic/SQLModel data models
-├── ingestion/          # Cookbook ingestion pipeline (OCR, classify, chunk, embed)
-├── api/                # FastAPI routes (health, users, sessions, ingest)
-├── core/               # Settings, auth, dependency injection
-├── workers/            # Celery task workers
+├── app/                # FastAPI app package
+│   ├── api/            # Routes (health, users, sessions, ingest, auth)
+│   ├── core/           # Settings, auth, dependency injection, status helpers
+│   ├── db/             # SQLAlchemy / SQLModel session setup
+│   ├── graph/          # LangGraph state machine & pipeline nodes
+│   ├── ingestion/      # Cookbook ingestion pipeline (OCR, classify, chunk, embed)
+│   ├── models/         # Pydantic/SQLModel data models
+│   └── workers/        # Celery task workers
+├── scripts/            # Archived utilities (Streamlit UI, bulk ingestion, smoke test)
 ├── tests/              # Test suite
-├── main.py             # FastAPI entry point
-├── streamlit_app.py    # Interactive test UI
-├── ingest_folder.py    # Bulk cookbook ingestion CLI
-└── docker-compose.yml  # Postgres + Redis
+├── frontend/           # React frontend
+├── docker-compose.yml  # Local Postgres + Redis + API + worker
+└── docs/               # Deployment and project docs
 ```
