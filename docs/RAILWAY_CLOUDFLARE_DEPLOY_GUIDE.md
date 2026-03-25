@@ -197,7 +197,7 @@ The worker processes background pipeline jobs.
 Use this worker command:
 
 ```bash
-celery -A workers.celery_app worker --concurrency=1 --pool=solo
+celery -A app.workers.celery_app worker --concurrency=1 --pool=solo --loglevel=INFO
 ```
 
 This is important for Railway Hobby-sized memory limits.
@@ -409,7 +409,7 @@ Re-check:
 Expected worker command:
 
 ```bash
-celery -A workers.celery_app worker --concurrency=1 --pool=solo
+celery -A app.workers.celery_app worker --concurrency=1 --pool=solo --loglevel=INFO
 ```
 
 ---
@@ -458,7 +458,7 @@ CORS_ALLOWED_ORIGINS=https://grasp-abc123.pages.dev
 
 ### Railway worker
 - [ ] Worker service created from same repo
-- [ ] Worker command set to `celery -A workers.celery_app worker --concurrency=1 --pool=solo`
+- [ ] Worker command set to `celery -A app.workers.celery_app worker --concurrency=1 --pool=solo --loglevel=INFO`
 - [ ] Same DB/Redis/API key env vars set
 - [ ] Worker logs show successful startup
 

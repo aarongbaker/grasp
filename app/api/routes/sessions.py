@@ -166,7 +166,7 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
         from app.main import get_graph  # injected at startup
 
         try:
-            graph = get_graph()
+            graph = await get_graph()
             live_status = await status_projection(session_id, graph)
             return {**session.model_dump(), "status": live_status}
         except Exception:
@@ -203,7 +203,7 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
     # Slow path (backward compat for sessions finalized before migration)
     from app.main import get_graph
 
-    graph = get_graph()
+    graph = await get_graph()
     config = {"configurable": {"thread_id": str(session_id)}}
 
     try:

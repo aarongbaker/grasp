@@ -2,6 +2,10 @@
 
 Use this when promoting the backend to Railway.
 
+If you deploy the frontend separately from the API (for example Cloudflare Pages → Railway API),
+you must also set `VITE_API_URL` in the frontend build environment. The frontend defaults
+to same-origin `/api/v1` only when `VITE_API_URL` is unset.
+
 ## Services
 
 Create four services in one Railway project:
@@ -90,12 +94,14 @@ PINECONE_ENVIRONMENT=us-east-1-aws
 
 Before deploy, confirm:
 
-- [ ] `pytest tests/ -m "not integration" -q` passes
-- [ ] `ruff check app/ tests/` passes
+- [ ] `.venv/bin/python -m pytest tests/ -m "not integration" -q` passes
+- [ ] `npm --prefix frontend run build` passes if deploying the frontend
+- [ ] `npm --prefix frontend run lint` passes if deploying the frontend
 - [ ] Pinecone index exists
 - [ ] JWT secret is not the default value
 - [ ] CORS origin is not localhost
 - [ ] Worker uses `--pool=solo --concurrency=1`
+- [ ] If frontend and API are on different origins, frontend build env sets `VITE_API_URL=https://<railway-api-url>`
 
 ## Smoke Test After Deploy
 

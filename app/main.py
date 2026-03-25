@@ -31,18 +31,46 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 _graph = None
+_checkpointer_cm = None
 
 
-def get_graph():
-    """Returns the compiled LangGraph graph. Raises if not initialised."""
-    if _graph is None:
-        raise RuntimeError("LangGraph graph not initialised. Is the app running?")
-    return _graph
+async def get_graph():
+    """Returns the compiled LangGraph graph, initialising it lazily if needed."""
+    global _graph, _checkpointer_cm
+
+    if _graph is not None:
+        return _graph
+
+    from app.core.settings import get_settings
+    from app.graph.graph import build_grasp_graph
+
+    settings = get_settings()
+
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.langgraph_checkpoint_url)
+        checkpointer = await _checkpointer_cm.__aenter__()
+        await checkpointer.setup()
+        _graph = build_grasp_graph(checkpointer)
+        return _graph
+    except Exception as e:
+        if settings.app_env == "production":
+            raise RuntimeError(
+                "LangGraph checkpoint initialisation failed in production. "
+                "Check LANGGRAPH_CHECKPOINT_URL and Postgres connectivity."
+            ) from e
+
+        logger.warning("LangGraph init failed (%s). Using MemorySaver fallback.", e)
+        from langgraph.checkpoint.memory import MemorySaver
+
+        _graph = build_grasp_graph(MemorySaver())
+        return _graph
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _graph
+    global _checkpointer_cm
 
     # ── 0. Validate JWT secret ────────────────────────────────────────────────
     from app.core.settings import get_settings
@@ -91,36 +119,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Pinecone init failed (%s). Ingestion will not work.", e)
 
-    # ── 3. Build LangGraph graph ──────────────────────────────────────────────
-    try:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-        from app.core.settings import get_settings
-        from app.graph.graph import build_grasp_graph
-
-        settings = get_settings()
-
-        _checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.langgraph_checkpoint_url)
-        checkpointer = await _checkpointer_cm.__aenter__()
-        await checkpointer.setup()
-        _graph = build_grasp_graph(checkpointer)
-        app.state.graph = _graph
-        app.state._checkpointer_cm = _checkpointer_cm  # prevent GC
-
-    except Exception as e:
-        logger.warning("LangGraph init failed (%s). Using MemorySaver fallback.", e)
-        from langgraph.checkpoint.memory import MemorySaver
-
-        from app.graph.graph import build_grasp_graph
-
-        _graph = build_grasp_graph(MemorySaver())
-        app.state.graph = _graph
+    # ── 3. Graph initialisation is lazy ──────────────────────────────────────
+    # Avoid blocking container readiness on checkpoint setup. The graph is
+    # initialised on first route access that needs it.
 
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
-    if hasattr(app.state, "_checkpointer_cm"):
-        await app.state._checkpointer_cm.__aexit__(None, None, None)
+    if _checkpointer_cm is not None:
+        await _checkpointer_cm.__aexit__(None, None, None)
     from app.db.session import engine
 
     await engine.dispose()

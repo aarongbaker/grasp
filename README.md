@@ -127,7 +127,7 @@ Database migrations run automatically on app startup via Alembic. You can also r
 
 - **Railway API service**: start command `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
 - **Railway worker service**: start command `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
-- **Cloudflare**: set `CORS_ALLOWED_ORIGINS` to your Cloudflare-hosted frontend origin(s) as a JSON array string.
+- **Cloudflare / separate frontend deploys**: set `CORS_ALLOWED_ORIGINS` to your Cloudflare-hosted frontend origin(s) as a JSON array string, and set `VITE_API_URL` in the frontend build environment to your Railway API base URL.
 - Keep environment variables for deploy targets in the platform environment, not in your local `.env`.
 - Full checklist: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
 
