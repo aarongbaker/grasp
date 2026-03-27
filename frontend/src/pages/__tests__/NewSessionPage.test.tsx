@@ -91,11 +91,18 @@ describe('NewSessionPage', () => {
   });
 
   it('keeps the meal-idea flow isolated and submits the legacy payload', async () => {
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
-      session_id: 'session-123',
-      status: 'generating',
-      message: 'Pipeline enqueued',
+    const callOrder: string[] = [];
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
+      callOrder.push(`create:${JSON.stringify(payload)}`);
+      return createdSession;
+    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockImplementation(async (sessionId) => {
+      callOrder.push(`run:${sessionId}`);
+      return {
+        session_id: 'session-123',
+        status: 'generating',
+        message: 'Pipeline enqueued',
+      };
     });
     const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 
@@ -114,17 +121,28 @@ describe('NewSessionPage', () => {
       serving_time: undefined,
     });
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+    expect(callOrder).toEqual([
+      'create:{"free_text":"A bright spring dinner","guest_count":4,"meal_type":"dinner","occasion":"dinner_party","dietary_restrictions":[]}',
+      'run:session-123',
+    ]);
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
     expect(detectedSpy).not.toHaveBeenCalled();
   });
 
   it('loads cookbook candidates lazily, supports mixed-book selection, and submits stable chunk order', async () => {
+    const callOrder: string[] = [];
     const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
-      session_id: 'session-123',
-      status: 'generating',
-      message: 'Pipeline enqueued',
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
+      callOrder.push(`create:${JSON.stringify(payload)}`);
+      return createdSession;
+    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockImplementation(async (sessionId) => {
+      callOrder.push(`run:${sessionId}`);
+      return {
+        session_id: 'session-123',
+        status: 'generating',
+        message: 'Pipeline enqueued',
+      };
     });
 
     renderPage();
@@ -155,6 +173,10 @@ describe('NewSessionPage', () => {
       serving_time: undefined,
     });
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+    expect(callOrder).toEqual([
+      'create:{"concept_source":"cookbook","free_text":"Cookbook-selected recipes: Roast Chicken with Herbs, Burnt Honey Tart","selected_recipes":[{"chunk_id":"aaa-chunk"},{"chunk_id":"zzz-chunk"}],"guest_count":4,"meal_type":"dinner","occasion":"dinner_party","dietary_restrictions":[]}',
+      'run:session-123',
+    ]);
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
   });
 

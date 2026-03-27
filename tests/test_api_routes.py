@@ -355,7 +355,14 @@ async def test_run_pipeline_keeps_generating_as_only_direct_in_progress_status_w
             resp = await ac.post(f"/api/v1/sessions/{session_id}/run")
 
     assert resp.status_code == 202
+    assert resp.json() == {
+        "session_id": str(session_id),
+        "status": "generating",
+        "message": "Pipeline enqueued",
+    }
     assert session.status == SessionStatus.GENERATING
+    assert session.started_at is not None
+    assert session.completed_at is None
     assert session.status not in {
         SessionStatus.ENRICHING,
         SessionStatus.VALIDATING,

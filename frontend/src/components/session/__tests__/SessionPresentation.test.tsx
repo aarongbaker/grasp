@@ -162,7 +162,11 @@ describe('session presentation', () => {
         isCookbook: false,
         title: 'A bright spring dinner party with fish and citrus',
         sourceLabel: 'Meal idea',
+        sourceDetail: null,
         recipeSummary: null,
+        recipeCount: 0,
+        recipeNames: [],
+        cookbookTitles: [],
       }),
     );
   });
