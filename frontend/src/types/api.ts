@@ -6,6 +6,7 @@ export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
 export type IngestionStatus = 'pending' | 'processing' | 'complete' | 'failed';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
+export type NewSessionMode = 'meal_ideas' | 'cookbook_recipes';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -238,6 +239,26 @@ export interface DetectedCookbookRecipe {
   chapter: string | null;
   page_number: number | null;
   created_at: string;
+}
+
+export interface SelectedCookbookRecipe {
+  chunk_id: string;
+  book_id: string;
+  book_title: string;
+  chapter: string | null;
+  page_number: number | null;
+  selection_order: number;
+}
+
+export interface CreateCookbookSessionSelectionPayload {
+  mode: 'cookbook_recipes';
+  selected_recipes: SelectedCookbookRecipe[];
+}
+
+export interface CookbookSelectionSummary {
+  total_selected: number;
+  selected_book_ids: string[];
+  selected_chunk_ids: string[];
 }
 
 export interface IngestionJob {
