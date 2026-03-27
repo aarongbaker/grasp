@@ -6,10 +6,15 @@ Pure function tests. No DB, no async, no fixtures beyond inline data.
 Tests cover:
   - Empty input (the Fix #1 crash case)
   - Single-state pages (all narrative, all method)
-  - State transitions via tripwire patterns
+  - Tripwire detection
   - Chunk minimum length filter (< 20 chars discarded)
   - Multiple transitions on the same page
+  - OCR-heavy historical cookbook line structure
 """
+
+from pathlib import Path
+
+import fitz
 
 from app.ingestion.state_machine import CookbookState, _tripwire_check, run_state_machine
 
@@ -92,7 +97,7 @@ def test_tripwire_no_match():
 
 
 def test_transition_narrative_to_method():
-    """A transition from NARRATIVE to METHOD should produce two chunks."""
+    """Method-only prose inside a narrative paragraph should not start a recipe chunk by itself."""
     pages = [
         {
             "page_number": 1,
@@ -104,9 +109,8 @@ def test_transition_narrative_to_method():
         }
     ]
     chunks = run_state_machine(pages)
-    types = [c["chunk_type"] for c in chunks]
-    assert "intro" in types
-    assert "recipe" in types
+    assert len(chunks) == 1
+    assert chunks[0]["chunk_type"] == "intro"
 
 
 def test_transition_method_to_recipe_end():
@@ -161,3 +165,175 @@ def test_same_state_no_flush():
     # All sentences match METHOD — should be a single chunk
     assert len(chunks) == 1
     assert chunks[0]["chunk_type"] == "recipe"
+
+
+def test_header_detection_rejects_front_matter_and_all_caps_noise():
+    """Front matter and all-caps marketing copy should not be treated as recipe headers."""
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                'DELICIOUS RECIPES\n'
+                'THAT HAVE MADE SOUTHERN COOKING FAMOUS THE WORLD\n'
+                'OVER.\n'
+                'Charlotte, N. C., News.\n'
+                'This is a long narrative introduction to the cookbook and its history.'
+            ),
+        }
+    ]
+
+    chunks = run_state_machine(pages)
+
+    assert len(chunks) == 1
+    assert chunks[0]["chunk_type"] == "intro"
+    assert "DELICIOUS RECIPES" in chunks[0]["text"]
+
+
+def test_ocr_split_title_lines_merge_back_into_single_recipe_header():
+    """A title followed by ingredient-style content should stay attached to one recipe chunk."""
+    pages = [
+        {
+            "page_number": 20,
+            "text": (
+                "Shrimp Paste\n"
+                "2 cups boiled shrimp\n"
+                "Run a quart of boiled and picked shrimp through the meat grinder.\n"
+                "Put in a saucepan with salt, pepper, mace and two heaping tablespoons of butter.\n"
+                "Heat thoroughly and place into molds."
+            ),
+        }
+    ]
+
+    chunks = run_state_machine(pages)
+    recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
+
+    assert len(recipe_chunks) == 1
+    assert "Shrimp Paste" in recipe_chunks[0]["text"]
+
+
+def test_ocr_heavy_page_with_multiple_recipes_splits_into_multiple_recipe_chunks():
+    """Historical cookbook OCR should preserve multiple recipe candidates from a dense page."""
+    page_text = """18
+THE SOUTHERN COOK BOOK
+Shrimp Sauce
+(To Be Served with Fish)
+1V2 cups chopped
+cooked
+shrimps
+3 tablespoons
+lemon
+juice
+salt and pepper to
+taste
+iVz cups white sauce
+(see page 24)
+2 hard cooked eggs
+Soak shrimps
+in lemon
+juice
+one-half hour
+and add them
+to white sauce; when ready
+to
+serve add the finely chopped hard cooked egg
+and
+a
+little minced
+parsley.
+Pour
+this
+over
+the
+fish.
+Deviled Crabs Norfolk
+Make
+a
+white
+sauce
+by mixing
+one
+table-
+spoonful
+of melted butter and one tablespoon-
+ful
+of
+flour; add one-half
+cup
+of
+cream
+or
+milk and
+let come to a
+boil, stirring constant-
+ly.
+Add
+salt and pepper.
+Then add one pint
+of crab meat, two chopped hard cooked eggs,
+sprig of
+parsley, dash of Worcestershire sauce
+and
+place
+in
+the
+shells.
+Brush
+with
+melted
+butter and cracker crumbs and bake
+in slow
+oven
+until
+well browned.
+Crab Croquettes
+2 cups crab meat
+1
+teaspoon onion juice
+salt and pepper
+chopped parsley
+1 cup white sauce
+(see page 24)
+cracker crumbs
+1
+egg, beaten
+Chop the crab meat fine and add the season-
+ings. When well mixed, add to the white sauce.
+Mold
+into
+croquettes,
+roll
+in
+cracker crumbs,
+dip
+in
+the
+slightly
+beaten
+egg, and then
+roll
+in the crumbs again. Fry
+in deep hot
+fat until
+golden
+brown.
+"""
+    chunks = run_state_machine([{"page_number": 18, "text": page_text}])
+    recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
+
+    assert len(recipe_chunks) >= 2
+    assert any("Shrimp Sauce" in c["text"] for c in recipe_chunks)
+    assert any("Crab Croquettes" in c["text"] for c in recipe_chunks)
+
+
+def test_southern_cookbook_pdf_yields_more_than_collapsed_single_recipe_result():
+    """Regression check against the real OCR-heavy PDF that previously collapsed to one recipe chunk."""
+    pdf_path = Path("/Users/aaronbaker/Desktop/cookbooks/southerncookbook00lustrich.pdf")
+    if not pdf_path.exists():
+        return
+
+    doc = fitz.open(str(pdf_path))
+    pages = [{"page_number": i + 1, "text": doc[i].get_text("text") or ""} for i in range(len(doc))]
+    chunks = run_state_machine(pages)
+    recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
+
+    assert len(recipe_chunks) > 16
