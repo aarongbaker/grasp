@@ -1,16 +1,1 @@
-[
-  {
-    "id": "8e4b1d43",
-    "label": "frontend-dev",
-    "command": "VITE_API_URL=http://localhost:8000 npm --prefix frontend run dev -- --host 127.0.0.1",
-    "cwd": "/Users/aaronbaker/Desktop/Projects/grasp",
-    "ownerSessionFile": "/Users/aaronbaker/.gsd/sessions/--Users-aaronbaker-Desktop-Projects-grasp--/2026-03-27T15-32-44-403Z_2c6050a9-1f6a-4f00-93ba-8a444e8fbe1e.jsonl",
-    "persistAcrossSessions": false,
-    "startedAt": 1774625594820,
-    "processType": "server",
-    "group": "s05-uat",
-    "readyPattern": null,
-    "readyPort": 5173,
-    "pid": 23516
-  }
-]
+[]
