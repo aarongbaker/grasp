@@ -15,14 +15,19 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
-from app.models.enums import MealType, Occasion, SessionStatus
-from app.models.pipeline import DinnerConcept
+from app.models.enums import SessionStatus
+from app.models.ingestion import BookRecord, CookbookChunk
+from app.models.pipeline import (
+    CreateSessionCookbookRequest,
+    CreateSessionLegacyRequest,
+    DinnerConcept,
+    SelectedCookbookRecipe,
+)
 from app.models.session import Session
 
 limiter = Limiter(key_func=get_remote_address)
@@ -33,34 +38,92 @@ def _session_status(value: SessionStatus | str) -> SessionStatus:
     return value if isinstance(value, SessionStatus) else SessionStatus(value)
 
 
-class CreateSessionRequest(BaseModel):
-    free_text: str = Field(max_length=2000)
-    guest_count: int = Field(ge=1, le=100)
-    meal_type: MealType
-    occasion: Occasion
-    dietary_restrictions: list[str] = []
-    serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
+def _summarise_selected_recipes(recipes: list[SelectedCookbookRecipe]) -> str:
+    names = [recipe.text.strip() for recipe in recipes if recipe.text.strip()]
+    preview = ", ".join(names[:3])
+    if len(names) > 3:
+        preview += f", and {len(names) - 3} more"
+    return f"Cookbook-selected recipes: {preview}." if preview else "Cookbook-selected recipes."
+
+
+async def _load_authorized_selected_recipes(
+    db: DBSession,
+    current_user: CurrentUser,
+    chunk_ids: list[uuid.UUID],
+) -> list[SelectedCookbookRecipe]:
+    statement = (
+        select(CookbookChunk, BookRecord)
+        .join(BookRecord, CookbookChunk.book_id == BookRecord.book_id)
+        .where(
+            CookbookChunk.chunk_id.in_(chunk_ids),
+            CookbookChunk.user_id == current_user.user_id,
+            BookRecord.user_id == current_user.user_id,
+        )
+    )
+    results = await db.exec(statement)
+    rows = results.all()
+
+    owned_by_chunk_id = {
+        chunk.chunk_id: SelectedCookbookRecipe(
+            chunk_id=chunk.chunk_id,
+            book_id=book.book_id,
+            book_title=book.title,
+            text=chunk.text,
+            chapter=chunk.chapter,
+            page_number=chunk.page_number,
+        )
+        for chunk, book in rows
+    }
+
+    missing = [str(chunk_id) for chunk_id in chunk_ids if chunk_id not in owned_by_chunk_id]
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "One or more selected cookbook recipes were not found for the current user.",
+                "invalid_chunk_ids": missing,
+            },
+        )
+
+    return [owned_by_chunk_id[chunk_id] for chunk_id in chunk_ids]
 
 
 @router.post("", status_code=201)
 @limiter.limit("30/minute")
-async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
+async def create_session(request: Request, body: CreateSessionLegacyRequest | CreateSessionCookbookRequest, db: DBSession, current_user: CurrentUser):
     # Merge chef's dietary_defaults into every session automatically
     merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
 
-    concept = DinnerConcept(
-        free_text=body.free_text,
-        guest_count=body.guest_count,
-        meal_type=body.meal_type,
-        occasion=body.occasion,
-        dietary_restrictions=merged_restrictions,
-        serving_time=body.serving_time,
-    )
+    if isinstance(body, CreateSessionCookbookRequest):
+        selected_recipes = await _load_authorized_selected_recipes(
+            db,
+            current_user,
+            [selection.chunk_id for selection in body.selected_recipes],
+        )
+        concept = DinnerConcept(
+            free_text=_summarise_selected_recipes(selected_recipes),
+            guest_count=body.guest_count,
+            meal_type=body.meal_type,
+            occasion=body.occasion,
+            dietary_restrictions=merged_restrictions,
+            serving_time=body.serving_time,
+            concept_source="cookbook",
+            selected_recipes=selected_recipes,
+        )
+    else:
+        concept = DinnerConcept(
+            free_text=body.free_text,
+            guest_count=body.guest_count,
+            meal_type=body.meal_type,
+            occasion=body.occasion,
+            dietary_restrictions=merged_restrictions,
+            serving_time=body.serving_time,
+        )
 
     session = Session(
         user_id=current_user.user_id,
         status=SessionStatus.PENDING,
-        concept_json=concept.model_dump(),
+        concept_json=concept.model_dump(mode="json"),
     )
     db.add(session)
     await db.commit()

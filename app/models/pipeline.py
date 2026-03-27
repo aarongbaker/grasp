@@ -20,11 +20,23 @@ every session.
 
 import operator
 import re
-from typing import Annotated, Any, Optional
+import uuid
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import MealType, Occasion
+
+
+class SelectedCookbookRecipe(BaseModel):
+    """Authoritative cookbook recipe reference captured at session creation."""
+
+    chunk_id: uuid.UUID
+    book_id: uuid.UUID
+    book_title: str = Field(max_length=500)
+    text: str = Field(min_length=1)
+    chapter: str = ""
+    page_number: int = Field(ge=0, default=0)
 
 
 class DinnerConcept(BaseModel):
@@ -40,6 +52,8 @@ class DinnerConcept(BaseModel):
     occasion: Occasion
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
+    concept_source: Literal["free_text", "cookbook"] = "free_text"
+    selected_recipes: list[SelectedCookbookRecipe] = []
 
     @field_validator("serving_time")
     @classmethod
@@ -49,6 +63,42 @@ class DinnerConcept(BaseModel):
         if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", v):
             raise ValueError("serving_time must be in HH:MM 24-hour format (e.g. '19:00')")
         return v
+
+    @model_validator(mode="after")
+    def validate_cookbook_source_contract(self) -> "DinnerConcept":
+        if self.concept_source == "cookbook" and not self.selected_recipes:
+            raise ValueError("selected_recipes is required when concept_source is 'cookbook'")
+        if self.concept_source == "free_text" and self.selected_recipes:
+            raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+        return self
+
+
+class CreateSessionLegacyRequest(BaseModel):
+    free_text: str = Field(max_length=2000)
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
+class CreateSessionCookbookSelection(BaseModel):
+    chunk_id: uuid.UUID
+
+
+class CreateSessionCookbookRequest(BaseModel):
+    selected_recipes: list[CreateSessionCookbookSelection] = Field(min_length=1)
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
+CreateSessionRequest = Annotated[
+    CreateSessionLegacyRequest | CreateSessionCookbookRequest,
+    Field(discriminator=None),
+]
 
 
 # ── GRASPState ────────────────────────────────────────────────────────────────

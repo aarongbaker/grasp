@@ -13,7 +13,7 @@ Postgres instance. Tests verify HTTP status codes and request validation.
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -22,7 +22,7 @@ from httpx import ASGITransport, AsyncClient
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import KitchenConfig, UserProfile
+from app.models.user import UserProfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test app + fixtures
@@ -65,9 +65,14 @@ class MockDBSession:
     def __init__(self):
         self._store: dict[tuple, object] = {}
         self._exec_results: list[object] = []
+        self._added: list[object] = []
 
     def add(self, obj):
-        pass
+        self._added.append(obj)
+        if hasattr(obj, "session_id"):
+            self._store[(type(obj), obj.session_id)] = obj
+        elif hasattr(obj, "job_id"):
+            self._store[(type(obj), obj.job_id)] = obj
 
     async def commit(self):
         pass
@@ -76,8 +81,10 @@ class MockDBSession:
         # Simulate assigning a UUID if not already set
         if hasattr(obj, "session_id") and obj.session_id is None:
             obj.session_id = uuid.uuid4()
+            self._store[(type(obj), obj.session_id)] = obj
         if hasattr(obj, "job_id") and obj.job_id is None:
             obj.job_id = uuid.uuid4()
+            self._store[(type(obj), obj.job_id)] = obj
 
     async def get(self, model_class, pk):
         return self._store.get((model_class, pk))
@@ -218,8 +225,88 @@ async def test_create_session_201(app_with_overrides, test_user):
     assert data["status"] == "pending"
     # dietary_defaults merged: gluten-free from user + nut-free from request
     concept = data["concept_json"]
+    assert concept["concept_source"] == "free_text"
+    assert concept["selected_recipes"] == []
     assert "gluten-free" in concept["dietary_restrictions"]
     assert "nut-free" in concept["dietary_restrictions"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_cookbook_201_persists_owned_recipe_selection(app_with_overrides, mock_db, test_user):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    book = BookRecord(
+        book_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        title="The French Laundry Cookbook",
+        author="Thomas Keller",
+        total_pages=320,
+        total_chunks=12,
+        created_at=now,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=uuid.uuid4(),
+        book_id=book.book_id,
+        user_id=test_user.user_id,
+        text="Roast chicken with bread salad",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Poultry",
+        page_number=87,
+        created_at=now,
+    )
+    mock_db.queue_exec_all([(recipe_chunk, book)])
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "selected_recipes": [{"chunk_id": str(recipe_chunk.chunk_id)}],
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": ["nut-free"],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    concept = data["concept_json"]
+    assert concept["concept_source"] == "cookbook"
+    assert concept["free_text"] == "Cookbook-selected recipes: Roast chicken with bread salad."
+    assert concept["selected_recipes"] == [
+        {
+            "chunk_id": str(recipe_chunk.chunk_id),
+            "book_id": str(book.book_id),
+            "book_title": "The French Laundry Cookbook",
+            "text": "Roast chicken with bread salad",
+            "chapter": "Poultry",
+            "page_number": 87,
+        }
+    ]
+    assert "gluten-free" in concept["dietary_restrictions"]
+    assert "nut-free" in concept["dietary_restrictions"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_cookbook_403_for_unowned_chunk(app_with_overrides):
+    missing_chunk_id = uuid.uuid4()
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "selected_recipes": [{"chunk_id": str(missing_chunk_id)}],
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+            },
+        )
+
+    assert resp.status_code == 403
+    payload = resp.json()["detail"]
+    assert payload["message"] == "One or more selected cookbook recipes were not found for the current user."
+    assert payload["invalid_chunk_ids"] == [str(missing_chunk_id)]
 
 
 @pytest.mark.asyncio
@@ -262,6 +349,8 @@ async def test_get_session_pending_returns_row(app_with_overrides, mock_db, test
             "meal_type": "dinner",
             "occasion": "casual",
             "dietary_restrictions": [],
+            "concept_source": "free_text",
+            "selected_recipes": [],
         },
     )
     mock_db.seed(Session, session_id, session)
@@ -335,7 +424,7 @@ async def test_run_pipeline_202_enqueues(app_with_overrides, mock_db, test_user)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Patch at workers.tasks — the route imports from there at call time
         with patch("app.workers.tasks.run_grasp_pipeline") as mock_task:
-            mock_task.delay = MagicMock()
+            mock_task.delay = MagicMock(return_value=MagicMock(id="task-123"))
             resp = await ac.post(f"/api/v1/sessions/{session_id}/run")
 
     assert resp.status_code == 202
