@@ -83,6 +83,184 @@
   color: var(--cost-negative);
 }
 
+.recipeSection {
+  margin-top: var(--space-2xl);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.sectionDescription {
+  margin-top: var(--space-xs);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 64ch;
+}
+
+.sectionBadge {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  border-radius: 999px;
+  padding: 6px var(--space-sm);
+}
+
+.infoState,
+.errorState {
+  padding: var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.infoState {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.errorState {
+  border-color: color-mix(in srgb, var(--cost-negative) 28%, var(--border));
+  background: color-mix(in srgb, var(--cost-negative) 6%, var(--bg-surface));
+}
+
+.errorStateTitle {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--cost-negative);
+}
+
+.errorStateBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.recipeGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.recipeGroup {
+  padding: var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.recipeGroupHeader {
+  margin-bottom: var(--space-md);
+}
+
+.recipeGroupTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.recipeGroupMeta {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.recipeList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.recipeCard {
+  padding: var(--space-md);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.recipeCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.recipeCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.recipeLocation {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.recipeType {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-warm);
+  background: rgba(194, 65, 12, 0.12);
+  border-radius: 999px;
+  padding: 2px var(--space-sm);
+}
+
+.recipeTimestamp {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.recipeText {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.recipeProvenance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.recipeProvenance div {
+  min-width: 0;
+}
+
+.recipeProvenance dt {
+  margin-bottom: 2px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.recipeProvenance dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 /* Library section */
 .library {
   margin-top: var(--space-2xl);
@@ -155,4 +333,20 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-secondary);
+}
+
+@media (max-width: 720px) {
+  .sectionHeader,
+  .recipeCardHeader,
+  .libraryItemHeader,
+  .libraryItemMeta,
+  .bookItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sectionBadge,
+  .recipeTimestamp {
+    white-space: normal;
+  }
 }

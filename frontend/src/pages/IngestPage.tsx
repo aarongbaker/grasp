@@ -1,11 +1,41 @@
-import { useCallback, useEffect, useState } from 'react';
-import { uploadPdf, getIngestionStatus, listCookbooks, deleteCookbook } from '../api/ingest';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  uploadPdf,
+  getIngestionStatus,
+  listCookbooks,
+  listDetectedCookbookRecipes,
+  deleteCookbook,
+} from '../api/ingest';
 import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
 import { usePolling } from '../hooks/usePolling';
-import type { BookRecord, IngestionJob } from '../types/api';
+import type { BookRecord, DetectedCookbookRecipe, IngestionJob } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './IngestPage.module.css';
+
+type RecipeGroups = Array<{
+  bookId: string;
+  bookTitle: string;
+  recipes: DetectedCookbookRecipe[];
+}>;
+
+function formatRecipeLocation(recipe: DetectedCookbookRecipe): string {
+  const parts: string[] = [];
+
+  if (recipe.chapter) {
+    parts.push(recipe.chapter);
+  }
+
+  if (recipe.page_number !== null) {
+    parts.push(`Page ${recipe.page_number}`);
+  }
+
+  return parts.join(' • ') || 'Location unavailable';
+}
+
+function formatRecipeText(text: string): string {
+  return text.trim() || 'No source text available for this candidate.';
+}
 
 export function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -13,6 +43,9 @@ export function IngestPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [cookbooks, setCookbooks] = useState<BookRecord[]>([]);
+  const [detectedRecipes, setDetectedRecipes] = useState<DetectedCookbookRecipe[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(true);
+  const [recipesError, setRecipesError] = useState('');
 
   const fetchCookbooks = useCallback(async () => {
     try {
@@ -24,12 +57,30 @@ export function IngestPage() {
     }
   }, []);
 
+  const fetchDetectedRecipes = useCallback(async () => {
+    setRecipesLoading(true);
+
+    try {
+      const recipes = await listDetectedCookbookRecipes();
+      setDetectedRecipes(recipes);
+      setRecipesError('');
+    } catch (err: unknown) {
+      setRecipesError(getErrorMessage(err, 'Could not load detected recipe candidates'));
+    } finally {
+      setRecipesLoading(false);
+    }
+  }, []);
+
+  const refreshCookbookData = useCallback(async () => {
+    await Promise.all([fetchCookbooks(), fetchDetectedRecipes()]);
+  }, [fetchCookbooks, fetchDetectedRecipes]);
+
   useEffect(() => {
     const id = window.setTimeout(() => {
-      void fetchCookbooks();
+      void refreshCookbookData();
     }, 0);
     return () => window.clearTimeout(id);
-  }, [fetchCookbooks]);
+  }, [refreshCookbookData]);
 
   const { data: job } = usePolling<IngestionJob>({
     fetcher: () => getIngestionStatus(jobId!),
@@ -38,7 +89,7 @@ export function IngestPage() {
       if (j.status === 'complete' || j.status === 'failed') {
         if (j.status === 'complete') {
           setFile(null);
-          void fetchCookbooks();
+          void refreshCookbookData();
         }
         setJobId(null);
         return true;
@@ -47,6 +98,25 @@ export function IngestPage() {
     },
     enabled: !!jobId,
   });
+
+  const recipeGroups = useMemo<RecipeGroups>(() => {
+    const groups = new Map<string, { bookId: string; bookTitle: string; recipes: DetectedCookbookRecipe[] }>();
+
+    for (const recipe of detectedRecipes) {
+      const existing = groups.get(recipe.book_id);
+      if (existing) {
+        existing.recipes.push(recipe);
+      } else {
+        groups.set(recipe.book_id, {
+          bookId: recipe.book_id,
+          bookTitle: recipe.book_title,
+          recipes: [recipe],
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [detectedRecipes]);
 
   async function handleUpload() {
     if (!file) return;
@@ -64,9 +134,11 @@ export function IngestPage() {
 
   async function handleDelete(bookId: string) {
     setError('');
+    setRecipesError('');
     try {
       await deleteCookbook(bookId);
       setCookbooks((prev) => prev.filter((book) => book.book_id !== bookId));
+      setDetectedRecipes((prev) => prev.filter((recipe) => recipe.book_id !== bookId));
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Could not delete cookbook'));
     }
@@ -117,6 +189,86 @@ export function IngestPage() {
           )}
         </div>
       )}
+
+      <section className={styles.recipeSection} aria-labelledby="detected-recipes-heading">
+        <div className={styles.sectionHeader}>
+          <div>
+            <h2 id="detected-recipes-heading" className={styles.libraryTitle}>
+              Detected Recipe Candidates
+            </h2>
+            <p className={styles.sectionDescription}>
+              Review recipe-like chunks from your uploaded cookbooks to inspect extraction quality and source provenance.
+            </p>
+          </div>
+          {!recipesLoading && !recipesError && detectedRecipes.length > 0 && (
+            <span className={styles.sectionBadge}>{detectedRecipes.length} candidate{detectedRecipes.length === 1 ? '' : 's'}</span>
+          )}
+        </div>
+
+        {recipesLoading ? (
+          <p className={styles.infoState}>Loading detected recipe candidates…</p>
+        ) : recipesError ? (
+          <div className={styles.errorState} role="alert">
+            <p className={styles.errorStateTitle}>Could not load detected recipe candidates.</p>
+            <p className={styles.errorStateBody}>{recipesError}</p>
+          </div>
+        ) : detectedRecipes.length === 0 ? (
+          <p className={styles.infoState}>
+            No detected recipe candidates yet. Upload a cookbook with recipe pages to inspect extracted chunks here.
+          </p>
+        ) : (
+          <div className={styles.recipeGroups}>
+            {recipeGroups.map((group) => (
+              <section key={group.bookId} className={styles.recipeGroup} aria-labelledby={`cookbook-${group.bookId}`}>
+                <div className={styles.recipeGroupHeader}>
+                  <div>
+                    <h3 id={`cookbook-${group.bookId}`} className={styles.recipeGroupTitle}>
+                      {group.bookTitle}
+                    </h3>
+                    <p className={styles.recipeGroupMeta}>
+                      {group.recipes.length} candidate{group.recipes.length === 1 ? '' : 's'} from this cookbook
+                    </p>
+                  </div>
+                </div>
+                <div className={styles.recipeList}>
+                  {group.recipes.map((recipe) => (
+                    <article key={recipe.chunk_id} className={styles.recipeCard}>
+                      <div className={styles.recipeCardHeader}>
+                        <div className={styles.recipeCardMeta}>
+                          <span className={styles.recipeLocation}>{formatRecipeLocation(recipe)}</span>
+                          <span className={styles.recipeType}>{recipe.chunk_type}</span>
+                        </div>
+                        <span className={styles.recipeTimestamp}>
+                          Detected {new Date(recipe.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className={styles.recipeText}>{formatRecipeText(recipe.text)}</p>
+                      <dl className={styles.recipeProvenance}>
+                        <div>
+                          <dt>Book ID</dt>
+                          <dd>{recipe.book_id}</dd>
+                        </div>
+                        <div>
+                          <dt>Chunk ID</dt>
+                          <dd>{recipe.chunk_id}</dd>
+                        </div>
+                        <div>
+                          <dt>Chapter</dt>
+                          <dd>{recipe.chapter ?? 'Unknown'}</dd>
+                        </div>
+                        <div>
+                          <dt>Page</dt>
+                          <dd>{recipe.page_number ?? 'Unknown'}</dd>
+                        </div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className={styles.library}>
         <h2 className={styles.libraryTitle}>Your Library</h2>
