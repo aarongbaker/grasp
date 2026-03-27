@@ -159,14 +159,18 @@ describe('NewSessionPage', () => {
   });
 
   it('shows a cookbook loading state before candidates render', async () => {
+    let resolveRecipes: ((value: DetectedRecipeCandidate[]) => void) | undefined;
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(() => resolve(detectedRecipes), 0)),
+      () => new Promise((resolve) => {
+        resolveRecipes = resolve;
+      }),
     );
 
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
 
     expect(screen.getByText('Loading cookbook recipes…')).toBeInTheDocument();
+    resolveRecipes?.(detectedRecipes);
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
     expect(screen.getByLabelText('Weeknight Classics')).toBeInTheDocument();
     expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();

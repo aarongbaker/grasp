@@ -10,6 +10,7 @@ import { PipelineProgress } from '../components/session/PipelineProgress';
 import { ScheduleTimeline } from '../components/session/ScheduleTimeline';
 import { RecipeCard } from '../components/session/RecipeCard';
 import { RecipePDF } from '../components/session/RecipePDF';
+import { getSessionConceptDisplay } from '../components/session/sessionConceptDisplay';
 import { useSessionStatus } from '../hooks/useSessionStatus';
 import { TERMINAL_STATUSES, type SessionResults } from '../types/api';
 import styles from './SessionDetailPage.module.css';
@@ -30,6 +31,7 @@ export function SessionDetailPage() {
   const isTerminal = session && TERMINAL_STATUSES.includes(session.status);
   const isFailed = session?.status === 'failed';
   const isCancelled = session?.status === 'cancelled';
+  const conceptDisplay = session ? getSessionConceptDisplay(session.concept_json) : null;
 
   async function handleCancel() {
     if (!sessionId || cancelling) return;
@@ -96,7 +98,20 @@ export function SessionDetailPage() {
           <h1 className={styles.title}>Session</h1>
           <StatusBadge status={session.status} />
         </div>
-        <p className={styles.conceptText}>{session.concept_json.free_text}</p>
+        {conceptDisplay?.isCookbook && (
+          <div className={styles.conceptBadgeRow}>
+            <span className={styles.conceptLabel}>{conceptDisplay.sourceLabel}</span>
+            {conceptDisplay.sourceDetail && (
+              <span className={styles.conceptSourceDetail}>{conceptDisplay.sourceDetail}</span>
+            )}
+          </div>
+        )}
+        <p className={styles.conceptText}>{conceptDisplay?.title ?? session.concept_json.free_text}</p>
+        {conceptDisplay?.isCookbook && conceptDisplay.recipeSummary && (
+          <p className={styles.conceptMeta}>
+            Selected recipes: {conceptDisplay.recipeSummary}
+          </p>
+        )}
       </div>
 
       {/* In-progress state */}

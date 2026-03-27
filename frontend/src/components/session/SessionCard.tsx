@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { XIcon } from 'lucide-react';
 import { StatusBadge } from '../shared/StatusBadge';
 import { MEAL_TYPE_LABELS, OCCASION_LABELS, type Session } from '../../types/api';
+import { getSessionConceptDisplay } from './sessionConceptDisplay';
 import styles from './SessionCard.module.css';
 
 function formatDuration(minutes: number): string {
@@ -29,6 +30,7 @@ interface SessionCardProps {
 
 export function SessionCard({ session, onDelete }: SessionCardProps) {
   const { concept_json: c } = session;
+  const conceptDisplay = getSessionConceptDisplay(c);
   const [confirming, setConfirming] = useState(false);
 
   function handleDeleteClick(e: React.MouseEvent) {
@@ -50,7 +52,18 @@ export function SessionCard({ session, onDelete }: SessionCardProps) {
   return (
     <Link to={`/sessions/${session.session_id}`} className={styles.card}>
       <div className={styles.header}>
-        <div className={styles.concept}>{c.free_text}</div>
+        <div className={styles.titleBlock}>
+          {conceptDisplay.isCookbook && (
+            <span className={styles.sourceLabel}>{conceptDisplay.sourceLabel}</span>
+          )}
+          <div className={styles.concept}>{conceptDisplay.title}</div>
+          {conceptDisplay.isCookbook && conceptDisplay.sourceDetail && (
+            <div className={styles.sourceDetail}>{conceptDisplay.sourceDetail}</div>
+          )}
+          {conceptDisplay.isCookbook && conceptDisplay.recipeSummary && (
+            <div className={styles.recipeSummary}>{conceptDisplay.recipeSummary}</div>
+          )}
+        </div>
         <div className={styles.headerActions}>
           <StatusBadge status={session.status} />
           {onDelete && (

@@ -13,6 +13,7 @@ import {
   type ValidatedRecipe,
   type TimelineEntry,
 } from '../../types/api';
+import { getSessionConceptDisplay } from './sessionConceptDisplay';
 
 /* ------------------------------------------------------------------ */
 /* Font registration — react-pdf needs explicit .ttf URLs              */
@@ -415,6 +416,7 @@ export interface RecipePDFProps {
 
 export function RecipePDF({ session, results }: RecipePDFProps) {
   const schedule = results.schedule;
+  const conceptDisplay = getSessionConceptDisplay(session.concept_json);
   // Combine timeline with any legacy prep_ahead_entries (backwards compat with old session data)
   const allEntries = (() => {
     const legacyPrepAhead = schedule.prep_ahead_entries ?? [];
@@ -440,7 +442,11 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
         </View>
         <View style={s.divider} />
 
-        <Text style={s.conceptText}>{session.concept_json.free_text}</Text>
+        <Text style={s.conceptText}>{conceptDisplay.title}</Text>
+
+        {conceptDisplay.isCookbook && conceptDisplay.sourceDetail ? (
+          <Text style={s.conceptText}>{conceptDisplay.sourceDetail}</Text>
+        ) : null}
 
         {schedule.summary ? (
           <View style={s.summaryBlock}>

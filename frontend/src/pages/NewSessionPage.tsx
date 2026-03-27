@@ -82,7 +82,7 @@ export function NewSessionPage() {
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (mode !== 'cookbook' || cookbookLoaded || cookbookLoading) {
+    if (mode !== 'cookbook' || cookbookLoaded) {
       return;
     }
 
@@ -110,7 +110,7 @@ export function NewSessionPage() {
     return () => {
       cancelled = true;
     };
-  }, [mode, cookbookLoaded, cookbookLoading]);
+  }, [mode, cookbookLoaded]);
 
   const groupedRecipes = useMemo(() => groupRecipesByBook(cookbookCandidates), [cookbookCandidates]);
   const selectedRecipes = useMemo(() => {
