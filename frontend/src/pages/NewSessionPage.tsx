@@ -1,5 +1,6 @@
-import { type FormEvent, type KeyboardEvent, useMemo, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { listDetectedCookbookRecipes } from '../api/ingest';
 import { createSession, runPipeline } from '../api/sessions';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
@@ -9,6 +10,7 @@ import {
   OCCASION_LABELS,
   type CookbookSelectionSummary,
   type CreateCookbookSessionSelectionPayload,
+  type DetectedCookbookRecipe,
   type MealType,
   type NewSessionMode,
   type Occasion,
@@ -51,6 +53,36 @@ function summarizeCookbookSelection(payload: CreateCookbookSessionSelectionPaylo
   };
 }
 
+function toSelectedCookbookRecipe(recipe: DetectedCookbookRecipe): SelectedCookbookRecipe {
+  return {
+    chunk_id: recipe.chunk_id,
+    book_id: recipe.book_id,
+    book_title: recipe.book_title,
+    chapter: recipe.chapter,
+    page_number: recipe.page_number,
+    selection_order: 0,
+  };
+}
+
+function buildRecipePreview(recipe: DetectedCookbookRecipe): string {
+  const trimmedText = recipe.text.trim();
+  if (trimmedText.length <= 220) {
+    return trimmedText;
+  }
+  return `${trimmedText.slice(0, 217).trimEnd()}...`;
+}
+
+function buildRecipeMeta(recipe: DetectedCookbookRecipe): string {
+  const meta = [] as string[];
+  if (recipe.chapter) {
+    meta.push(recipe.chapter);
+  }
+  if (recipe.page_number !== null) {
+    meta.push(`Page ${recipe.page_number}`);
+  }
+  return meta.join(' • ');
+}
+
 export function NewSessionPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<NewSessionMode>('meal_ideas');
@@ -61,7 +93,11 @@ export function NewSessionPage() {
   const [restrictions, setRestrictions] = useState<string[]>([]);
   const [restrictionInput, setRestrictionInput] = useState('');
   const [servingTime, setServingTime] = useState('');
-  const [selectedCookbookRecipes] = useState<SelectedCookbookRecipe[]>([]);
+  const [selectedCookbookRecipes, setSelectedCookbookRecipes] = useState<SelectedCookbookRecipe[]>([]);
+  const [detectedRecipes, setDetectedRecipes] = useState<DetectedCookbookRecipe[]>([]);
+  const [cookbookLoading, setCookbookLoading] = useState(false);
+  const [cookbookError, setCookbookError] = useState('');
+  const [cookbookFetched, setCookbookFetched] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -71,6 +107,57 @@ export function NewSessionPage() {
   );
   const cookbookSummary = useMemo(() => summarizeCookbookSelection(cookbookPayload), [cookbookPayload]);
   const cookbookSubmitDisabled = loading || cookbookSummary.total_selected === 0;
+
+  const recipesByBook = useMemo(() => {
+    const grouped = new Map<string, { bookId: string; bookTitle: string; recipes: DetectedCookbookRecipe[] }>();
+    for (const recipe of detectedRecipes) {
+      const existing = grouped.get(recipe.book_id);
+      if (existing) {
+        existing.recipes.push(recipe);
+      } else {
+        grouped.set(recipe.book_id, {
+          bookId: recipe.book_id,
+          bookTitle: recipe.book_title,
+          recipes: [recipe],
+        });
+      }
+    }
+    return Array.from(grouped.values());
+  }, [detectedRecipes]);
+
+  useEffect(() => {
+    if (mode !== 'cookbook_recipes' || cookbookFetched) {
+      return;
+    }
+
+    let active = true;
+    setCookbookLoading(true);
+    setCookbookError('');
+
+    void listDetectedCookbookRecipes()
+      .then((recipes) => {
+        if (!active) {
+          return;
+        }
+        setDetectedRecipes(recipes);
+        setCookbookFetched(true);
+      })
+      .catch((err: unknown) => {
+        if (!active) {
+          return;
+        }
+        setCookbookError(getErrorMessage(err, 'Unable to load cookbook recipes right now.'));
+      })
+      .finally(() => {
+        if (active) {
+          setCookbookLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [cookbookFetched, mode]);
 
   function addRestriction(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -111,6 +198,17 @@ export function NewSessionPage() {
       setError('Select at least one cookbook recipe to continue.');
       return;
     }
+  }
+
+  function toggleCookbookRecipe(recipe: DetectedCookbookRecipe) {
+    setSelectedCookbookRecipes((current) => {
+      const alreadySelected = current.some((selected) => selected.chunk_id === recipe.chunk_id);
+      if (alreadySelected) {
+        return current.filter((selected) => selected.chunk_id !== recipe.chunk_id);
+      }
+      return [...current, toSelectedCookbookRecipe(recipe)];
+    });
+    setError('');
   }
 
   function renderMealIdeaMode() {
@@ -196,6 +294,77 @@ export function NewSessionPage() {
     );
   }
 
+  function renderCookbookPickerBody() {
+    if (cookbookLoading) {
+      return (
+        <div className={styles.pickerStateCard} role="status">
+          Loading cookbook recipe candidates...
+        </div>
+      );
+    }
+
+    if (cookbookError) {
+      return (
+        <div className={styles.pickerStateCard} role="alert">
+          {cookbookError}
+        </div>
+      );
+    }
+
+    if (recipesByBook.length === 0) {
+      return (
+        <div className={styles.pickerStateCard}>
+          No detected cookbook recipes yet. Upload a cookbook to browse recipe candidates here.
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.recipeGroups}>
+        {recipesByBook.map((group) => (
+          <section key={group.bookId} className={styles.recipeGroup} aria-labelledby={`book-group-${group.bookId}`}>
+            <div className={styles.recipeGroupHeader}>
+              <h3 id={`book-group-${group.bookId}`} className={styles.recipeGroupTitle}>
+                {group.bookTitle}
+              </h3>
+              <p className={styles.recipeGroupMeta}>
+                {group.recipes.length} candidate{group.recipes.length === 1 ? '' : 's'}
+              </p>
+            </div>
+            <div className={styles.recipeCards}>
+              {group.recipes.map((recipe) => {
+                const selected = cookbookSummary.selected_chunk_ids.includes(recipe.chunk_id);
+                const preview = buildRecipePreview(recipe);
+                const meta = buildRecipeMeta(recipe);
+                return (
+                  <label
+                    key={recipe.chunk_id}
+                    className={`${styles.recipeCard} ${selected ? styles.recipeCardSelected : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className={styles.recipeCheckbox}
+                      checked={selected}
+                      onChange={() => toggleCookbookRecipe(recipe)}
+                      aria-label={`Select ${recipe.chunk_id} from ${recipe.book_title}`}
+                    />
+                    <div className={styles.recipeCardBody}>
+                      <div className={styles.recipeCardHeader}>
+                        <span className={styles.recipeCardType}>{recipe.chunk_type.replace(/_/g, ' ')}</span>
+                        {meta && <span className={styles.recipeCardMeta}>{meta}</span>}
+                      </div>
+                      <p className={styles.recipeCardPreview}>{preview}</p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+    );
+  }
+
   function renderCookbookMode() {
     return (
       <form className={styles.form} onSubmit={handleCookbookSubmit}>
@@ -207,16 +376,11 @@ export function NewSessionPage() {
               Browse cookbook recipes
             </h2>
             <p className={styles.panelDescription}>
-              Choose recipe candidates from your uploaded books. We&apos;ll keep the selection payload stable while the picker lands in the next tasks.
+              Choose recipe candidates from your uploaded books. This picker prepares a stable selection payload now, and cookbook session creation lands in S03.
             </p>
           </div>
 
-          <div className={styles.placeholderCard}>
-            <p className={styles.placeholderTitle}>Cookbook picker coming next</p>
-            <p className={styles.placeholderBody}>
-              Recipe candidates will appear here once the picker fetch flow is connected.
-            </p>
-          </div>
+          {renderCookbookPickerBody()}
 
           <div className={styles.selectionSummary}>
             <p className={styles.selectionSummaryTitle}>Selected recipes</p>
@@ -225,6 +389,19 @@ export function NewSessionPage() {
                 ? 'No cookbook recipes selected yet.'
                 : `${cookbookSummary.total_selected} recipes selected across ${cookbookSummary.selected_book_ids.length} books.`}
             </p>
+            {cookbookSummary.total_selected > 0 && (
+              <ul className={styles.selectionList} aria-label="Selected cookbook chunks">
+                {cookbookPayload.selected_recipes.map((recipe) => (
+                  <li key={recipe.chunk_id} className={styles.selectionListItem}>
+                    <span className={styles.selectionListTitle}>{recipe.book_title}</span>
+                    <span className={styles.selectionListMeta}>
+                      Chunk {recipe.chunk_id}
+                      {recipe.page_number !== null ? ` • Page ${recipe.page_number}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 
@@ -238,7 +415,11 @@ export function NewSessionPage() {
         </div>
 
         {cookbookSubmitDisabled && (
-          <p className={styles.helperText}>Select at least one cookbook recipe to continue.</p>
+          <p className={styles.helperText}>
+            {cookbookSummary.total_selected === 0
+              ? 'Select at least one cookbook recipe to continue. Backend cookbook session creation arrives in S03.'
+              : 'Backend cookbook session creation arrives in S03.'}
+          </p>
         )}
       </form>
     );
