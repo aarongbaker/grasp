@@ -347,6 +347,21 @@
   margin-bottom: var(--space-sm);
 }
 
+.recipePreviewSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.recipePreviewSummary span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 86%, white 14%);
+}
+
 .chunkId {
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -376,6 +391,34 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.recipePreviewBlock {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid rgba(28, 25, 23, 0.05);
+}
+
+.recipePreviewHeading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.recipePreviewList,
+.recipePreviewListOrdered {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.recipePreviewList li,
+.recipePreviewListOrdered li {
+  margin-bottom: 4px;
 }
 
 .excerptToggle {

@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, us
 import { useNavigate } from 'react-router-dom';
 import { listDetectedRecipes } from '../api/ingest';
 import { createSession, runPipeline } from '../api/sessions';
+import { buildCookbookCandidatePreview } from '../components/session/cookbookCandidatePreview';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
@@ -366,8 +367,9 @@ export function NewSessionPage() {
                       {group.recipes.map((recipe) => {
                         const checked = selectedRecipeIds.includes(recipe.chunk_id);
                         const isExpanded = expandedExcerpts.has(recipe.chunk_id);
-                        const excerptText = recipe.text || '';
-                        const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD;
+                        const preview = buildCookbookCandidatePreview(recipe);
+                        const excerptText = preview.excerpt;
+                        const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD || preview.ingredients.length > 0 || preview.steps.length > 0;
                         const displayTitle = getRecipeDisplayTitle(recipe);
                         return (
                           <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
@@ -391,11 +393,39 @@ export function NewSessionPage() {
                                 <span>{recipe.chapter || 'Unsorted'}</span>
                                 <span className={styles.chunkId}>{recipe.chunk_id.slice(0, 8)}</span>
                               </div>
+                              <div className={styles.recipePreviewSummary}>
+                                {preview.ingredients.length > 0 && (
+                                  <span>{preview.ingredients.length} ingredients shown</span>
+                                )}
+                                {preview.steps.length > 0 && (
+                                  <span>{preview.steps.length} steps previewed</span>
+                                )}
+                              </div>
                               {excerptText && (
                                 <div className={styles.excerptContainer}>
                                   <p className={`${styles.recipeExcerpt} ${isExpanded ? styles.recipeExcerptExpanded : ''}`}>
                                     {isExpanded || !needsExpand ? excerptText : `${excerptText.slice(0, EXCERPT_COLLAPSE_THRESHOLD)}…`}
                                   </p>
+                                  {isExpanded && preview.ingredients.length > 0 && (
+                                    <div className={styles.recipePreviewBlock}>
+                                      <h4 className={styles.recipePreviewHeading}>Ingredients</h4>
+                                      <ul className={styles.recipePreviewList}>
+                                        {preview.ingredients.map((line) => (
+                                          <li key={line}>{line}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {isExpanded && preview.steps.length > 0 && (
+                                    <div className={styles.recipePreviewBlock}>
+                                      <h4 className={styles.recipePreviewHeading}>Method</h4>
+                                      <ol className={styles.recipePreviewListOrdered}>
+                                        {preview.steps.map((line) => (
+                                          <li key={line}>{line}</li>
+                                        ))}
+                                      </ol>
+                                    </div>
+                                  )}
                                   {needsExpand && (
                                     <button
                                       type="button"
@@ -408,7 +438,7 @@ export function NewSessionPage() {
                                       aria-expanded={isExpanded}
                                       aria-label={isExpanded ? 'Show less' : 'Show more'}
                                     >
-                                      {isExpanded ? 'Show less' : 'Show more'}
+                                      {isExpanded ? 'Show less' : 'Show recipe preview'}
                                     </button>
                                   )}
                                 </div>

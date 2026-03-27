@@ -1,6 +1,7 @@
 """api/routes/ingest.py — PDF upload and ingestion job polling."""
 
 import base64
+import re
 import uuid
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -17,6 +18,38 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/ingest")
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+_NON_RECIPE_DETECTED_TITLES = (
+    "index",
+    "introduction",
+    "foreword",
+    "preface",
+    "contents",
+)
+
+
+def _first_meaningful_line(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:160]
+    return ""
+
+
+def _looks_like_detected_recipe_noise(chunk_text: str, recipe_name: str) -> bool:
+    lowered_name = recipe_name.strip().lower()
+    if any(lowered_name.startswith(prefix) for prefix in _NON_RECIPE_DETECTED_TITLES):
+        return True
+
+    lowered_text = chunk_text.lower()
+    if "index page" in lowered_text or lowered_text.startswith("index "):
+        return True
+    if lowered_text.startswith("introduction ") and "cook book" in lowered_text:
+        return True
+    if lowered_text.count("the southern cook book") >= 2:
+        return True
+    if len(re.findall(r"\bpage\b", lowered_text)) >= 3 and len(re.findall(r"\b\d{1,3}\b", lowered_text)) >= 8:
+        return True
+    return False
 
 
 @router.post("", status_code=202)
@@ -112,12 +145,13 @@ async def list_detected_recipes(db: DBSession, current_user: CurrentUser):
             "chunk_id": str(chunk.chunk_id),
             "book_id": str(book.book_id),
             "book_title": book.title,
-            "recipe_name": _detect_recipe_name(chunk),
+            "recipe_name": recipe_name,
             "chapter": chunk.chapter,
             "page_number": chunk.page_number,
             "text": chunk.text,
         }
         for chunk, book in rows
+        if not _looks_like_detected_recipe_noise(chunk.text, (recipe_name := _detect_recipe_name(chunk)))
     ]
 
 
