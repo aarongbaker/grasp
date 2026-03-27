@@ -229,6 +229,17 @@ export interface BookRecord {
   created_at: string;
 }
 
+export interface DetectedCookbookRecipe {
+  chunk_id: string;
+  book_id: string;
+  book_title: string;
+  text: string;
+  chunk_type: string;
+  chapter: string | null;
+  page_number: number | null;
+  created_at: string;
+}
+
 export interface IngestionJob {
   job_id: string;
   user_id: string;

@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { BookRecord, IngestionJob } from '../types/api';
+import type { BookRecord, DetectedCookbookRecipe, IngestionJob } from '../types/api';
 
 export function uploadPdf(file: File): Promise<{ job_id: string }> {
   const form = new FormData();
@@ -16,6 +16,10 @@ export function getIngestionStatus(jobId: string): Promise<IngestionJob> {
 
 export function listCookbooks(): Promise<BookRecord[]> {
   return apiFetch<BookRecord[]>('/ingest/cookbooks');
+}
+
+export function listDetectedCookbookRecipes(): Promise<DetectedCookbookRecipe[]> {
+  return apiFetch<DetectedCookbookRecipe[]>('/ingest/cookbooks/recipes');
 }
 
 export function deleteCookbook(bookId: string): Promise<void> {
