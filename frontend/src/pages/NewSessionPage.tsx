@@ -255,16 +255,21 @@ export function NewSessionPage() {
                               onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
                               aria-label={`Select ${recipe.recipe_name}`}
                             />
+                            <span className={styles.selectionIndicator} aria-hidden="true">
+                              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M2.5 6L5 8.5L9.5 3.5" />
+                              </svg>
+                            </span>
                             <div className={styles.recipeOptionBody}>
                               <div className={styles.recipeOptionHeader}>
-                                <span className={styles.recipeName}>{recipe.recipe_name}</span>
-                                <span className={styles.recipePage}>p. {recipe.page_number || '—'}</span>
+                                <span className={styles.recipeName}>{recipe.recipe_name || 'Untitled Recipe'}</span>
+                                {recipe.page_number && <span className={styles.recipePage}>p. {recipe.page_number}</span>}
                               </div>
                               <div className={styles.recipeMetaRow}>
-                                <span>{recipe.chapter || 'Unsorted chapter'}</span>
-                                <span className={styles.chunkId}>Chunk {recipe.chunk_id.slice(0, 8)}</span>
+                                <span>{recipe.chapter || 'Unsorted'}</span>
+                                <span className={styles.chunkId}>{recipe.chunk_id.slice(0, 8)}</span>
                               </div>
-                              <p className={styles.recipeExcerpt}>{recipe.text}</p>
+                              {recipe.text && <p className={styles.recipeExcerpt}>{recipe.text}</p>}
                             </div>
                           </label>
                         );
