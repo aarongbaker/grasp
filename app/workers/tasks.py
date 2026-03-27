@@ -13,9 +13,35 @@ import asyncio
 import uuid
 
 from app.core.settings import get_settings
+from app.models.pipeline import DinnerConcept
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
+
+
+def build_initial_pipeline_state(
+    concept: DinnerConcept,
+    user_id: str,
+    rag_owner_key: str,
+    kitchen: object | None,
+    equipment_rows: list[object],
+) -> dict:
+    """Build the initial GRASPState payload passed to LangGraph."""
+    return {
+        "concept": concept.model_dump(),
+        "kitchen_config": kitchen.model_dump() if kitchen else {},
+        "equipment": [e.model_dump() for e in equipment_rows],
+        "user_id": user_id,
+        "rag_owner_key": rag_owner_key,
+        "raw_recipes": [],
+        "enriched_recipes": [],
+        "validated_recipes": [],
+        "recipe_dags": [],
+        "merged_dag": None,
+        "schedule": None,
+        "errors": [],
+        "test_mode": None,
+    }
 
 
 @celery_app.task(name="grasp.run_pipeline")
@@ -34,7 +60,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
     from app.core.status import finalise_session
     from app.graph.graph import build_grasp_graph
-    from app.models.pipeline import DinnerConcept
+    from app.models.pipeline import DinnerConcept, build_initial_pipeline_state
     from app.models.session import Session
     from app.models.user import Equipment, KitchenConfig, UserProfile
 
@@ -64,21 +90,13 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
             concept = DinnerConcept.model_validate(session.concept_json)
 
-            initial_state = {
-                "concept": concept.model_dump(),
-                "kitchen_config": kitchen.model_dump() if kitchen else {},
-                "equipment": [e.model_dump() for e in equipment_rows],
-                "user_id": user_id,
-                "rag_owner_key": user.rag_owner_key,
-                "raw_recipes": [],
-                "enriched_recipes": [],
-                "validated_recipes": [],
-                "recipe_dags": [],
-                "merged_dag": None,
-                "schedule": None,
-                "errors": [],
-                "test_mode": None,
-            }
+            initial_state = build_initial_pipeline_state(
+                concept=concept,
+                user_id=user_id,
+                rag_owner_key=user.rag_owner_key,
+                kitchen=kitchen,
+                equipment_rows=equipment_rows,
+            )
 
             config = {"configurable": {"thread_id": session_id}}
 

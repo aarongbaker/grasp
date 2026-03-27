@@ -21,7 +21,7 @@ every session.
 import operator
 import re
 import uuid
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -99,6 +99,31 @@ CreateSessionRequest = Annotated[
     CreateSessionLegacyRequest | CreateSessionCookbookRequest,
     Field(discriminator=None),
 ]
+
+
+def build_initial_pipeline_state(
+    concept: DinnerConcept,
+    user_id: str,
+    rag_owner_key: str,
+    kitchen_config: dict,
+    equipment: list[dict],
+) -> dict:
+    """Build the initial GRASPState payload passed to LangGraph."""
+    return {
+        "concept": concept.model_dump(),
+        "kitchen_config": kitchen_config,
+        "equipment": equipment,
+        "user_id": user_id,
+        "rag_owner_key": rag_owner_key,
+        "raw_recipes": [],
+        "enriched_recipes": [],
+        "validated_recipes": [],
+        "recipe_dags": [],
+        "merged_dag": None,
+        "schedule": None,
+        "errors": [],
+        "test_mode": None,
+    }
 
 
 # ── GRASPState ────────────────────────────────────────────────────────────────

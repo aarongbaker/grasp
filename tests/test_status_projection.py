@@ -21,7 +21,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.core.status import status_projection
-from app.models.enums import SessionStatus
+from app.models.enums import MealType, Occasion, SessionStatus
+from app.models.pipeline import DinnerConcept, SelectedCookbookRecipe, build_initial_pipeline_state
 
 
 def _make_mock_graph(state_values: dict):
@@ -156,6 +157,61 @@ async def test_empty_lists_treated_as_not_populated():
     )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.GENERATING
+
+
+def test_build_initial_pipeline_state_preserves_cookbook_concept_without_status_fields():
+    concept = DinnerConcept(
+        free_text="Cookbook-selected recipes: Roast chicken.",
+        guest_count=4,
+        meal_type=MealType.DINNER,
+        occasion=Occasion.DINNER_PARTY,
+        concept_source="cookbook",
+        selected_recipes=[
+            SelectedCookbookRecipe(
+                chunk_id=uuid.uuid4(),
+                book_id=uuid.uuid4(),
+                book_title="The French Laundry Cookbook",
+                text="Roast Chicken\nMethod:\n1. Prep\n2. Roast\n3. Rest",
+                chapter="Poultry",
+                page_number=87,
+            )
+        ],
+    )
+
+    kitchen = {"max_burners": 4}
+    equipment = [{"name": "Dutch oven"}]
+
+    state = build_initial_pipeline_state(
+        concept=concept,
+        user_id="user-123",
+        rag_owner_key="owner-123",
+        kitchen_config=kitchen,
+        equipment=equipment,
+    )
+
+    assert state["concept"]["concept_source"] == "cookbook"
+    assert len(state["concept"]["selected_recipes"]) == 1
+    assert state["raw_recipes"] == []
+    assert state["enriched_recipes"] == []
+    assert state["validated_recipes"] == []
+    assert state["errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_cookbook_raw_recipes_still_project_enriching():
+    """Cookbook-seeded raw_recipes should use the normal ENRICHING projection."""
+    graph = _make_mock_graph(
+        {
+            "raw_recipes": [
+                {
+                    "name": "Roast Chicken with Bread Salad",
+                    "steps": ["Prep", "Roast", "Rest"],
+                }
+            ]
+        }
+    )
+    status = await status_projection(uuid.uuid4(), graph)
+    assert status == SessionStatus.ENRICHING
 
 
 @pytest.mark.asyncio
