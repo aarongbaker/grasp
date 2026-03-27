@@ -53,6 +53,15 @@ const detectedRecipes: DetectedRecipeCandidate[] = [
     page_number: 117,
     text: 'Wilt the greens, add stock, and simmer until tender.',
   },
+  {
+    chunk_id: 'bbb-chunk',
+    book_id: 'book-a',
+    book_title: 'Weeknight Classics',
+    recipe_name: 'Slow-Roasted Pork Shoulder',
+    chapter: 'Centerpieces',
+    page_number: 58,
+    text: 'Season generously with salt and pepper the night before. Let the meat come to room temperature before roasting. Start at high heat to develop a crust, then lower to 275°F and roast slowly for 6-8 hours until the internal temperature reaches 195°F and the meat is fall-apart tender. Rest for at least 30 minutes before shredding.',
+  },
 ];
 
 const createdSession: Session = {
@@ -156,6 +165,11 @@ describe('NewSessionPage', () => {
 
     await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
     await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
+
+    // Verify selection summary appears with selected recipes
+    expect(screen.getByText('Your menu')).toBeInTheDocument();
+    expect(screen.getByText('2 recipes')).toBeInTheDocument();
+
     await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
 
     await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
@@ -178,6 +192,30 @@ describe('NewSessionPage', () => {
       'run:session-123',
     ]);
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
+  });
+
+  it('shows selection summary with removable pills and clear all button', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+
+    // Select two recipes
+    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
+    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
+
+    // Verify selection summary appears
+    expect(screen.getByText('Your menu')).toBeInTheDocument();
+    expect(screen.getByText('2 recipes')).toBeInTheDocument();
+
+    // Verify individual remove buttons work
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Burnt Honey Tart' }));
+    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+
+    // Verify clear all works
+    await userEvent.click(screen.getByRole('button', { name: 'Clear all selections' }));
+    expect(screen.queryByText('Your menu')).not.toBeInTheDocument();
   });
 
   it('shows a cookbook loading state before candidates render', async () => {
@@ -238,5 +276,28 @@ describe('NewSessionPage', () => {
     expect(await screen.findByText('Session creation failed')).toBeInTheDocument();
     expect(runPipelineSpy).not.toHaveBeenCalled();
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('provides progressive disclosure for long recipe excerpts', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+
+    // Short excerpts should not have a show more button
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeInTheDocument();
+
+    // Long excerpt should be truncated with show more button
+    const showMoreButtons = screen.getAllByRole('button', { name: 'Show more' });
+    expect(showMoreButtons.length).toBeGreaterThan(0);
+
+    // Click to expand
+    await userEvent.click(showMoreButtons[0]);
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+
+    // Clicking show less should collapse
+    await userEvent.click(screen.getByRole('button', { name: 'Show less' }));
+    expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
   });
 });

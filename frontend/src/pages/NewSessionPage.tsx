@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listDetectedRecipes } from '../api/ingest';
 import { createSession, runPipeline } from '../api/sessions';
@@ -18,6 +18,8 @@ import {
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
+
+const EXCERPT_COLLAPSE_THRESHOLD = 120;
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 const occasionOptions = Object.entries(OCCASION_LABELS).map(([value, label]) => ({ value, label }));
@@ -80,6 +82,7 @@ export function NewSessionPage() {
   const [cookbookLoading, setCookbookLoading] = useState(false);
   const [cookbookLoaded, setCookbookLoaded] = useState(false);
   const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
+  const [expandedExcerpts, setExpandedExcerpts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (mode !== 'cookbook' || cookbookLoaded) {
@@ -135,6 +138,22 @@ export function NewSessionPage() {
       const next = exists ? prev.filter((id) => id !== chunkId) : [...prev, chunkId];
       return sortSelectionsByChunkId(next.map((id) => ({ chunk_id: id }))).map((recipe) => recipe.chunk_id);
     });
+  }
+
+  const toggleExcerpt = useCallback((chunkId: string) => {
+    setExpandedExcerpts((prev) => {
+      const next = new Set(prev);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  }, []);
+
+  function removeSelectedRecipe(chunkId: string) {
+    setSelectedRecipeIds((prev) => prev.filter((id) => id !== chunkId));
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -224,13 +243,51 @@ export function NewSessionPage() {
           <section className={styles.cookbookSection} aria-labelledby="cookbook-recipes-heading">
             <div className={styles.sectionHeader}>
               <div>
-                <h2 id="cookbook-recipes-heading" className={styles.sectionTitle}>Detected cookbook recipes</h2>
-                <p className={styles.sectionCopy}>Selections are submitted in stable chunk order so scheduling runs against the exact recipes you chose.</p>
-              </div>
-              <div className={styles.selectionCount} aria-live="polite">
-                {selectedRecipeIds.length} selected
+                <h2 id="cookbook-recipes-heading" className={styles.sectionTitle}>Select cookbook recipes</h2>
+                <p className={styles.sectionCopy}>
+                  Pick the exact recipes you want to cook. The scheduler will build a unified timeline across all selected recipes, 
+                  calculating prep times and coordinating steps so everything finishes together.
+                </p>
               </div>
             </div>
+
+            {/* Selection summary - appears when recipes are selected */}
+            {selectedRecipes.length > 0 && (
+              <div className={styles.selectionSummary} aria-label="Selected recipes">
+                <div className={styles.selectionSummaryHeader}>
+                  <span className={styles.selectionSummaryTitle}>
+                    Your menu
+                    <span className={styles.selectionSummaryCount}>{selectedRecipes.length} recipe{selectedRecipes.length !== 1 ? 's' : ''}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.clearAllButton}
+                    onClick={() => setSelectedRecipeIds([])}
+                    aria-label="Clear all selections"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className={styles.selectionPills}>
+                  {selectedRecipes.map((recipe) => (
+                    <span key={recipe.chunk_id} className={styles.selectionPill}>
+                      <span className={styles.selectionPillName}>{recipe.recipe_name || 'Untitled'}</span>
+                      <span className={styles.selectionPillBook}>{recipe.book_title}</span>
+                      <button
+                        type="button"
+                        className={styles.selectionPillRemove}
+                        onClick={() => removeSelectedRecipe(recipe.chunk_id)}
+                        aria-label={`Remove ${recipe.recipe_name}`}
+                      >
+                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <path d="M3 3L9 9M9 3L3 9" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {cookbookLoading ? (
               <div className={styles.cookbookState}>Loading cookbook recipes…</div>
@@ -247,6 +304,9 @@ export function NewSessionPage() {
                     <div className={styles.recipeList}>
                       {group.recipes.map((recipe) => {
                         const checked = selectedRecipeIds.includes(recipe.chunk_id);
+                        const isExpanded = expandedExcerpts.has(recipe.chunk_id);
+                        const excerptText = recipe.text || '';
+                        const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD;
                         return (
                           <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
                             <input
@@ -269,7 +329,28 @@ export function NewSessionPage() {
                                 <span>{recipe.chapter || 'Unsorted'}</span>
                                 <span className={styles.chunkId}>{recipe.chunk_id.slice(0, 8)}</span>
                               </div>
-                              {recipe.text && <p className={styles.recipeExcerpt}>{recipe.text}</p>}
+                              {excerptText && (
+                                <div className={styles.excerptContainer}>
+                                  <p className={`${styles.recipeExcerpt} ${isExpanded ? styles.recipeExcerptExpanded : ''}`}>
+                                    {isExpanded || !needsExpand ? excerptText : `${excerptText.slice(0, EXCERPT_COLLAPSE_THRESHOLD)}…`}
+                                  </p>
+                                  {needsExpand && (
+                                    <button
+                                      type="button"
+                                      className={styles.excerptToggle}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        toggleExcerpt(recipe.chunk_id);
+                                      }}
+                                      aria-expanded={isExpanded}
+                                      aria-label={isExpanded ? 'Show less' : 'Show more'}
+                                    >
+                                      {isExpanded ? 'Show less' : 'Show more'}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </label>
                         );
