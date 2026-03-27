@@ -248,6 +248,7 @@ export interface SelectedCookbookRecipe {
   chapter: string | null;
   page_number: number | null;
   selection_order: number;
+  source_label: string;
 }
 
 export interface CreateCookbookSessionSelectionPayload {
@@ -259,6 +260,7 @@ export interface CookbookSelectionSummary {
   total_selected: number;
   selected_book_ids: string[];
   selected_chunk_ids: string[];
+  selections_by_book: Record<string, number>;
 }
 
 export interface IngestionJob {

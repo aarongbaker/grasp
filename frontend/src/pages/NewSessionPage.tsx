@@ -39,8 +39,13 @@ function buildCookbookSelectionPayload(selectedRecipes: SelectedCookbookRecipe[]
   return {
     mode: 'cookbook_recipes',
     selected_recipes: selectedRecipes.map((recipe, index) => ({
-      ...recipe,
-      selection_order: index,
+      chunk_id: recipe.chunk_id,
+      book_id: recipe.book_id,
+      book_title: recipe.book_title,
+      chapter: recipe.chapter,
+      page_number: recipe.page_number,
+      selection_order: index + 1,
+      source_label: buildSelectionSourceLabel(recipe),
     })),
   };
 }
@@ -50,6 +55,10 @@ function summarizeCookbookSelection(payload: CreateCookbookSessionSelectionPaylo
     total_selected: payload.selected_recipes.length,
     selected_book_ids: [...new Set(payload.selected_recipes.map((recipe) => recipe.book_id))],
     selected_chunk_ids: payload.selected_recipes.map((recipe) => recipe.chunk_id),
+    selections_by_book: payload.selected_recipes.reduce<Record<string, number>>((counts, recipe) => {
+      counts[recipe.book_id] = (counts[recipe.book_id] ?? 0) + 1;
+      return counts;
+    }, {}),
   };
 }
 
@@ -61,6 +70,7 @@ function toSelectedCookbookRecipe(recipe: DetectedCookbookRecipe): SelectedCookb
     chapter: recipe.chapter,
     page_number: recipe.page_number,
     selection_order: 0,
+    source_label: buildSelectionSourceLabel(recipe),
   };
 }
 
@@ -81,6 +91,20 @@ function buildRecipeMeta(recipe: DetectedCookbookRecipe): string {
     meta.push(`Page ${recipe.page_number}`);
   }
   return meta.join(' • ');
+}
+
+function buildSelectionSourceLabel(recipe: Pick<SelectedCookbookRecipe, 'chapter' | 'page_number'>): string {
+  const parts: string[] = [];
+
+  if (recipe.chapter) {
+    parts.push(recipe.chapter);
+  }
+
+  if (recipe.page_number !== null) {
+    parts.push(`Page ${recipe.page_number}`);
+  }
+
+  return parts.join(' • ') || 'Location unavailable';
 }
 
 export function NewSessionPage() {
@@ -382,7 +406,8 @@ export function NewSessionPage() {
 
           {renderCookbookPickerBody()}
 
-          <div className={styles.selectionSummary}>
+          <div className={styles.selectionSummary} aria-live="polite">
+            <p className={styles.selectionSummaryEyebrow}>Cookbook selection payload</p>
             <p className={styles.selectionSummaryTitle}>Selected recipes</p>
             <p className={styles.selectionSummaryBody}>
               {cookbookSummary.total_selected === 0
@@ -390,23 +415,38 @@ export function NewSessionPage() {
                 : `${cookbookSummary.total_selected} recipes selected across ${cookbookSummary.selected_book_ids.length} books.`}
             </p>
             {cookbookSummary.total_selected > 0 && (
-              <ul className={styles.selectionList} aria-label="Selected cookbook chunks">
-                {cookbookPayload.selected_recipes.map((recipe) => (
-                  <li key={recipe.chunk_id} className={styles.selectionListItem}>
-                    <span className={styles.selectionListTitle}>{recipe.book_title}</span>
-                    <span className={styles.selectionListMeta}>
-                      Chunk {recipe.chunk_id}
-                      {recipe.page_number !== null ? ` • Page ${recipe.page_number}` : ''}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <dl className={styles.selectionStats} aria-label="Cookbook selection summary">
+                  <div className={styles.selectionStat}>
+                    <dt>Selections</dt>
+                    <dd>{cookbookSummary.total_selected}</dd>
+                  </div>
+                  <div className={styles.selectionStat}>
+                    <dt>Books</dt>
+                    <dd>{cookbookSummary.selected_book_ids.length}</dd>
+                  </div>
+                </dl>
+                <ul className={styles.selectionList} aria-label="Selected cookbook chunks">
+                  {cookbookPayload.selected_recipes.map((recipe) => (
+                    <li key={recipe.chunk_id} className={styles.selectionListItem}>
+                      <div>
+                        <span className={styles.selectionListTitle}>{recipe.book_title}</span>
+                        <span className={styles.selectionListMeta}>{recipe.source_label}</span>
+                      </div>
+                      <div className={styles.selectionListOrderBlock}>
+                        <span className={styles.selectionListOrder}>#{recipe.selection_order}</span>
+                        <span className={styles.selectionListChunk}>{recipe.chunk_id}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </div>
         </section>
 
         <div className={styles.actions}>
-          <Button type="submit" disabled={cookbookSubmitDisabled}>
+          <Button type="submit" disabled={cookbookSubmitDisabled} aria-describedby="cookbook-submit-guard">
             {loading ? 'Starting...' : 'Start Cookbook Session'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => navigate('/')}>
@@ -414,13 +454,11 @@ export function NewSessionPage() {
           </Button>
         </div>
 
-        {cookbookSubmitDisabled && (
-          <p className={styles.helperText}>
-            {cookbookSummary.total_selected === 0
-              ? 'Select at least one cookbook recipe to continue. Backend cookbook session creation arrives in S03.'
-              : 'Backend cookbook session creation arrives in S03.'}
-          </p>
-        )}
+        <p id="cookbook-submit-guard" className={styles.helperText}>
+          {cookbookSummary.total_selected === 0
+            ? 'Select at least one cookbook recipe to continue. Backend cookbook session creation arrives in S03.'
+            : 'Your selected cookbook payload is ready. Backend cookbook session creation arrives in S03.'}
+        </p>
       </form>
     );
   }

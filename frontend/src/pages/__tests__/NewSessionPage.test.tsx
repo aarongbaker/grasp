@@ -119,7 +119,7 @@ describe('NewSessionPage', () => {
     expect(screen.getByText(/cookbook session creation lands in s03/i)).toBeInTheDocument();
   });
 
-  it('supports chunk-id keyed mixed-book selection with a visible summary', async () => {
+  it('supports mixed-book selection, ordering, and deselection in the visible payload summary', async () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('tab', { name: /cookbook recipes/i }));
@@ -133,15 +133,51 @@ describe('NewSessionPage', () => {
 
     expect(screen.getByText(/2 recipes selected across 2 books/i)).toBeInTheDocument();
     const selectionList = screen.getByRole('list', { name: /selected cookbook chunks/i });
-    expect(within(selectionList).getByText(/chunk chunk-1/i)).toBeInTheDocument();
-    expect(within(selectionList).getByText(/chunk chunk-3/i)).toBeInTheDocument();
+    const items = within(selectionList).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByText('Sunday Suppers')).toBeInTheDocument();
+    expect(within(items[0]).getByText('Winter Vegetables • Page 42')).toBeInTheDocument();
+    expect(within(items[0]).getByText('#1')).toBeInTheDocument();
+    expect(within(items[0]).getByText('chunk-1')).toBeInTheDocument();
+    expect(within(items[1]).getByText('The Dessert Shelf')).toBeInTheDocument();
+    expect(within(items[1]).getByText('Tarts • Page 17')).toBeInTheDocument();
+    expect(within(items[1]).getByText('#2')).toBeInTheDocument();
+    expect(within(items[1]).getByText('chunk-3')).toBeInTheDocument();
+    expect(screen.getByText('Selections')).toBeInTheDocument();
+    expect(screen.getByText('Books')).toBeInTheDocument();
+    expect(screen.getAllByText('2')).toHaveLength(2);
     expect(screen.getByRole('button', { name: /start cookbook session/i })).toBeEnabled();
+    expect(screen.getByText(/your selected cookbook payload is ready/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText(/select chunk-1 from sunday suppers/i));
 
     expect(screen.getByText(/1 recipes selected across 1 books/i)).toBeInTheDocument();
-    expect(within(selectionList).queryByText(/chunk chunk-1/i)).not.toBeInTheDocument();
-    expect(within(selectionList).getByText(/chunk chunk-3/i)).toBeInTheDocument();
+    expect(within(selectionList).queryByText('chunk-1')).not.toBeInTheDocument();
+    expect(within(selectionList).getByText('#1')).toBeInTheDocument();
+    expect(within(selectionList).getByText('chunk-3')).toBeInTheDocument();
+  });
+
+  it('keeps cookbook submission guarded with explicit copy until cookbook creation exists', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('tab', { name: /cookbook recipes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /browse cookbook recipes/i })).toBeInTheDocument();
+    });
+
+    const submitButton = screen.getByRole('button', { name: /start cookbook session/i });
+    expect(submitButton).toBeDisabled();
+    expect(submitButton).toHaveAttribute('aria-describedby', 'cookbook-submit-guard');
+    expect(screen.getByText(/select at least one cookbook recipe to continue/i)).toBeInTheDocument();
+    expect(screen.getByText(/backend cookbook session creation arrives in s03/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText(/select chunk-2 from sunday suppers/i));
+
+    expect(submitButton).toBeEnabled();
+    expect(screen.getByText(/your selected cookbook payload is ready/i)).toBeInTheDocument();
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(runPipelineMock).not.toHaveBeenCalled();
   });
 
   it('surfaces picker-only empty and error states inline without blanking the page', async () => {
