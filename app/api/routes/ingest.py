@@ -10,8 +10,8 @@ from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
-from app.models.enums import IngestionStatus
-from app.models.ingestion import BookRecord, IngestionJob
+from app.models.enums import ChunkType, IngestionStatus
+from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/ingest")
@@ -85,6 +85,37 @@ async def list_cookbooks(db: DBSession, current_user: CurrentUser):
             "created_at": b.created_at.isoformat(),
         }
         for b in books
+    ]
+
+
+@router.get("/cookbooks/recipes")
+async def list_detected_cookbook_recipes(db: DBSession, current_user: CurrentUser):
+    """Return detected recipe chunks for the current user, newest books first."""
+    statement = (
+        select(CookbookChunk, BookRecord)
+        .join(BookRecord, CookbookChunk.book_id == BookRecord.book_id)
+        .where(
+            BookRecord.user_id == current_user.user_id,
+            CookbookChunk.user_id == current_user.user_id,
+            CookbookChunk.chunk_type == ChunkType.RECIPE,
+        )
+        .order_by(BookRecord.created_at.desc(), CookbookChunk.page_number.asc(), CookbookChunk.created_at.asc())
+    )
+    results = await db.exec(statement)
+    rows = results.all()
+
+    return [
+        {
+            "chunk_id": str(chunk.chunk_id),
+            "book_id": str(book.book_id),
+            "book_title": book.title,
+            "text": chunk.text,
+            "chunk_type": getattr(chunk.chunk_type, "value", chunk.chunk_type),
+            "chapter": chunk.chapter,
+            "page_number": chunk.page_number,
+            "created_at": chunk.created_at.isoformat(),
+        }
+        for chunk, book in rows
     ]
 
 

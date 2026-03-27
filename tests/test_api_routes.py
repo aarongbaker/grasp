@@ -19,8 +19,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.models.enums import IngestionStatus, SessionStatus
-from app.models.ingestion import IngestionJob
+from app.models.enums import ChunkType, IngestionStatus, SessionStatus
+from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
 from app.models.user import KitchenConfig, UserProfile
 
@@ -64,6 +64,7 @@ class MockDBSession:
 
     def __init__(self):
         self._store: dict[tuple, object] = {}
+        self._exec_results: list[object] = []
 
     def add(self, obj):
         pass
@@ -85,11 +86,16 @@ class MockDBSession:
         """Pre-populate a row for get() to find."""
         self._store[(model_class, pk)] = obj
 
+    def queue_exec_all(self, rows):
+        """Queue rows for the next exec().all() result."""
+        self._exec_results.append(list(rows))
+
     async def exec(self, stmt):
         """Stub for select queries."""
         mock_result = MagicMock()
         mock_result.first.return_value = None
-        mock_result.all.return_value = []
+        rows = self._exec_results.pop(0) if self._exec_results else []
+        mock_result.all.return_value = rows
         return mock_result
 
 
@@ -368,6 +374,105 @@ async def test_upload_pdf_returns_202(app_with_overrides):
             )
     assert resp.status_code == 202
     assert "job_id" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_get_detected_cookbook_recipes_returns_recipe_projection(app_with_overrides, mock_db, test_user):
+    """Recipe listing returns recipe chunks with cookbook provenance for the current user."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    book = BookRecord(
+        book_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        title="The French Laundry Cookbook",
+        author="Thomas Keller",
+        total_pages=320,
+        total_chunks=12,
+        created_at=now,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=uuid.uuid4(),
+        book_id=book.book_id,
+        user_id=test_user.user_id,
+        text="Roast chicken with bread salad",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Poultry",
+        page_number=87,
+        created_at=now,
+    )
+    mock_db.queue_exec_all([(recipe_chunk, book)])
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/cookbooks/recipes")
+
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "chunk_id": str(recipe_chunk.chunk_id),
+            "book_id": str(book.book_id),
+            "book_title": "The French Laundry Cookbook",
+            "text": "Roast chicken with bread salad",
+            "chunk_type": "recipe",
+            "chapter": "Poultry",
+            "page_number": 87,
+            "created_at": now.isoformat(),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_detected_cookbook_recipes_returns_empty_list(app_with_overrides):
+    """Recipe listing returns an explicit empty array when the user has no recipe chunks."""
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/cookbooks/recipes")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_detected_cookbook_recipes_excludes_non_recipe_chunks(app_with_overrides, mock_db, test_user):
+    """Route never projects non-recipe chunk types into the detected recipe contract."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    book = BookRecord(
+        book_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        title="On Food and Cooking",
+        author="Harold McGee",
+        created_at=now,
+    )
+    technique_chunk = CookbookChunk(
+        chunk_id=uuid.uuid4(),
+        book_id=book.book_id,
+        user_id=test_user.user_id,
+        text="Sear over high heat.",
+        chunk_type=ChunkType.TECHNIQUE,
+        chapter="Meat",
+        page_number=33,
+        created_at=now,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=uuid.uuid4(),
+        book_id=book.book_id,
+        user_id=test_user.user_id,
+        text="Pan sauce",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Sauces",
+        page_number=34,
+        created_at=now,
+    )
+    mock_db.queue_exec_all([(recipe_chunk, book)])
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/cookbooks/recipes")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert [row["chunk_id"] for row in payload] == [str(recipe_chunk.chunk_id)]
+    assert all(row["chunk_type"] == "recipe" for row in payload)
+    assert str(technique_chunk.chunk_id) not in {row["chunk_id"] for row in payload}
 
 
 @pytest.mark.asyncio
