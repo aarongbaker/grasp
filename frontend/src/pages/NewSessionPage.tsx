@@ -1,18 +1,72 @@
-import { type FormEvent, type KeyboardEvent, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { listDetectedRecipes } from '../api/ingest';
 import { createSession, runPipeline } from '../api/sessions';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
-import { MEAL_TYPE_LABELS, OCCASION_LABELS, type MealType, type Occasion } from '../types/api';
+import {
+  MEAL_TYPE_LABELS,
+  OCCASION_LABELS,
+  type CreateCookbookSessionRequest,
+  type CreateFreeTextSessionRequest,
+  type DetectedRecipeCandidate,
+  type MealType,
+  type Occasion,
+  type SelectedCookbookRecipeRef,
+  type SessionConceptSource,
+} from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 const occasionOptions = Object.entries(OCCASION_LABELS).map(([value, label]) => ({ value, label }));
 
+type SessionMode = SessionConceptSource;
+
+function sortSelectionsByChunkId(selection: SelectedCookbookRecipeRef[]) {
+  return [...selection].sort((a, b) => a.chunk_id.localeCompare(b.chunk_id));
+}
+
+function buildCookbookFreeText(selectedRecipes: DetectedRecipeCandidate[]): string {
+  if (selectedRecipes.length === 0) {
+    return 'Cookbook-selected session';
+  }
+
+  const recipeNames = selectedRecipes.map((recipe) => recipe.recipe_name.trim()).filter(Boolean);
+  if (recipeNames.length === 0) {
+    return 'Cookbook-selected session';
+  }
+
+  return `Cookbook-selected recipes: ${recipeNames.join(', ')}`;
+}
+
+function groupRecipesByBook(recipes: DetectedRecipeCandidate[]) {
+  const groups = new Map<string, { bookId: string; bookTitle: string; recipes: DetectedRecipeCandidate[] }>();
+
+  for (const recipe of recipes) {
+    const existing = groups.get(recipe.book_id);
+    if (existing) {
+      existing.recipes.push(recipe);
+      continue;
+    }
+
+    groups.set(recipe.book_id, {
+      bookId: recipe.book_id,
+      bookTitle: recipe.book_title,
+      recipes: [recipe],
+    });
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    recipes: [...group.recipes].sort((a, b) => a.chunk_id.localeCompare(b.chunk_id)),
+  }));
+}
+
 export function NewSessionPage() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<SessionMode>('free_text');
   const [freeText, setFreeText] = useState('');
   const [guestCount, setGuestCount] = useState(4);
   const [mealType, setMealType] = useState<MealType>('dinner');
@@ -22,6 +76,47 @@ export function NewSessionPage() {
   const [servingTime, setServingTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [cookbookCandidates, setCookbookCandidates] = useState<DetectedRecipeCandidate[]>([]);
+  const [cookbookLoading, setCookbookLoading] = useState(false);
+  const [cookbookLoaded, setCookbookLoaded] = useState(false);
+  const [selectedRecipeIds, setSelectedRecipeIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (mode !== 'cookbook' || cookbookLoaded || cookbookLoading) {
+      return;
+    }
+
+    let cancelled = false;
+    setCookbookLoading(true);
+    setError('');
+
+    void listDetectedRecipes()
+      .then((recipes) => {
+        if (cancelled) return;
+        const ordered = [...recipes].sort((a, b) => a.chunk_id.localeCompare(b.chunk_id));
+        setCookbookCandidates(ordered);
+        setCookbookLoaded(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(getErrorMessage(err, 'Could not load cookbook recipes'));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCookbookLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, cookbookLoaded, cookbookLoading]);
+
+  const groupedRecipes = useMemo(() => groupRecipesByBook(cookbookCandidates), [cookbookCandidates]);
+  const selectedRecipes = useMemo(() => {
+    const selectedSet = new Set(selectedRecipeIds);
+    return cookbookCandidates.filter((recipe) => selectedSet.has(recipe.chunk_id));
+  }, [cookbookCandidates, selectedRecipeIds]);
 
   function addRestriction(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -34,19 +129,22 @@ export function NewSessionPage() {
     }
   }
 
+  function toggleSelectedRecipe(chunkId: string) {
+    setSelectedRecipeIds((prev) => {
+      const exists = prev.includes(chunkId);
+      const next = exists ? prev.filter((id) => id !== chunkId) : [...prev, chunkId];
+      return sortSelectionsByChunkId(next.map((id) => ({ chunk_id: id }))).map((recipe) => recipe.chunk_id);
+    });
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const session = await createSession({
-        free_text: freeText,
-        guest_count: guestCount,
-        meal_type: mealType,
-        occasion,
-        dietary_restrictions: restrictions,
-        serving_time: servingTime || undefined,
-      });
+      const session = mode === 'cookbook'
+        ? await createSession(buildCookbookRequest())
+        : await createSession(buildFreeTextRequest());
       await runPipeline(session.session_id);
       navigate(`/sessions/${session.session_id}`);
     } catch (err: unknown) {
@@ -56,22 +154,128 @@ export function NewSessionPage() {
     }
   }
 
+  function buildFreeTextRequest(): CreateFreeTextSessionRequest {
+    return {
+      free_text: freeText,
+      guest_count: guestCount,
+      meal_type: mealType,
+      occasion,
+      dietary_restrictions: restrictions,
+      serving_time: servingTime || undefined,
+    };
+  }
+
+  function buildCookbookRequest(): CreateCookbookSessionRequest {
+    return {
+      concept_source: 'cookbook',
+      free_text: buildCookbookFreeText(selectedRecipes),
+      selected_recipes: sortSelectionsByChunkId(selectedRecipeIds.map((chunk_id) => ({ chunk_id }))),
+      guest_count: guestCount,
+      meal_type: mealType,
+      occasion,
+      dietary_restrictions: restrictions,
+      serving_time: servingTime || undefined,
+    };
+  }
+
+  const canSubmit = mode === 'cookbook' ? selectedRecipeIds.length > 0 : !!freeText.trim();
+
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>Plan a Dinner</h1>
-      <p className={styles.subtitle}>Describe the meal you're imagining and we'll handle the rest.</p>
+      <p className={styles.subtitle}>Choose between a fresh meal idea or exact recipes from your uploaded cookbooks.</p>
 
       <form className={styles.form} onSubmit={handleSubmit}>
         {error && <div className={styles.error}>{error}</div>}
 
-        <Textarea
-          label="What are you cooking?"
-          placeholder="A rustic Italian dinner with handmade pasta, seasonal vegetables, and something decadent for dessert..."
-          value={freeText}
-          onChange={(e) => setFreeText(e.target.value)}
-          maxLength={2000}
-          required
-        />
+        <div className={styles.modeSwitcher} role="radiogroup" aria-label="Session mode">
+          <button
+            type="button"
+            className={`${styles.modeCard} ${mode === 'free_text' ? styles.modeCardActive : ''}`}
+            onClick={() => setMode('free_text')}
+            aria-pressed={mode === 'free_text'}
+          >
+            <span className={styles.modeEyebrow}>Meal idea</span>
+            <span className={styles.modeTitle}>Describe the menu you want</span>
+            <span className={styles.modeDescription}>Keep the classic free-text flow for a brand-new plan.</span>
+          </button>
+          <button
+            type="button"
+            className={`${styles.modeCard} ${mode === 'cookbook' ? styles.modeCardActive : ''}`}
+            onClick={() => setMode('cookbook')}
+            aria-pressed={mode === 'cookbook'}
+          >
+            <span className={styles.modeEyebrow}>Cookbook mode</span>
+            <span className={styles.modeTitle}>Schedule exact uploaded recipes</span>
+            <span className={styles.modeDescription}>Select detected recipes across books and run the scheduler on those exact cookbook chunks.</span>
+          </button>
+        </div>
+
+        {mode === 'free_text' ? (
+          <Textarea
+            label="What are you cooking?"
+            placeholder="A rustic Italian dinner with handmade pasta, seasonal vegetables, and something decadent for dessert..."
+            value={freeText}
+            onChange={(e) => setFreeText(e.target.value)}
+            maxLength={2000}
+            required
+          />
+        ) : (
+          <section className={styles.cookbookSection} aria-labelledby="cookbook-recipes-heading">
+            <div className={styles.sectionHeader}>
+              <div>
+                <h2 id="cookbook-recipes-heading" className={styles.sectionTitle}>Detected cookbook recipes</h2>
+                <p className={styles.sectionCopy}>Selections are submitted in stable chunk order so scheduling runs against the exact recipes you chose.</p>
+              </div>
+              <div className={styles.selectionCount} aria-live="polite">
+                {selectedRecipeIds.length} selected
+              </div>
+            </div>
+
+            {cookbookLoading ? (
+              <div className={styles.cookbookState}>Loading cookbook recipes…</div>
+            ) : cookbookLoaded && cookbookCandidates.length === 0 ? (
+              <div className={styles.cookbookState}>No detected cookbook recipes yet. Upload a cookbook and let ingestion finish first.</div>
+            ) : (
+              <div className={styles.bookGrid}>
+                {groupedRecipes.map((group) => (
+                  <section key={group.bookId} className={styles.bookCard} aria-label={group.bookTitle}>
+                    <div className={styles.bookHeader}>
+                      <h3 className={styles.bookTitle}>{group.bookTitle}</h3>
+                      <span className={styles.bookMeta}>{group.recipes.length} recipes</span>
+                    </div>
+                    <div className={styles.recipeList}>
+                      {group.recipes.map((recipe) => {
+                        const checked = selectedRecipeIds.includes(recipe.chunk_id);
+                        return (
+                          <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
+                              aria-label={`Select ${recipe.recipe_name}`}
+                            />
+                            <div className={styles.recipeOptionBody}>
+                              <div className={styles.recipeOptionHeader}>
+                                <span className={styles.recipeName}>{recipe.recipe_name}</span>
+                                <span className={styles.recipePage}>p. {recipe.page_number || '—'}</span>
+                              </div>
+                              <div className={styles.recipeMetaRow}>
+                                <span>{recipe.chapter || 'Unsorted chapter'}</span>
+                                <span className={styles.chunkId}>Chunk {recipe.chunk_id.slice(0, 8)}</span>
+                              </div>
+                              <p className={styles.recipeExcerpt}>{recipe.text}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <div className={styles.row}>
           <Input
@@ -131,8 +335,8 @@ export function NewSessionPage() {
         </div>
 
         <div className={styles.actions}>
-          <Button type="submit" disabled={loading || !freeText.trim()}>
-            {loading ? 'Starting...' : 'Start Planning'}
+          <Button type="submit" disabled={loading || !canSubmit}>
+            {loading ? 'Starting...' : mode === 'cookbook' ? 'Schedule Selected Recipes' : 'Start Planning'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => navigate('/')}>
             Cancel

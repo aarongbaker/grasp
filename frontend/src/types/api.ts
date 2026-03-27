@@ -6,6 +6,7 @@ export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
 export type IngestionStatus = 'pending' | 'processing' | 'complete' | 'failed';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
+export type SessionConceptSource = 'free_text' | 'cookbook';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -88,6 +89,19 @@ export interface UserProfile {
 }
 
 // Session
+export interface SelectedCookbookRecipeRef {
+  chunk_id: string;
+}
+
+export interface SelectedCookbookRecipe {
+  chunk_id: string;
+  book_id: string;
+  book_title: string;
+  text: string;
+  chapter: string;
+  page_number: number;
+}
+
 export interface DinnerConcept {
   free_text: string;
   guest_count: number;
@@ -95,9 +109,11 @@ export interface DinnerConcept {
   occasion: Occasion;
   dietary_restrictions: string[];
   serving_time: string | null;
+  concept_source?: SessionConceptSource;
+  selected_recipes?: SelectedCookbookRecipe[];
 }
 
-export interface CreateSessionRequest {
+export interface CreateFreeTextSessionRequest {
   free_text: string;
   guest_count: number;
   meal_type: MealType;
@@ -105,6 +121,19 @@ export interface CreateSessionRequest {
   dietary_restrictions?: string[];
   serving_time?: string;
 }
+
+export interface CreateCookbookSessionRequest {
+  guest_count: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+  concept_source: 'cookbook';
+  selected_recipes: SelectedCookbookRecipeRef[];
+  free_text?: string;
+}
+
+export type CreateSessionRequest = CreateFreeTextSessionRequest | CreateCookbookSessionRequest;
 
 export interface Session {
   session_id: string;
@@ -239,4 +268,14 @@ export interface IngestionJob {
   book_statuses: BookStatus[];
   created_at: string;
   completed_at: string | null;
+}
+
+export interface DetectedRecipeCandidate {
+  chunk_id: string;
+  book_id: string;
+  book_title: string;
+  recipe_name: string;
+  chapter: string;
+  page_number: number;
+  text: string;
 }
