@@ -49,6 +49,11 @@ _enricher_skip_recipes: set[str] = set()
 # Used by test_run3 (fatal error) — cycles are caught by the real DAG builder.
 _enricher_cyclic_mode: bool = False
 
+# ── Generator mock control ───────────────────────────────────────────────────
+# When True, the generator mock returns FT (finish-together) test recipes
+# instead of the default 3-recipe menu. Used by S03 integration tests.
+_generator_ft_mode: bool = False
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -108,9 +113,15 @@ async def compiled_graph(test_checkpointer):
         CYCLIC_STEPS_POMMES_PUREE,
         CYCLIC_STEPS_SHORT_RIBS,
         ENRICHED_CHOCOLATE_FONDANT,
+        ENRICHED_FT_RECIPE_A,
+        ENRICHED_FT_RECIPE_B,
+        ENRICHED_FT_RECIPE_C,
         ENRICHED_POMMES_PUREE,
         ENRICHED_SHORT_RIBS,
         RAW_CHOCOLATE_FONDANT,
+        RAW_FT_RECIPE_A,
+        RAW_FT_RECIPE_B,
+        RAW_FT_RECIPE_C,
         RAW_POMMES_PUREE,
         RAW_SHORT_RIBS,
     )
@@ -120,9 +131,18 @@ async def compiled_graph(test_checkpointer):
     )
 
     # ── Generator mock (Phase 4) ─────────────────────────────────────────────
-    gen_mock_output = RecipeGenerationOutput(recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT])
+    # Returns default 3-recipe menu OR FT test recipes based on _generator_ft_mode
+    gen_default_output = RecipeGenerationOutput(recipes=[RAW_SHORT_RIBS, RAW_POMMES_PUREE, RAW_CHOCOLATE_FONDANT])
+    gen_ft_output = RecipeGenerationOutput(recipes=[RAW_FT_RECIPE_A, RAW_FT_RECIPE_B, RAW_FT_RECIPE_C])
+
+    async def _generator_ainvoke_side_effect(_):
+        """Return default or FT recipes based on _generator_ft_mode flag."""
+        if _generator_ft_mode:
+            return gen_ft_output
+        return gen_default_output
+
     gen_mock_chain = AsyncMock()
-    gen_mock_chain.ainvoke.return_value = gen_mock_output
+    gen_mock_chain.ainvoke = AsyncMock(side_effect=_generator_ainvoke_side_effect)
 
     gen_mock_llm = MagicMock()
     gen_mock_llm.with_structured_output.return_value = gen_mock_chain
@@ -133,6 +153,10 @@ async def compiled_graph(test_checkpointer):
         "Braised Short Ribs": ENRICHED_SHORT_RIBS,
         "Pommes Puree": ENRICHED_POMMES_PUREE,
         "Chocolate Fondant": ENRICHED_CHOCOLATE_FONDANT,
+        # Finish-together test fixtures (S03 integration tests)
+        "Recipe A Long Braise": ENRICHED_FT_RECIPE_A,
+        "Recipe B Quick Saute": ENRICHED_FT_RECIPE_B,
+        "Recipe C Medium Roast": ENRICHED_FT_RECIPE_C,
     }
 
     # Map recipe names to cyclic step data (Phase 6 fatal error test)
@@ -247,6 +271,19 @@ def enricher_return_cyclic():
     _enricher_cyclic_mode = True
     yield
     _enricher_cyclic_mode = False
+
+
+@pytest.fixture
+def generator_ft_mode():
+    """
+    Function-scoped fixture that makes the generator mock return finish-together
+    test recipes (RAW_FT_RECIPE_A/B/C) instead of the default 3-recipe menu.
+    Used by S03 integration tests to verify finish-together scheduling.
+    """
+    global _generator_ft_mode
+    _generator_ft_mode = True
+    yield
+    _generator_ft_mode = False
 
 
 @pytest_asyncio.fixture(scope="session")

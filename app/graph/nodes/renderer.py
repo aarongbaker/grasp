@@ -200,6 +200,17 @@ def _build_summary_prompt(
 You MUST also produce an `error_summary` field: a single sentence explaining
 which recipe(s) were dropped and why, suitable for display to the user."""
 
+    # Build RESOURCE WARNINGS section if any warnings exist
+    resource_warning_section = ""
+    if merged_dag.resource_warnings:
+        warning_lines = "\n".join(f"  - {w}" for w in merged_dag.resource_warnings)
+        resource_warning_section = f"""
+
+## RESOURCE WARNINGS
+The following scheduling constraints were detected:
+{warning_lines}
+"""
+
     return f"""You are GRASP's schedule renderer. Your job is to write a concise, informative summary paragraph for a multi-course cooking schedule.
 
 ## DINNER CONCEPT
@@ -219,13 +230,14 @@ which recipe(s) were dropped and why, suitable for display to the user."""
 
 ## ACTIVE TIME
 {merged_dag.active_time_minutes} minutes of hands-on / active work (excludes passive steps like resting, chilling, braising).
-{error_section}
+{resource_warning_section}{error_section}
 ## OUTPUT REQUIREMENTS
 1. `summary`: One paragraph (2-4 sentences) overview of the meal schedule. Include:
    - Number of courses and guest count
    - The anchor dish (longest duration) and how other prep fits around it
    - Total elapsed time and approximate active time
    - Mention any prep-ahead opportunities if present
+   - If RESOURCE WARNINGS are present, mention the equipment constraints and any workarounds
 2. {"`error_summary`: A single sentence about dropped recipes. Set to null if no errors." if has_errors else "`error_summary`: Set to null (no errors occurred)."}
 3. Write for an experienced home cook. Be specific, not generic."""
 

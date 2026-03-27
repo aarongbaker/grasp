@@ -317,3 +317,106 @@ CYCLIC_STEPS_FONDANT = [
         resource=Resource.HANDS,
     ),
 ]
+
+
+# ── Finish-Together Test Fixtures ─────────────────────────────────────────────
+# Three recipes with different cooking durations to test finish-together scheduling.
+# Step IDs must match those defined in schedules.py (FT_*_PREP, FT_*_COOK).
+
+# Step ID constants for finish-together fixtures
+FT_A_PREP = "ft_recipe_a_prep"
+FT_A_COOK = "ft_recipe_a_cook"
+FT_B_PREP = "ft_recipe_b_prep"
+FT_B_COOK = "ft_recipe_b_cook"
+FT_C_PREP = "ft_recipe_c_prep"
+FT_C_COOK = "ft_recipe_c_cook"
+
+RAW_FT_RECIPE_A = RawRecipe(
+    name="Recipe A Long Braise",
+    description="A dish with a long braise time for finish-together testing.",
+    servings=4,
+    cuisine="Test",
+    estimated_total_minutes=210,
+    ingredients=[Ingredient(name="ingredient", quantity="1")],
+    steps=["prep", "cook"],
+)
+
+RAW_FT_RECIPE_B = RawRecipe(
+    name="Recipe B Quick Saute",
+    description="A quick sauté dish for finish-together testing.",
+    servings=4,
+    cuisine="Test",
+    estimated_total_minutes=75,
+    ingredients=[Ingredient(name="ingredient", quantity="1")],
+    steps=["prep", "cook"],
+)
+
+RAW_FT_RECIPE_C = RawRecipe(
+    name="Recipe C Medium Roast",
+    description="A medium roast dish for finish-together testing.",
+    servings=4,
+    cuisine="Test",
+    estimated_total_minutes=80,
+    ingredients=[Ingredient(name="ingredient", quantity="1")],
+    steps=["prep", "cook"],
+)
+
+ENRICHED_FT_RECIPE_A = EnrichedRecipe(
+    source=RAW_FT_RECIPE_A,
+    steps=[
+        RecipeStep(
+            step_id=FT_A_PREP,
+            description="Prepare ingredients for long braise",
+            duration_minutes=30,
+            depends_on=[],
+            resource=Resource.HANDS,
+        ),
+        RecipeStep(
+            step_id=FT_A_COOK,
+            description="Braise for 3 hours in oven",
+            duration_minutes=180,
+            depends_on=[FT_A_PREP],
+            resource=Resource.OVEN,
+        ),
+    ],
+)
+
+ENRICHED_FT_RECIPE_B = EnrichedRecipe(
+    source=RAW_FT_RECIPE_B,
+    steps=[
+        RecipeStep(
+            step_id=FT_B_PREP,
+            description="Prepare ingredients for quick sauté",
+            duration_minutes=15,
+            depends_on=[],
+            resource=Resource.HANDS,
+        ),
+        RecipeStep(
+            step_id=FT_B_COOK,
+            description="Sauté on stovetop for 1 hour",
+            duration_minutes=60,
+            depends_on=[FT_B_PREP],
+            resource=Resource.STOVETOP,
+        ),
+    ],
+)
+
+ENRICHED_FT_RECIPE_C = EnrichedRecipe(
+    source=RAW_FT_RECIPE_C,
+    steps=[
+        RecipeStep(
+            step_id=FT_C_PREP,
+            description="Prepare ingredients for medium roast",
+            duration_minutes=20,
+            depends_on=[],
+            resource=Resource.HANDS,
+        ),
+        RecipeStep(
+            step_id=FT_C_COOK,
+            description="Roast in oven for 1 hour",
+            duration_minutes=60,
+            depends_on=[FT_C_PREP],
+            resource=Resource.OVEN,
+        ),
+    ],
+)

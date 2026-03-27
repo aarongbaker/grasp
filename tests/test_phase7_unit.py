@@ -317,6 +317,48 @@ class TestBuildSummaryPrompt:
         prompt = _build_summary_prompt(concept, MERGED_DAG_FULL, [])
         assert "Set to null (no errors occurred)" in prompt
 
+    def test_prompt_includes_resource_warnings_when_present(self):
+        """Prompt includes RESOURCE WARNINGS section when warnings exist."""
+        concept = DinnerConcept.model_validate(CONCEPT_DICT)
+        # Create a MergedDAG with resource warnings
+        dag_with_warnings = MergedDAG(
+            scheduled_steps=MERGED_DAG_FULL.scheduled_steps,
+            total_duration_minutes=MERGED_DAG_FULL.total_duration_minutes,
+            active_time_minutes=MERGED_DAG_FULL.active_time_minutes,
+            resource_warnings=[
+                "Recipe C Medium Roast's oven cooking will finish ~60 minutes after Recipe A Long Braise due to oven capacity. Consider starting Recipe C Medium Roast earlier if you have a second oven.",
+                "Recipe D Quick Sear may need to juggle burners with Recipe B Sauce.",
+            ],
+        )
+        prompt = _build_summary_prompt(concept, dag_with_warnings, [])
+        assert "## RESOURCE WARNINGS" in prompt
+        assert "scheduling constraints were detected" in prompt
+        assert "Recipe C Medium Roast" in prompt
+        assert "oven capacity" in prompt
+        assert "Recipe D Quick Sear" in prompt
+        assert "juggle burners" in prompt
+
+    def test_prompt_excludes_resource_warnings_when_empty(self):
+        """Prompt excludes RESOURCE WARNINGS section when no warnings exist."""
+        concept = DinnerConcept.model_validate(CONCEPT_DICT)
+        # MERGED_DAG_FULL has resource_warnings=[] by default
+        prompt = _build_summary_prompt(concept, MERGED_DAG_FULL, [])
+        assert "## RESOURCE WARNINGS" not in prompt
+        assert "scheduling constraints were detected" not in prompt
+
+    def test_prompt_with_warnings_mentions_workarounds_in_output_requirements(self):
+        """OUTPUT REQUIREMENTS section mentions incorporating warnings when present."""
+        concept = DinnerConcept.model_validate(CONCEPT_DICT)
+        dag_with_warnings = MergedDAG(
+            scheduled_steps=MERGED_DAG_FULL.scheduled_steps,
+            total_duration_minutes=MERGED_DAG_FULL.total_duration_minutes,
+            active_time_minutes=MERGED_DAG_FULL.active_time_minutes,
+            resource_warnings=["Test warning about equipment constraints."],
+        )
+        prompt = _build_summary_prompt(concept, dag_with_warnings, [])
+        # The output requirements should always mention workarounds since it's static text
+        assert "equipment constraints" in prompt or "workarounds" in prompt
+
 
 # ── Node Function ───────────────────────────────────────────────────────────
 

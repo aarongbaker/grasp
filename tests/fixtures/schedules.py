@@ -430,3 +430,65 @@ NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE = NaturalLanguageSchedule(
     ),
     error_summary="Chocolate Fondant dropped: RAG retrieval returned zero results.",
 )
+
+
+# ── Finish-Together Test Fixtures ─────────────────────────────────────────────
+# Three recipes with different cooking durations to test finish-together scheduling.
+#
+# Recipe A (Long Braise):
+#   - 30 min prep (HANDS)
+#   - 180 min cook (OVEN) = 3 hours cooking
+#   Total cooking: 180 min (anchor)
+#
+# Recipe B (Quick Sauté):
+#   - 15 min prep (HANDS)
+#   - 60 min cook (STOVETOP) = 1 hour cooking
+#   Total cooking: 60 min → offset = 120 min
+#
+# Recipe C (Medium Roast):
+#   - 20 min prep (HANDS)
+#   - 60 min cook (OVEN) = 1 hour cooking
+#   Total cooking: 60 min → offset = 120 min
+#
+# With finish-together scheduling:
+#   - Recipe A cooking starts at T+30 (after prep), ends at T+210
+#   - Recipe B cooking starts at T+120 (offset) + prep done → max(15, 120) = 120, ends at T+180
+#   - Recipe C cooking starts at T+120 (offset) + prep done → max(20, 120) = 120, ends at T+180
+#   - All cooking finishes within 30 min window (180-210)
+#
+# With ASAP scheduling (no serving_time):
+#   - Recipe A cooking starts at T+30, ends at T+210
+#   - Recipe B cooking starts at T+15, ends at T+75
+#   - Recipe C cooking starts at T+20, ends at T+80
+#   - Cooking finish times span 135 min (75 to 210)
+
+# Step IDs for finish-together test fixtures
+FT_A_PREP = "ft_recipe_a_prep"
+FT_A_COOK = "ft_recipe_a_cook"
+FT_B_PREP = "ft_recipe_b_prep"
+FT_B_COOK = "ft_recipe_b_cook"
+FT_C_PREP = "ft_recipe_c_prep"
+FT_C_COOK = "ft_recipe_c_cook"
+
+
+# RecipeDAG definitions for finish-together tests
+RECIPE_DAG_FT_A = RecipeDAG(
+    recipe_name="Recipe A Long Braise",
+    recipe_slug="recipe_a_long_braise",
+    steps=[],
+    edges=[(FT_A_PREP, FT_A_COOK)],
+)
+
+RECIPE_DAG_FT_B = RecipeDAG(
+    recipe_name="Recipe B Quick Saute",
+    recipe_slug="recipe_b_quick_saute",
+    steps=[],
+    edges=[(FT_B_PREP, FT_B_COOK)],
+)
+
+RECIPE_DAG_FT_C = RecipeDAG(
+    recipe_name="Recipe C Medium Roast",
+    recipe_slug="recipe_c_medium_roast",
+    steps=[],
+    edges=[(FT_C_PREP, FT_C_COOK)],
+)

@@ -65,6 +65,7 @@ class MergedDAG(BaseModel):
     # resource → list of (start, end) windows. Used for conflict validation.
     # Same JSON round-trip caveat as RecipeDAG.edges — model_validate() to get tuples.
     equipment_utilisation: dict[str, list[tuple[int, int]]] = {}
+    resource_warnings: list[str] = []  # warnings surfaced by finish-together scheduling
     # equipment_name → list of (start, end) windows.
 
 

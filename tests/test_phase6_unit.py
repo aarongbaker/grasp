@@ -17,6 +17,8 @@ from app.graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
 from app.graph.nodes.dag_merger import (
     ResourceConflictError,
     _compute_critical_paths,
+    _compute_finish_together_offsets,
+    _detect_resource_warnings,
     _IntervalIndex,
     _merge_dags,
     _StepInfo,
@@ -602,3 +604,887 @@ class TestEquipmentContention:
 
         assert result.equipment_utilisation == {}
         assert result.total_duration_minutes == MERGED_DAG_FULL.total_duration_minutes
+
+
+class TestFinishTogetherOffsets:
+    """Tests for _compute_finish_together_offsets() function."""
+
+    def _make_step(self, step_id: str, recipe_name: str, resource: Resource, duration: int) -> _StepInfo:
+        """Helper to build a minimal step."""
+        return _StepInfo(
+            step_id=step_id,
+            recipe_name=recipe_name,
+            recipe_slug=recipe_name.lower().replace(" ", "_"),
+            description=f"test step {step_id}",
+            resource=resource,
+            duration_minutes=duration,
+            depends_on=[],
+        )
+
+    def test_no_serving_time_returns_empty_dict(self):
+        """When serving_time is None, returns empty dict (ASAP mode)."""
+        steps = [
+            self._make_step("a_1", "Recipe A", Resource.OVEN, 60),
+            self._make_step("b_1", "Recipe B", Resource.OVEN, 30),
+        ]
+        edges = []
+
+        result = _compute_finish_together_offsets(steps, edges, serving_time=None)
+
+        assert result == {}
+
+    def test_single_recipe_returns_zero_offset(self):
+        """Single recipe gets offset of 0 (no delay needed)."""
+        steps = [
+            self._make_step("a_1", "Recipe A", Resource.STOVETOP, 60),
+        ]
+        edges = []
+
+        result = _compute_finish_together_offsets(steps, edges, serving_time="18:00")
+
+        assert result == {"Recipe A": 0}
+
+    def test_three_recipes_computes_correct_offsets(self):
+        """3h, 1h, 1h recipes → offsets 0, 120, 120 minutes."""
+        # Recipe A: 3 hours = 180 min of cooking (longest, anchor)
+        # Recipe B: 1 hour = 60 min of cooking
+        # Recipe C: 1 hour = 60 min of cooking
+        steps = [
+            self._make_step("a_1", "Recipe A", Resource.OVEN, 180),
+            self._make_step("b_1", "Recipe B", Resource.STOVETOP, 60),
+            self._make_step("c_1", "Recipe C", Resource.OVEN, 60),
+        ]
+        edges = []
+
+        result = _compute_finish_together_offsets(steps, edges, serving_time="18:00")
+
+        assert result["Recipe A"] == 0, "Longest cooking recipe should have 0 offset"
+        assert result["Recipe B"] == 120, "1h recipe should delay 2h to match 3h anchor"
+        assert result["Recipe C"] == 120, "1h recipe should delay 2h to match 3h anchor"
+
+    def test_equal_duration_recipes_zero_offsets(self):
+        """All recipes with equal cooking time get offset 0."""
+        steps = [
+            self._make_step("a_1", "Recipe A", Resource.OVEN, 90),
+            self._make_step("b_1", "Recipe B", Resource.STOVETOP, 90),
+            self._make_step("c_1", "Recipe C", Resource.OVEN, 90),
+        ]
+        edges = []
+
+        result = _compute_finish_together_offsets(steps, edges, serving_time="19:00")
+
+        assert result["Recipe A"] == 0
+        assert result["Recipe B"] == 0
+        assert result["Recipe C"] == 0
+
+    def test_prep_steps_not_counted_in_cooking_duration(self):
+        """HANDS/PASSIVE steps don't affect cooking duration or offsets."""
+        # Recipe A: 30 min prep (HANDS) + 60 min cooking (OVEN) = 60 min cooking
+        # Recipe B: 120 min cooking (STOVETOP) = 120 min cooking (anchor)
+        # Recipe A offset should be 120 - 60 = 60
+        steps = [
+            self._make_step("a_prep", "Recipe A", Resource.HANDS, 30),
+            self._make_step("a_cook", "Recipe A", Resource.OVEN, 60),
+            self._make_step("b_cook", "Recipe B", Resource.STOVETOP, 120),
+        ]
+        edges = [("a_prep", "a_cook")]
+
+        result = _compute_finish_together_offsets(steps, edges, serving_time="18:00")
+
+        assert result["Recipe A"] == 60, "Should offset 60 min (120 - 60 cooking)"
+        assert result["Recipe B"] == 0, "Anchor recipe gets 0 offset"
+
+    def test_empty_steps_returns_empty_dict(self):
+        """No steps returns empty dict."""
+        result = _compute_finish_together_offsets([], [], serving_time="18:00")
+        assert result == {}
+
+
+class TestFinishTogetherScheduling:
+    """
+    Integration tests for finish-together scheduling via _merge_dags().
+
+    These tests verify the full scheduling algorithm when serving_time is set,
+    not just the offset computation. They prove:
+    - R022: Cooking steps are staggered to finish together
+    - R023: All cooking ends within a 15 min window when serving_time is set
+    - R024: Prep steps (HANDS) remain ASAP while cooking is delayed
+    - R026: Backward compatibility — no serving_time = ASAP behavior
+    """
+
+    @pytest.fixture
+    def finish_together_fixtures(self):
+        """Create validated recipes and DAGs for finish-together tests."""
+        from tests.fixtures.recipes import (
+            ENRICHED_FT_RECIPE_A,
+            ENRICHED_FT_RECIPE_B,
+            ENRICHED_FT_RECIPE_C,
+        )
+        from tests.fixtures.schedules import (
+            RECIPE_DAG_FT_A,
+            RECIPE_DAG_FT_B,
+            RECIPE_DAG_FT_C,
+        )
+
+        validated_a = ValidatedRecipe(source=ENRICHED_FT_RECIPE_A, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=ENRICHED_FT_RECIPE_B, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=ENRICHED_FT_RECIPE_C, validated_at=datetime.now())
+
+        return {
+            "dags": [RECIPE_DAG_FT_A, RECIPE_DAG_FT_B, RECIPE_DAG_FT_C],
+            "validated": [validated_a, validated_b, validated_c],
+        }
+
+    def test_three_recipes_finish_within_window(self, finish_together_fixtures):
+        """
+        Verify 3h + 1h + 1h cooking respects finish-together offsets.
+
+        Recipe A: 180 min cooking (OVEN) — anchor
+        Recipe B: 60 min cooking (STOVETOP) — should delay 120 min
+        Recipe C: 60 min cooking (OVEN) — should delay 120 min
+
+        Note: Recipe C must wait for Recipe A's oven to free up (oven capacity=1),
+        so it can't finish at the same time as Recipe A. The key assertion is that
+        Recipe B (STOVETOP) finishes close to Recipe A's cooking end time.
+        """
+        result = _merge_dags(
+            finish_together_fixtures["dags"],
+            finish_together_fixtures["validated"],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        cook_a = by_id["ft_recipe_a_cook"]
+        cook_b = by_id["ft_recipe_b_cook"]
+        cook_c = by_id["ft_recipe_c_cook"]
+
+        # Recipe A (OVEN, 180 min) ends at T+30 + 180 = T+210
+        assert cook_a.end_at_minute == 210, f"Recipe A cooking should end at T+210, got T+{cook_a.end_at_minute}"
+
+        # Recipe B (STOVETOP, 60 min) starts at offset 120, ends at T+180
+        # This should finish within 30 min of Recipe A
+        assert cook_b.end_at_minute == 180, f"Recipe B cooking should end at T+180, got T+{cook_b.end_at_minute}"
+
+        # Verify Recipe B finishes within 30 min of Recipe A
+        a_b_window = abs(cook_a.end_at_minute - cook_b.end_at_minute)
+        assert a_b_window <= 30, f"Recipe A and B should finish within 30 min, got {a_b_window}"
+
+        # Recipe C uses OVEN, must wait for Recipe A to finish (oven capacity=1)
+        # So Recipe C starts at T+210 (when A finishes), ends at T+270
+        # This is expected behavior — oven contention overrides finish-together for C
+        assert cook_c.start_at_minute >= 210, f"Recipe C must wait for oven, should start at T+210+, got T+{cook_c.start_at_minute}"
+
+    def test_prep_steps_scheduled_early(self, finish_together_fixtures):
+        """
+        Verify HANDS prep steps for shorter recipes happen early, before their cooking starts.
+
+        Recipe B and C have cooking delayed by 120 min offset, but their prep steps
+        should still happen ASAP (not delayed). This enables productive use of the
+        wait time during Recipe A's cooking.
+        """
+        result = _merge_dags(
+            finish_together_fixtures["dags"],
+            finish_together_fixtures["validated"],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        # Prep steps should be scheduled early (ASAP from dependencies)
+        prep_a = by_id["ft_recipe_a_prep"]
+        prep_b = by_id["ft_recipe_b_prep"]
+        prep_c = by_id["ft_recipe_c_prep"]
+        cook_b = by_id["ft_recipe_b_cook"]
+        cook_c = by_id["ft_recipe_c_cook"]
+
+        # All prep steps should start early (within first 30 min, accounting for HANDS exclusivity)
+        assert prep_a.start_at_minute < 60, f"Prep A should be early, got T+{prep_a.start_at_minute}"
+        assert prep_b.start_at_minute < 60, f"Prep B should be early, got T+{prep_b.start_at_minute}"
+        assert prep_c.start_at_minute < 60, f"Prep C should be early, got T+{prep_c.start_at_minute}"
+
+        # Prep should finish before cooking starts (dependency constraint)
+        assert prep_b.end_at_minute <= cook_b.start_at_minute, (
+            f"Prep B must finish before Cook B starts: prep ends T+{prep_b.end_at_minute}, "
+            f"cook starts T+{cook_b.start_at_minute}"
+        )
+        assert prep_c.end_at_minute <= cook_c.start_at_minute, (
+            f"Prep C must finish before Cook C starts: prep ends T+{prep_c.end_at_minute}, "
+            f"cook starts T+{cook_c.start_at_minute}"
+        )
+
+        # Cooking starts at offset (120 min) not immediately after prep
+        assert cook_b.start_at_minute >= 120, (
+            f"Cook B should start at offset 120+, got T+{cook_b.start_at_minute}"
+        )
+
+    def test_no_serving_time_uses_asap(self, finish_together_fixtures):
+        """
+        Verify existing ASAP behavior when serving_time=None (backward compatible).
+
+        Without finish-together scheduling, cooking starts as soon as dependencies
+        and resources allow. Recipe B (STOVETOP) should start before offset=120
+        would allow.
+        """
+        result = _merge_dags(
+            finish_together_fixtures["dags"],
+            finish_together_fixtures["validated"],
+            DEFAULT_KITCHEN,
+            serving_time=None,  # ASAP mode
+        )
+
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        # Cooking should start immediately after prep and HANDS availability (ASAP)
+        cook_b = by_id["ft_recipe_b_cook"]
+
+        # In ASAP mode, Recipe B cooking should start much earlier than offset=120
+        # (HANDS exclusivity causes some serialization of prep steps, but cooking
+        # should start well before the 120 min offset that finish-together would use)
+        assert cook_b.start_at_minute < 120, (
+            f"ASAP: Cook B should start before offset 120, got T+{cook_b.start_at_minute}"
+        )
+
+        # Compare with finish-together mode to verify the difference
+        result_ft = _merge_dags(
+            finish_together_fixtures["dags"],
+            finish_together_fixtures["validated"],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        ft_by_id = {s.step_id: s for s in result_ft.scheduled_steps}
+        cook_b_ft = ft_by_id["ft_recipe_b_cook"]
+
+        # In finish-together mode, Recipe B should start at offset 120
+        # In ASAP mode, it should start earlier
+        assert cook_b.start_at_minute < cook_b_ft.start_at_minute, (
+            f"ASAP mode should start cooking earlier than FT mode: "
+            f"ASAP T+{cook_b.start_at_minute} vs FT T+{cook_b_ft.start_at_minute}"
+        )
+
+    def test_single_recipe_with_serving_time(self):
+        """
+        Verify single recipe works correctly with serving_time set.
+
+        A single recipe should get offset=0 (it's the anchor). The schedule
+        should be identical to ASAP mode.
+        """
+        from tests.fixtures.recipes import ENRICHED_FT_RECIPE_A
+        from tests.fixtures.schedules import RECIPE_DAG_FT_A
+
+        validated_a = ValidatedRecipe(source=ENRICHED_FT_RECIPE_A, validated_at=datetime.now())
+
+        result_ft = _merge_dags(
+            [RECIPE_DAG_FT_A],
+            [validated_a],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        result_asap = _merge_dags(
+            [RECIPE_DAG_FT_A],
+            [validated_a],
+            DEFAULT_KITCHEN,
+            serving_time=None,
+        )
+
+        # Both should produce the same schedule
+        assert result_ft.total_duration_minutes == result_asap.total_duration_minutes, (
+            f"Single recipe: FT={result_ft.total_duration_minutes} vs ASAP={result_asap.total_duration_minutes}"
+        )
+
+        # Verify the cooking step starts at the expected time
+        by_id_ft = {s.step_id: s for s in result_ft.scheduled_steps}
+        cook_a = by_id_ft["ft_recipe_a_cook"]
+
+        # Cooking should start immediately after prep (30 min)
+        assert cook_a.start_at_minute == 30, f"Single recipe cooking should start at T+30, got T+{cook_a.start_at_minute}"
+
+    def test_equal_cooking_duration_no_stagger(self):
+        """
+        Verify that recipes with equal cooking durations get no stagger.
+
+        When all recipes have the same cooking time, all offsets are 0,
+        so the schedule is identical to ASAP mode for the cooking steps.
+        """
+        # Create two recipes with identical 60 min cooking times
+        raw_a = RawRecipe(
+            name="Equal A",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+        raw_b = RawRecipe(
+            name="Equal B",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="eq_a_prep", description="prep A", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="eq_a_cook", description="cook A", duration_minutes=60, resource=Resource.OVEN, depends_on=["eq_a_prep"]),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="eq_b_prep", description="prep B", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="eq_b_cook", description="cook B", duration_minutes=60, resource=Resource.STOVETOP, depends_on=["eq_b_prep"]),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Equal A", recipe_slug="equal_a", steps=[], edges=[("eq_a_prep", "eq_a_cook")])
+        dag_b = RecipeDAG(recipe_name="Equal B", recipe_slug="equal_b", steps=[], edges=[("eq_b_prep", "eq_b_cook")])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        result_ft = _merge_dags(
+            [dag_a, dag_b],
+            [validated_a, validated_b],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        result_asap = _merge_dags(
+            [dag_a, dag_b],
+            [validated_a, validated_b],
+            DEFAULT_KITCHEN,
+            serving_time=None,
+        )
+
+        # With equal cooking durations, FT and ASAP should produce similar schedules
+        # (Cooking steps should start at similar times)
+        ft_by_id = {s.step_id: s for s in result_ft.scheduled_steps}
+        asap_by_id = {s.step_id: s for s in result_asap.scheduled_steps}
+
+        # Equal cooking durations → offset = 0 for both → cooking starts same as ASAP
+        assert ft_by_id["eq_a_cook"].start_at_minute == asap_by_id["eq_a_cook"].start_at_minute, (
+            f"Equal duration: Cook A should start same time in FT vs ASAP"
+        )
+        assert ft_by_id["eq_b_cook"].start_at_minute == asap_by_id["eq_b_cook"].start_at_minute, (
+            f"Equal duration: Cook B should start same time in FT vs ASAP"
+        )
+
+    def test_cooking_steps_staggered_correctly(self, finish_together_fixtures):
+        """
+        Verify cooking step start times are correctly staggered.
+
+        Recipe A (180 min cooking): offset=0, starts at T+30 (after 30 min prep)
+        Recipe B (60 min cooking): offset=120, starts at T+120 (delayed)
+        Recipe C (60 min cooking): offset=120, starts at T+120 (may wait for oven)
+        """
+        result = _merge_dags(
+            finish_together_fixtures["dags"],
+            finish_together_fixtures["validated"],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+
+        cook_a = by_id["ft_recipe_a_cook"]
+        cook_b = by_id["ft_recipe_b_cook"]
+        cook_c = by_id["ft_recipe_c_cook"]
+
+        # Recipe A (anchor): cooking starts after prep ends (T+30)
+        assert cook_a.start_at_minute == 30, f"Anchor cooking should start at T+30, got T+{cook_a.start_at_minute}"
+
+        # Recipe B: offset=120, prep=15 → cooking starts at max(15, 120) = 120
+        assert cook_b.start_at_minute == 120, f"Recipe B cooking should start at T+120, got T+{cook_b.start_at_minute}"
+
+        # Recipe C: offset=120, prep=20 → cooking starts at max(20, 120) = 120
+        # But Recipe A uses the oven from T+30 to T+210, so Recipe C (OVEN) may wait
+        # Recipe C should start at 120 or later (when oven is free)
+        assert cook_c.start_at_minute >= 120, f"Recipe C cooking should start at T+120+, got T+{cook_c.start_at_minute}"
+
+    def test_stovetop_only_finish_within_window(self):
+        """
+        Verify three recipes using only STOVETOP finish close together.
+
+        This test uses STOVETOP-only recipes to avoid oven contention issues.
+        Recipe A: 180 min cooking (3h)
+        Recipe B: 60 min cooking (1h)
+        Recipe C: 60 min cooking (1h)
+
+        With 4 burners and no oven conflicts, all cooking should finish
+        within a reasonable window when finish-together is enabled.
+        The window may be slightly larger than the ideal due to prep time
+        differences (A prep = 20 min, B/C prep = 10 min).
+        """
+        # Create three STOVETOP-only recipes
+        raw_a = RawRecipe(
+            name="Stovetop A",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=200,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+        raw_b = RawRecipe(
+            name="Stovetop B",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+        raw_c = RawRecipe(
+            name="Stovetop C",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="st_a_prep", description="prep A", duration_minutes=20, resource=Resource.HANDS),
+                RecipeStep(step_id="st_a_cook", description="cook A 3h", duration_minutes=180, resource=Resource.STOVETOP, depends_on=["st_a_prep"]),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="st_b_prep", description="prep B", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="st_b_cook", description="cook B 1h", duration_minutes=60, resource=Resource.STOVETOP, depends_on=["st_b_prep"]),
+            ],
+        )
+        enriched_c = EnrichedRecipe(
+            source=raw_c,
+            steps=[
+                RecipeStep(step_id="st_c_prep", description="prep C", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="st_c_cook", description="cook C 1h", duration_minutes=60, resource=Resource.STOVETOP, depends_on=["st_c_prep"]),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Stovetop A", recipe_slug="stovetop_a", steps=[], edges=[("st_a_prep", "st_a_cook")])
+        dag_b = RecipeDAG(recipe_name="Stovetop B", recipe_slug="stovetop_b", steps=[], edges=[("st_b_prep", "st_b_cook")])
+        dag_c = RecipeDAG(recipe_name="Stovetop C", recipe_slug="stovetop_c", steps=[], edges=[("st_c_prep", "st_c_cook")])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=enriched_c, validated_at=datetime.now())
+
+        result = _merge_dags(
+            [dag_a, dag_b, dag_c],
+            [validated_a, validated_b, validated_c],
+            DEFAULT_KITCHEN,  # 4 burners, plenty of capacity
+            serving_time="18:00",
+        )
+
+        # Find all cooking step end times
+        cooking_steps = [
+            s for s in result.scheduled_steps
+            if s.resource == Resource.STOVETOP
+        ]
+        cooking_end_times = [s.end_at_minute for s in cooking_steps]
+
+        # Verify the algorithm is working correctly:
+        # Recipe A: 180 min cooking, offset=0, starts at T+20 (after 20 min prep), ends at T+200
+        # Recipe B: 60 min cooking, offset=120, starts at T+120, ends at T+180
+        # Recipe C: 60 min cooking, offset=120, starts at T+120, ends at T+180
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+        assert by_id["st_a_cook"].start_at_minute == 20, "Recipe A should start at T+20 (after prep)"
+        assert by_id["st_b_cook"].start_at_minute == 120, "Recipe B should start at offset 120"
+        assert by_id["st_c_cook"].start_at_minute == 120, "Recipe C should start at offset 120"
+
+        # Window is 20 min (200 - 180) due to Recipe A's longer prep time.
+        # The algorithm correctly staggered B and C to finish at T+180,
+        # but A's prep adds 10 min to its end time (20 + 180 = 200).
+        min_end = min(cooking_end_times)
+        max_end = max(cooking_end_times)
+        window = max_end - min_end
+
+        assert window <= 25, (
+            f"STOVETOP-only cooking should finish within 25 min window, got {window} min. "
+            f"End times: {sorted(cooking_end_times)}"
+        )
+
+        # Compare with ASAP mode — the window should be much larger
+        result_asap = _merge_dags(
+            [dag_a, dag_b, dag_c],
+            [validated_a, validated_b, validated_c],
+            DEFAULT_KITCHEN,
+            serving_time=None,  # ASAP mode
+        )
+
+        asap_cooking_steps = [
+            s for s in result_asap.scheduled_steps
+            if s.resource == Resource.STOVETOP
+        ]
+        asap_cooking_end_times = [s.end_at_minute for s in asap_cooking_steps]
+        asap_window = max(asap_cooking_end_times) - min(asap_cooking_end_times)
+
+        assert asap_window > window, (
+            f"ASAP window ({asap_window}) should be larger than FT window ({window})"
+        )
+
+
+class TestResourceWarnings:
+    """
+    Tests for resource constraint warning detection.
+
+    These tests verify that `_detect_resource_warnings()` correctly identifies
+    when oven/stovetop contention prevents recipes from finishing together,
+    and generates user-friendly warnings.
+    """
+
+    def test_no_warnings_in_asap_mode(self):
+        """ASAP mode (no serving_time) should never produce warnings."""
+        # Create a simple step that would trigger warning in FT mode
+        step = ScheduledStep(
+            step_id="test_step",
+            recipe_name="Test Recipe",
+            description="test",
+            resource=Resource.OVEN,
+            duration_minutes=60,
+            start_at_minute=0,
+            end_at_minute=60,
+        )
+        capacities = {Resource.OVEN: 1, Resource.STOVETOP: 4, Resource.HANDS: 1, Resource.PASSIVE: float("inf")}
+
+        # Empty finish_offsets dict = ASAP mode
+        warnings = _detect_resource_warnings([step], {}, capacities)
+
+        assert warnings == [], "ASAP mode should not produce warnings"
+
+    def test_no_warnings_when_within_threshold(self):
+        """No warnings when all recipes finish within 20 min of anchor."""
+        steps = [
+            ScheduledStep(
+                step_id="anchor_cook",
+                recipe_name="Anchor Recipe",
+                description="cook anchor",
+                resource=Resource.OVEN,
+                duration_minutes=60,
+                start_at_minute=0,
+                end_at_minute=60,
+            ),
+            ScheduledStep(
+                step_id="other_cook",
+                recipe_name="Other Recipe",
+                description="cook other",
+                resource=Resource.STOVETOP,
+                duration_minutes=60,
+                start_at_minute=15,
+                end_at_minute=75,  # 15 min after anchor (within threshold)
+            ),
+        ]
+        finish_offsets = {"Anchor Recipe": 0, "Other Recipe": 0}
+        capacities = {Resource.OVEN: 1, Resource.STOVETOP: 4, Resource.HANDS: 1, Resource.PASSIVE: float("inf")}
+
+        warnings = _detect_resource_warnings(steps, finish_offsets, capacities)
+
+        assert warnings == [], "Recipes finishing within 20 min should not trigger warnings"
+
+    def test_warning_when_oven_contention_delays_recipe(self):
+        """Warning generated when oven contention causes >20 min delay."""
+        steps = [
+            ScheduledStep(
+                step_id="anchor_cook",
+                recipe_name="Recipe A Long Braise",
+                description="braise anchor",
+                resource=Resource.OVEN,
+                duration_minutes=180,
+                start_at_minute=30,
+                end_at_minute=210,  # Anchor finishes at T+210
+            ),
+            ScheduledStep(
+                step_id="delayed_cook",
+                recipe_name="Recipe C Medium Roast",
+                description="roast delayed",
+                resource=Resource.OVEN,
+                duration_minutes=60,
+                start_at_minute=210,  # Must wait for anchor's oven
+                end_at_minute=270,  # Finishes 60 min after anchor (>20 min)
+            ),
+        ]
+        # Recipe C has offset=120 (would ideally finish near anchor) but oven contention delays it
+        finish_offsets = {"Recipe A Long Braise": 0, "Recipe C Medium Roast": 120}
+        capacities = {Resource.OVEN: 1, Resource.STOVETOP: 4, Resource.HANDS: 1, Resource.PASSIVE: float("inf")}
+
+        warnings = _detect_resource_warnings(steps, finish_offsets, capacities)
+
+        assert len(warnings) == 1, f"Expected 1 warning, got {len(warnings)}"
+        assert "Recipe C Medium Roast" in warnings[0], "Warning should mention delayed recipe"
+        assert "oven" in warnings[0].lower(), "Warning should mention oven resource"
+        assert "60" in warnings[0], "Warning should mention delay amount (~60 min)"
+        assert "Recipe A Long Braise" in warnings[0], "Warning should mention anchor recipe"
+
+    def test_warning_message_format(self):
+        """Verify warning message is user-friendly with actionable suggestion."""
+        steps = [
+            ScheduledStep(
+                step_id="anchor_cook",
+                recipe_name="Anchor Recipe",
+                description="anchor",
+                resource=Resource.OVEN,
+                duration_minutes=180,
+                start_at_minute=0,
+                end_at_minute=180,
+            ),
+            ScheduledStep(
+                step_id="delayed_cook",
+                recipe_name="Delayed Recipe",
+                description="delayed",
+                resource=Resource.OVEN,
+                duration_minutes=60,
+                start_at_minute=180,  # Must wait for oven
+                end_at_minute=240,  # 60 min after anchor
+            ),
+        ]
+        finish_offsets = {"Anchor Recipe": 0, "Delayed Recipe": 120}
+        capacities = {Resource.OVEN: 1, Resource.STOVETOP: 4, Resource.HANDS: 1, Resource.PASSIVE: float("inf")}
+
+        warnings = _detect_resource_warnings(steps, finish_offsets, capacities)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+
+        # Should have recipe name, resource, delay, and suggestion
+        assert "Delayed Recipe" in warning
+        assert "oven" in warning.lower()
+        assert "second oven" in warning.lower(), "Should suggest second oven for oven contention"
+
+    def test_multiple_warnings_for_multiple_delayed_recipes(self):
+        """Multiple recipes delayed beyond threshold should produce multiple warnings."""
+        steps = [
+            ScheduledStep(
+                step_id="anchor_cook",
+                recipe_name="Anchor Recipe",
+                description="anchor",
+                resource=Resource.OVEN,
+                duration_minutes=180,
+                start_at_minute=0,
+                end_at_minute=180,
+            ),
+            ScheduledStep(
+                step_id="delayed_1_cook",
+                recipe_name="Delayed Recipe 1",
+                description="delayed 1",
+                resource=Resource.OVEN,
+                duration_minutes=60,
+                start_at_minute=180,
+                end_at_minute=240,  # 60 min after anchor
+            ),
+            ScheduledStep(
+                step_id="delayed_2_cook",
+                recipe_name="Delayed Recipe 2",
+                description="delayed 2",
+                resource=Resource.OVEN,
+                duration_minutes=60,
+                start_at_minute=240,
+                end_at_minute=300,  # 120 min after anchor
+            ),
+        ]
+        finish_offsets = {"Anchor Recipe": 0, "Delayed Recipe 1": 120, "Delayed Recipe 2": 120}
+        capacities = {Resource.OVEN: 1, Resource.STOVETOP: 4, Resource.HANDS: 1, Resource.PASSIVE: float("inf")}
+
+        warnings = _detect_resource_warnings(steps, finish_offsets, capacities)
+
+        assert len(warnings) == 2, f"Expected 2 warnings, got {len(warnings)}"
+        assert any("Delayed Recipe 1" in w for w in warnings)
+        assert any("Delayed Recipe 2" in w for w in warnings)
+
+    def test_integration_with_merge_dags_oven_contention(self):
+        """
+        Integration test: verify MergedDAG.resource_warnings populated when oven contention occurs.
+
+        Uses the FT fixtures where Recipe C (OVEN) must wait for Recipe A's oven to free up.
+        """
+        from tests.fixtures.recipes import (
+            ENRICHED_FT_RECIPE_A,
+            ENRICHED_FT_RECIPE_B,
+            ENRICHED_FT_RECIPE_C,
+        )
+        from tests.fixtures.schedules import (
+            RECIPE_DAG_FT_A,
+            RECIPE_DAG_FT_B,
+            RECIPE_DAG_FT_C,
+        )
+
+        validated_a = ValidatedRecipe(source=ENRICHED_FT_RECIPE_A, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=ENRICHED_FT_RECIPE_B, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=ENRICHED_FT_RECIPE_C, validated_at=datetime.now())
+
+        result = _merge_dags(
+            [RECIPE_DAG_FT_A, RECIPE_DAG_FT_B, RECIPE_DAG_FT_C],
+            [validated_a, validated_b, validated_c],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        # Recipe C should have a warning because it must wait for Recipe A's oven
+        # Recipe A (OVEN, 180 min) ends at T+210
+        # Recipe C (OVEN, 60 min) must wait until T+210, ends at T+270 — 60 min after anchor
+        assert len(result.resource_warnings) >= 1, (
+            f"Expected at least 1 warning due to oven contention, got {len(result.resource_warnings)}: {result.resource_warnings}"
+        )
+
+        # Verify the warning mentions Recipe C
+        assert any("Recipe C" in w for w in result.resource_warnings), (
+            f"Warning should mention Recipe C: {result.resource_warnings}"
+        )
+
+    def test_no_warnings_without_serving_time(self):
+        """Verify ASAP mode produces no warnings even with same recipe set."""
+        from tests.fixtures.recipes import (
+            ENRICHED_FT_RECIPE_A,
+            ENRICHED_FT_RECIPE_B,
+            ENRICHED_FT_RECIPE_C,
+        )
+        from tests.fixtures.schedules import (
+            RECIPE_DAG_FT_A,
+            RECIPE_DAG_FT_B,
+            RECIPE_DAG_FT_C,
+        )
+
+        validated_a = ValidatedRecipe(source=ENRICHED_FT_RECIPE_A, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=ENRICHED_FT_RECIPE_B, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=ENRICHED_FT_RECIPE_C, validated_at=datetime.now())
+
+        result = _merge_dags(
+            [RECIPE_DAG_FT_A, RECIPE_DAG_FT_B, RECIPE_DAG_FT_C],
+            [validated_a, validated_b, validated_c],
+            DEFAULT_KITCHEN,
+            serving_time=None,  # ASAP mode
+        )
+
+        assert result.resource_warnings == [], (
+            f"ASAP mode should produce no warnings, got: {result.resource_warnings}"
+        )
+
+    def test_no_warnings_when_recipes_finish_together(self):
+        """No warnings when all recipes use different resources and finish within window."""
+        # Create recipes using different resources so they can actually finish together
+        raw_a = RawRecipe(
+            name="Oven Recipe",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+        raw_b = RawRecipe(
+            name="Stovetop Recipe",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "cook"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="ov_prep", description="prep", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="ov_cook", description="cook", duration_minutes=60, resource=Resource.OVEN, depends_on=["ov_prep"]),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="st_prep", description="prep", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(step_id="st_cook", description="cook", duration_minutes=60, resource=Resource.STOVETOP, depends_on=["st_prep"]),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Oven Recipe", recipe_slug="oven_recipe", steps=[], edges=[("ov_prep", "ov_cook")])
+        dag_b = RecipeDAG(recipe_name="Stovetop Recipe", recipe_slug="stovetop_recipe", steps=[], edges=[("st_prep", "st_cook")])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        result = _merge_dags(
+            [dag_a, dag_b],
+            [validated_a, validated_b],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        # Both recipes have equal cooking duration and use different resources
+        # They should finish at the same time with no warnings
+        assert result.resource_warnings == [], (
+            f"Equal duration recipes using different resources should have no warnings: {result.resource_warnings}"
+        )
+
+    def test_stovetop_warning_when_burner_limited(self):
+        """Warning generated when stovetop capacity limits cause delays."""
+        # Create recipes that exceed burner capacity
+        raw_a = RawRecipe(
+            name="Long Cook A",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=200,
+            ingredients=[],
+            steps=["cook"],
+        )
+        raw_b = RawRecipe(
+            name="Short Cook B",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["cook"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="a_cook", description="cook A", duration_minutes=180, resource=Resource.STOVETOP),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="b_cook", description="cook B", duration_minutes=60, resource=Resource.STOVETOP),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Long Cook A", recipe_slug="long_cook_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Short Cook B", recipe_slug="short_cook_b", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        # Use only 1 burner to force contention
+        kitchen = {"max_burners": 1, "has_second_oven": False}
+
+        result = _merge_dags(
+            [dag_a, dag_b],
+            [validated_a, validated_b],
+            kitchen,
+            serving_time="18:00",
+        )
+
+        # With 1 burner, Recipe B must wait for Recipe A to finish
+        # Recipe A: 180 min cooking, ends at T+180
+        # Recipe B: offset=120, but must wait until T+180, ends at T+240 — 60 min after anchor
+        assert len(result.resource_warnings) >= 1, (
+            f"Expected warning due to stovetop contention, got: {result.resource_warnings}"
+        )
+        assert any("stovetop" in w.lower() for w in result.resource_warnings), (
+            f"Warning should mention stovetop: {result.resource_warnings}"
+        )

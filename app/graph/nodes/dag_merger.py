@@ -93,6 +93,204 @@ def _compute_critical_paths(
     return cp
 
 
+def _is_cooking_step(resource: Resource) -> bool:
+    """Return True for active cooking resources (STOVETOP, OVEN)."""
+    return resource in (Resource.STOVETOP, Resource.OVEN)
+
+
+def _compute_recipe_cooking_durations(
+    all_steps: list[_StepInfo],
+    all_edges: list[tuple[str, str]],
+) -> dict[str, int]:
+    """
+    Compute total cooking time per recipe (STOVETOP + OVEN steps only).
+
+    Returns recipe_name → total cooking minutes. Follows the critical path
+    within each recipe to avoid double-counting parallel cooking steps.
+    """
+    # Group steps by recipe
+    steps_by_recipe: dict[str, list[_StepInfo]] = {}
+    for step in all_steps:
+        steps_by_recipe.setdefault(step.recipe_name, []).append(step)
+
+    # Build edge lookup for filtering per-recipe edges
+    step_to_recipe = {s.step_id: s.recipe_name for s in all_steps}
+
+    # For each recipe, compute the critical path length considering only cooking steps
+    result: dict[str, int] = {}
+
+    for recipe_name, steps in steps_by_recipe.items():
+        # Filter edges to this recipe
+        recipe_step_ids = {s.step_id for s in steps}
+        recipe_edges = [(src, dst) for src, dst in all_edges if src in recipe_step_ids and dst in recipe_step_ids]
+
+        # Build graph for this recipe
+        G = nx.DiGraph()
+        G.add_nodes_from(recipe_step_ids)
+        G.add_edges_from(recipe_edges)
+
+        # Compute critical path length for cooking steps only
+        # Duration is only counted for STOVETOP/OVEN steps
+        cooking_dur = {
+            s.step_id: s.duration_minutes if _is_cooking_step(s.resource) else 0 for s in steps
+        }
+
+        # Bottom-up critical path: sum of cooking durations along longest path
+        cp: dict[str, int] = {}
+        for step_id in reversed(list(nx.topological_sort(G))):
+            successors = list(G.successors(step_id))
+            if not successors:
+                cp[step_id] = cooking_dur[step_id]
+            else:
+                cp[step_id] = cooking_dur[step_id] + max(cp[s] for s in successors)
+
+        # Handle isolated nodes
+        for s in steps:
+            if s.step_id not in cp:
+                cp[s.step_id] = cooking_dur[s.step_id]
+
+        # Recipe cooking duration = max critical path from any root
+        roots = [s.step_id for s in steps if G.in_degree(s.step_id) == 0]
+        if roots:
+            result[recipe_name] = max(cp[root] for root in roots)
+        else:
+            # Fallback: sum of all cooking step durations (shouldn't happen)
+            result[recipe_name] = sum(cooking_dur.values())
+
+    return result
+
+
+def _compute_finish_together_offsets(
+    all_steps: list[_StepInfo],
+    all_edges: list[tuple[str, str]],
+    serving_time: str | None,
+) -> dict[str, int]:
+    """
+    Compute per-recipe cooking start offsets so all recipes finish together.
+
+    If serving_time is None (ASAP mode), returns empty dict — no offsets applied.
+
+    Otherwise:
+    1. Compute cooking duration per recipe using critical path analysis
+    2. Find the max cooking duration (anchor recipe)
+    3. For each recipe: offset = max_cooking - this_recipe_cooking
+
+    The offset is applied only to cooking steps (STOVETOP/OVEN), not prep steps.
+
+    Returns recipe_name → offset in minutes. Anchor recipe gets 0, shorter
+    recipes get positive offsets (delay start of cooking to finish together).
+    """
+    # ASAP mode: no finish-together scheduling
+    if serving_time is None:
+        return {}
+
+    # Compute cooking durations per recipe
+    cooking_durations = _compute_recipe_cooking_durations(all_steps, all_edges)
+
+    if not cooking_durations:
+        return {}
+
+    # Find the anchor (longest cooking) recipe
+    max_cooking = max(cooking_durations.values())
+
+    # Compute offsets: anchor gets 0, shorter recipes get positive offsets
+    offsets: dict[str, int] = {}
+    for recipe_name, duration in cooking_durations.items():
+        offsets[recipe_name] = max_cooking - duration
+
+    return offsets
+
+
+def _detect_resource_warnings(
+    scheduled_steps: list[ScheduledStep],
+    finish_offsets: dict[str, int],
+    capacities: dict[Resource, float],
+) -> list[str]:
+    """
+    Detect when resource constraints caused recipes to finish later than intended.
+
+    Compares each recipe's actual cooking end time to the anchor's cooking end time.
+    If a recipe's cooking ends >20 min after the anchor, it means resource constraints
+    (typically oven capacity) forced delays despite finish-together scheduling.
+
+    Args:
+        scheduled_steps: The final scheduled steps from the merger
+        finish_offsets: The finish-together offsets (empty dict in ASAP mode)
+        capacities: Resource capacity configuration (used for warning messages)
+
+    Returns:
+        List of user-friendly warning strings
+    """
+    # No warnings in ASAP mode (no finish-together intent)
+    if not finish_offsets:
+        return []
+
+    # Find cooking steps per recipe and their end times
+    # A cooking step is STOVETOP or OVEN
+    cooking_ends_by_recipe: dict[str, int] = {}
+    cooking_resource_by_recipe: dict[str, Resource] = {}
+
+    for step in scheduled_steps:
+        if not _is_cooking_step(step.resource):
+            continue
+
+        recipe = step.recipe_name
+        if recipe not in cooking_ends_by_recipe or step.end_at_minute > cooking_ends_by_recipe[recipe]:
+            cooking_ends_by_recipe[recipe] = step.end_at_minute
+            cooking_resource_by_recipe[recipe] = step.resource
+
+    if not cooking_ends_by_recipe:
+        return []
+
+    # Find the anchor recipe (the one with offset=0, i.e., longest cooking)
+    anchor_recipes = [name for name, offset in finish_offsets.items() if offset == 0]
+    if not anchor_recipes:
+        return []
+
+    # Get anchor's cooking end time (there may be multiple anchors with equal duration)
+    anchor_end_times = [cooking_ends_by_recipe.get(name, 0) for name in anchor_recipes]
+    anchor_end = max(anchor_end_times) if anchor_end_times else 0
+
+    # Check each non-anchor recipe for significant delays
+    warnings: list[str] = []
+    delay_threshold = 20  # minutes
+
+    for recipe_name, cooking_end in cooking_ends_by_recipe.items():
+        # Skip anchor recipes
+        if recipe_name in anchor_recipes:
+            continue
+
+        delay = cooking_end - anchor_end
+        if delay > delay_threshold:
+            resource = cooking_resource_by_recipe.get(recipe_name, Resource.OVEN)
+            resource_name = resource.value.lower()
+            capacity = capacities.get(resource, 1)
+
+            # Round delay to nearest 5 minutes for cleaner messaging
+            delay_rounded = round(delay / 5) * 5
+
+            # Determine suggestion based on resource type
+            if resource == Resource.OVEN:
+                if capacity == 1:
+                    suggestion = f"Consider starting {recipe_name} earlier if you have a second oven."
+                else:
+                    suggestion = f"You may need additional oven capacity for simultaneous cooking."
+            elif resource == Resource.STOVETOP:
+                suggestion = f"Consider timing {recipe_name} to start earlier or adding burners."
+            else:
+                suggestion = f"Consider adjusting timing for {recipe_name}."
+
+            # Find anchor recipe name for message (use first anchor for simplicity)
+            anchor_name = anchor_recipes[0]
+
+            warnings.append(
+                f"{recipe_name}'s {resource_name} cooking will finish ~{delay_rounded} minutes "
+                f"after {anchor_name} due to {resource_name} capacity. {suggestion}"
+            )
+
+    return warnings
+
+
 class _IntervalIndex:
     """Sorted interval index with O(log n) overlap counting."""
 
@@ -163,6 +361,7 @@ def _merge_dags(
     recipe_dags: list[RecipeDAG],
     validated_recipes: list[ValidatedRecipe],
     kitchen_config: dict,
+    serving_time: str | None = None,
 ) -> MergedDAG:
     """
     Pure algorithmic greedy list scheduler.
@@ -170,6 +369,10 @@ def _merge_dags(
     Joins recipe_dags (edges) with validated_recipes (step details),
     computes critical paths, and schedules steps one at a time in
     priority order at the earliest feasible time.
+
+    If serving_time is set, applies finish-together offsets to cooking
+    steps (STOVETOP/OVEN) so all recipes finish together. Prep steps
+    (HANDS/PASSIVE) remain ASAP.
     """
     # Resource capacities
     max_burners = kitchen_config.get("max_burners", 4)
@@ -220,6 +423,9 @@ def _merge_dags(
     for s in all_steps:
         s.critical_path_length = cp[s.step_id]
 
+    # Compute finish-together offsets (empty dict if serving_time is None)
+    finish_offsets = _compute_finish_together_offsets(all_steps, all_edges, serving_time)
+
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
     resource_intervals: dict[Resource, _IntervalIndex] = {r: _IntervalIndex() for r in Resource}
@@ -255,6 +461,11 @@ def _merge_dags(
             (scheduled_end[dep] for dep in step.depends_on),
             default=0,
         )
+
+        # Apply finish-together offset for cooking steps only (STOVETOP/OVEN)
+        # Prep steps (HANDS/PASSIVE) remain ASAP
+        if _is_cooking_step(step.resource) and step.recipe_name in finish_offsets:
+            earliest = max(earliest, finish_offsets[step.recipe_name])
 
         # Find earliest feasible start respecting resource constraints
         start = _find_earliest_start(
@@ -363,6 +574,9 @@ def _merge_dags(
         if len(index) > 0:
             eq_utilisation[eq_name] = index.intervals()
 
+    # Detect resource constraint warnings for finish-together scheduling
+    resource_warnings = _detect_resource_warnings(result, finish_offsets, capacities)
+
     return MergedDAG(
         scheduled_steps=result,
         total_duration_minutes=total,
@@ -370,6 +584,7 @@ def _merge_dags(
         active_time_minutes=active,
         resource_utilisation=utilisation,
         equipment_utilisation=eq_utilisation,
+        resource_warnings=resource_warnings,
     )
 
 
@@ -378,12 +593,16 @@ async def dag_merger_node(state: GRASPState) -> dict:
     dag_dicts = state.get("recipe_dags", [])
     validated_dicts = state.get("validated_recipes", [])
     kitchen_config = state.get("kitchen_config", {})
+    
+    # Extract serving_time for finish-together scheduling
+    concept = state.get("concept", {})
+    serving_time = concept.get("serving_time") if concept else None
 
     try:
         recipe_dags = [RecipeDAG.model_validate(d) for d in dag_dicts]
         validated_recipes = [ValidatedRecipe.model_validate(d) for d in validated_dicts]
 
-        merged = _merge_dags(recipe_dags, validated_recipes, kitchen_config)
+        merged = _merge_dags(recipe_dags, validated_recipes, kitchen_config, serving_time=serving_time)
         logger.info(
             "Merged %d recipes → %d steps, %d min total",
             len(recipe_dags),
