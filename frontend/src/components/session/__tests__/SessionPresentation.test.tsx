@@ -120,8 +120,9 @@ describe('session presentation', () => {
     vi.restoreAllMocks();
     vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
       data: cookbookSession,
-      error: undefined,
-      loading: false,
+      error: null,
+      isPolling: false,
+      refresh: vi.fn(),
     });
     vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue(results);
   });
