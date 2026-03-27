@@ -300,4 +300,74 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Show less' }));
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
   });
+
+  it('falls back to chapter/page labels for OCR noise recipe names', async () => {
+    const recipesWithOcrNoise: DetectedRecipeCandidate[] = [
+      {
+        chunk_id: 'clean-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: 'Roast Chicken', // Good title
+        chapter: 'Main Courses',
+        page_number: 42,
+        text: 'A delicious roast chicken recipe.',
+      },
+      {
+        chunk_id: 'ocr-noise-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: '3.5 oz /', // OCR noise: starts with number, short, odd characters
+        chapter: 'Desserts',
+        page_number: 88,
+        text: 'Some dessert recipe text.',
+      },
+      {
+        chunk_id: 'lowercase-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: 'broken lowercase start', // starts with lowercase
+        chapter: 'Appetizers',
+        page_number: 12,
+        text: 'Appetizer recipe.',
+      },
+      {
+        chunk_id: 'empty-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: '', // Empty
+        chapter: 'Soups',
+        page_number: 55,
+        text: 'Soup recipe.',
+      },
+      {
+        chunk_id: 'special-char-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: '|__Recipe__| Test', // OCR garbage characters
+        chapter: 'Salads',
+        page_number: 23,
+        text: 'Salad recipe.',
+      },
+    ];
+
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(recipesWithOcrNoise);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+
+    // Good title should be used as-is
+    expect(screen.getByText('Roast Chicken')).toBeInTheDocument();
+
+    // OCR noise should fall back to chapter + page
+    expect(screen.getByText('Desserts, p. 88')).toBeInTheDocument();
+    expect(screen.getByText('Appetizers, p. 12')).toBeInTheDocument();
+    expect(screen.getByText('Soups, p. 55')).toBeInTheDocument();
+    expect(screen.getByText('Salads, p. 23')).toBeInTheDocument();
+
+    // The original OCR noise should NOT be displayed as the primary title
+    expect(screen.queryByText('3.5 oz /')).not.toBeInTheDocument();
+    expect(screen.queryByText('broken lowercase start')).not.toBeInTheDocument();
+    expect(screen.queryByText('|__Recipe__| Test')).not.toBeInTheDocument();
+  });
 });

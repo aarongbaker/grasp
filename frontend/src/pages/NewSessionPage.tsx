@@ -24,6 +24,64 @@ const EXCERPT_COLLAPSE_THRESHOLD = 120;
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 const occasionOptions = Object.entries(OCCASION_LABELS).map(([value, label]) => ({ value, label }));
 
+/**
+ * Detects whether a recipe name looks like broken OCR noise rather than a real title.
+ * Heuristics:
+ * - Too short (< 3 chars) or too long (> 80 chars)
+ * - Starts with lowercase (real titles typically capitalized)
+ * - High ratio of non-letter characters
+ * - Starts with punctuation or numbers
+ * - Contains excessive special chars common in OCR errors
+ */
+function looksLikeOcrNoise(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  if (trimmed.length < 3) return true;
+  if (trimmed.length > 80) return true;
+  
+  // Real titles usually start with capital letter, not lowercase or symbols
+  if (/^[a-z]/.test(trimmed)) return true;
+  if (/^[0-9.,;:!?'"—–-]/.test(trimmed)) return true;
+  
+  // Check ratio of letters vs other characters
+  const letters = trimmed.replace(/[^a-zA-Z]/g, '').length;
+  const ratio = letters / trimmed.length;
+  if (ratio < 0.5) return true;
+  
+  // Check for common OCR garbage patterns
+  if (/[|_\\{}[\]<>~`]+/.test(trimmed)) return true;
+  
+  return false;
+}
+
+/**
+ * Returns a display-safe title for a recipe candidate.
+ * Falls back to chapter + page when recipe_name looks like OCR noise.
+ */
+function getRecipeDisplayTitle(recipe: DetectedRecipeCandidate): string {
+  const rawName = recipe.recipe_name?.trim() || '';
+  
+  if (!looksLikeOcrNoise(rawName)) {
+    return rawName;
+  }
+  
+  // Build a fallback from chapter and page
+  const chapter = recipe.chapter?.trim();
+  const page = recipe.page_number;
+  
+  if (chapter && page) {
+    return `${chapter}, p. ${page}`;
+  }
+  if (chapter) {
+    return chapter;
+  }
+  if (page) {
+    return `Recipe on p. ${page}`;
+  }
+  
+  return 'Untitled Recipe';
+}
+
 type SessionMode = SessionConceptSource;
 
 function sortSelectionsByChunkId(selection: SelectedCookbookRecipeRef[]) {
@@ -35,7 +93,7 @@ function buildCookbookFreeText(selectedRecipes: DetectedRecipeCandidate[]): stri
     return 'Cookbook-selected session';
   }
 
-  const recipeNames = selectedRecipes.map((recipe) => recipe.recipe_name.trim()).filter(Boolean);
+  const recipeNames = selectedRecipes.map((recipe) => getRecipeDisplayTitle(recipe)).filter(Boolean);
   if (recipeNames.length === 0) {
     return 'Cookbook-selected session';
   }
@@ -269,22 +327,25 @@ export function NewSessionPage() {
                   </button>
                 </div>
                 <div className={styles.selectionPills}>
-                  {selectedRecipes.map((recipe) => (
-                    <span key={recipe.chunk_id} className={styles.selectionPill}>
-                      <span className={styles.selectionPillName}>{recipe.recipe_name || 'Untitled'}</span>
-                      <span className={styles.selectionPillBook}>{recipe.book_title}</span>
-                      <button
-                        type="button"
-                        className={styles.selectionPillRemove}
-                        onClick={() => removeSelectedRecipe(recipe.chunk_id)}
-                        aria-label={`Remove ${recipe.recipe_name}`}
-                      >
-                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                          <path d="M3 3L9 9M9 3L3 9" />
-                        </svg>
-                      </button>
-                    </span>
-                  ))}
+                  {selectedRecipes.map((recipe) => {
+                    const displayTitle = getRecipeDisplayTitle(recipe);
+                    return (
+                      <span key={recipe.chunk_id} className={styles.selectionPill}>
+                        <span className={styles.selectionPillName}>{displayTitle}</span>
+                        <span className={styles.selectionPillBook}>{recipe.book_title}</span>
+                        <button
+                          type="button"
+                          className={styles.selectionPillRemove}
+                          onClick={() => removeSelectedRecipe(recipe.chunk_id)}
+                          aria-label={`Remove ${displayTitle}`}
+                        >
+                          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                            <path d="M3 3L9 9M9 3L3 9" />
+                          </svg>
+                        </button>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -307,13 +368,14 @@ export function NewSessionPage() {
                         const isExpanded = expandedExcerpts.has(recipe.chunk_id);
                         const excerptText = recipe.text || '';
                         const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD;
+                        const displayTitle = getRecipeDisplayTitle(recipe);
                         return (
                           <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
-                              aria-label={`Select ${recipe.recipe_name}`}
+                              aria-label={`Select ${displayTitle}`}
                             />
                             <span className={styles.selectionIndicator} aria-hidden="true">
                               <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -322,7 +384,7 @@ export function NewSessionPage() {
                             </span>
                             <div className={styles.recipeOptionBody}>
                               <div className={styles.recipeOptionHeader}>
-                                <span className={styles.recipeName}>{recipe.recipe_name || 'Untitled Recipe'}</span>
+                                <span className={styles.recipeName}>{displayTitle}</span>
                                 {recipe.page_number && <span className={styles.recipePage}>p. {recipe.page_number}</span>}
                               </div>
                               <div className={styles.recipeMetaRow}>
