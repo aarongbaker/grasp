@@ -19,8 +19,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.models.enums import IngestionStatus, SessionStatus
-from app.models.ingestion import IngestionJob
+from app.models.enums import ChunkType, IngestionStatus, SessionStatus
+from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
 from app.models.user import KitchenConfig, UserProfile
 
@@ -64,6 +64,7 @@ class MockDBSession:
 
     def __init__(self):
         self._store: dict[tuple, object] = {}
+        self.exec_result = None
 
     def add(self, obj):
         pass
@@ -87,6 +88,8 @@ class MockDBSession:
 
     async def exec(self, stmt):
         """Stub for select queries."""
+        if self.exec_result is not None:
+            return self.exec_result
         mock_result = MagicMock()
         mock_result.first.return_value = None
         mock_result.all.return_value = []
@@ -429,3 +432,79 @@ async def test_get_ingestion_status_403_wrong_user(app_with_overrides, mock_db, 
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get(f"/api/v1/ingest/{job_id}")
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_returns_recipe_chunks_with_book_metadata(app_with_overrides, mock_db, test_user):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Sunday Suppers",
+        author="Test Author",
+        total_pages=240,
+        total_chunks=12,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Roast Chicken with Herbs\nPat the bird dry and season generously.",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Mains",
+        page_number=42,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "chunk_id": str(recipe_chunk_id),
+            "book_id": str(book_id),
+            "book_title": "Sunday Suppers",
+            "recipe_name": "Roast Chicken with Herbs",
+            "chapter": "Mains",
+            "page_number": 42,
+            "text": "Roast Chicken with Herbs\nPat the bird dry and season generously.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_falls_back_when_chunk_text_has_no_nonempty_title(app_with_overrides, mock_db, test_user):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Night Kitchen",
+        author="Test Author",
+        total_pages=120,
+        total_chunks=8,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="\n\n  ",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Desserts",
+        page_number=77,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Recipe on page 77"

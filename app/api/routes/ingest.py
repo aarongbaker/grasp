@@ -10,7 +10,7 @@ from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
-from app.models.enums import IngestionStatus
+from app.models.enums import ChunkType, IngestionStatus
 from app.models.ingestion import BookRecord, IngestionJob
 
 limiter = Limiter(key_func=get_remote_address)
@@ -85,6 +85,39 @@ async def list_cookbooks(db: DBSession, current_user: CurrentUser):
             "created_at": b.created_at.isoformat(),
         }
         for b in books
+    ]
+
+
+@router.get("/detected-recipes")
+async def list_detected_recipes(db: DBSession, current_user: CurrentUser):
+    """Returns recipe-like cookbook chunks for the current user, grouped by source book metadata."""
+    from app.models.ingestion import CookbookChunk
+
+    statement = (
+        select(CookbookChunk, BookRecord)
+        .join(BookRecord, CookbookChunk.book_id == BookRecord.book_id)
+        .where(CookbookChunk.user_id == current_user.user_id)
+        .where(CookbookChunk.chunk_type == ChunkType.RECIPE)
+        .order_by(BookRecord.created_at.desc(), CookbookChunk.page_number.asc(), CookbookChunk.created_at.asc())
+    )
+    results = await db.exec(statement)
+    rows = results.all()
+
+    def _detect_recipe_name(chunk: CookbookChunk) -> str:
+        first_line = next((line.strip() for line in chunk.text.splitlines() if line.strip()), "")
+        return first_line[:160] if first_line else f"Recipe on page {chunk.page_number or '—'}"
+
+    return [
+        {
+            "chunk_id": str(chunk.chunk_id),
+            "book_id": str(book.book_id),
+            "book_title": book.title,
+            "recipe_name": _detect_recipe_name(chunk),
+            "chapter": chunk.chapter,
+            "page_number": chunk.page_number,
+            "text": chunk.text,
+        }
+        for chunk, book in rows
     ]
 
 
