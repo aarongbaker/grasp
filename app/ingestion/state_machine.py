@@ -232,6 +232,39 @@ def _is_recipe_state(state: CookbookState) -> bool:
     return state.value in _RECIPE_STATES
 
 
+def _looks_like_non_recipe_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    upper = stripped.upper()
+    if upper in _GENERIC_NON_RECIPE_HEADINGS:
+        return True
+    return bool(re.match(r"^(?:INDEX|INTRODUCTION|FOREWORD|PREFACE|CONTENTS)\b", stripped, re.I))
+
+
+def _looks_like_recipe_continuation(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if _looks_like_ingredient_line(stripped) or _RECIPE_VERB_START.match(stripped):
+        return True
+    lowered = stripped.lower()
+    continuation_starts = (
+        "then ",
+        "when ",
+        "cook ",
+        "add ",
+        "stir ",
+        "mix ",
+        "pour ",
+        "place ",
+        "serve ",
+        "remove ",
+        "reduce ",
+    )
+    return lowered.startswith(continuation_starts)
+
+
 def _event_parts(line: str) -> list[str]:
     stripped = line.strip()
     if not stripped:
@@ -307,6 +340,12 @@ def run_state_machine(pages: list[dict]) -> list[dict]:
             continue
 
         lines = _normalize_page_lines(page_text)
+        if current_chunk and _is_recipe_state(current_state) and page_num != current_page_num:
+            first_line = next((line for line in lines if line.strip()), "")
+            if _looks_like_non_recipe_heading(first_line) or not _looks_like_recipe_continuation(first_line):
+                flush_chunk(current_state, current_page_num)
+                current_state = CookbookState.NARRATIVE
+
         for index, line in enumerate(lines):
             next_line = lines[index + 1] if index + 1 < len(lines) else None
             line_candidates = _line_state_candidates(line, next_line)

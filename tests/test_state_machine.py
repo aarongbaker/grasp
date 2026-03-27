@@ -337,3 +337,69 @@ def test_southern_cookbook_pdf_yields_more_than_collapsed_single_recipe_result()
     recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
 
     assert len(recipe_chunks) > 16
+
+
+def test_recipe_state_flushes_when_new_page_starts_with_front_matter_noise():
+    """A recipe chunk should not absorb the next page's index/front-matter text just because no new header is detected."""
+    pages = [
+        {
+            "page_number": 51,
+            "text": (
+                "Shrimp Paste\n"
+                "2 cups boiled shrimp\n"
+                "Run a quart of boiled and picked shrimp through the meat grinder.\n"
+                "Put in a saucepan with salt, pepper, mace and butter.\n"
+                "Heat thoroughly and place into molds."
+            ),
+        },
+        {
+            "page_number": 52,
+            "text": (
+                "INDEX\n"
+                "APPETIZERS\n"
+                "Avocado Canapes 47\n"
+                "Cheese Appetizer 47\n"
+                "Introduction\n"
+                "PEOPLE think of the Southland as the place where the sun shines brighter."
+            ),
+        },
+    ]
+
+    chunks = run_state_machine(pages)
+    shrimp_chunk = next(c for c in chunks if c["chunk_type"] == "recipe" and "Shrimp Paste" in c["text"])
+
+    assert shrimp_chunk["page_number"] == 51
+    assert "INDEX" not in shrimp_chunk["text"]
+    assert "Introduction" not in shrimp_chunk["text"]
+    assert any(c["page_number"] == 52 for c in chunks if c["chunk_type"] in {"recipe", "intro"})
+
+
+def test_recipe_chunk_page_number_stays_at_recipe_start_page_across_continuation_pages():
+    """Multi-page recipes should preserve the originating page number instead of drifting to the final page."""
+    pages = [
+        {
+            "page_number": 10,
+            "text": (
+                "Chicken Gumbo\n"
+                "1 small stewing chicken\n"
+                "2 tablespoons flour\n"
+                "After chicken is cleaned and dressed, cut it into serving portions."
+            ),
+        },
+        {
+            "page_number": 11,
+            "text": (
+                "When the chicken is nicely browned, add the okra, tomatoes, parsley and water.\n"
+                "Season to taste with salt and pepper.\n"
+                "Cook very slowly until the chicken is tender."
+            ),
+        },
+    ]
+
+    chunks = run_state_machine(pages)
+    recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
+
+    assert len(recipe_chunks) == 1
+    assert recipe_chunks[0]["page_number"] == 10
+    assert "Chicken Gumbo" in recipe_chunks[0]["text"]
+    assert "Cook very slowly" in recipe_chunks[0]["text"]
