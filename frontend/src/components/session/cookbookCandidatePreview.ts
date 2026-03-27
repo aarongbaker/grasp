@@ -1,4 +1,5 @@
 import type { DetectedRecipeCandidate } from '../../types/api';
+import { getRecipeDisplayTitle } from '../../utils/cookbookTitles';
 
 export interface CookbookCandidatePreview {
   title: string;
@@ -76,7 +77,7 @@ export function buildCookbookCandidatePreview(recipe: DetectedRecipeCandidate): 
   }
 
   const fallbackExcerpt = buildExcerpt(lines);
-  const title = recipe.recipe_name?.trim() || `Recipe on p. ${recipe.page_number}`;
+  const title = getRecipeDisplayTitle(recipe);
   const subtitle = recipe.chapter?.trim() || recipe.book_title;
 
   return {

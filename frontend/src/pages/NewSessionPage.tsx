@@ -18,70 +18,13 @@ import {
   type SessionConceptSource,
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
+import { getRecipeDisplayTitle } from '../utils/cookbookTitles';
 import styles from './NewSessionPage.module.css';
 
 const EXCERPT_COLLAPSE_THRESHOLD = 120;
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 const occasionOptions = Object.entries(OCCASION_LABELS).map(([value, label]) => ({ value, label }));
-
-/**
- * Detects whether a recipe name looks like broken OCR noise rather than a real title.
- * Heuristics:
- * - Too short (< 3 chars) or too long (> 80 chars)
- * - Starts with lowercase (real titles typically capitalized)
- * - High ratio of non-letter characters
- * - Starts with punctuation or numbers
- * - Contains excessive special chars common in OCR errors
- */
-function looksLikeOcrNoise(name: string): boolean {
-  const trimmed = name.trim();
-  if (!trimmed) return true;
-  if (trimmed.length < 3) return true;
-  if (trimmed.length > 80) return true;
-  
-  // Real titles usually start with capital letter, not lowercase or symbols
-  if (/^[a-z]/.test(trimmed)) return true;
-  if (/^[0-9.,;:!?'"—–-]/.test(trimmed)) return true;
-  
-  // Check ratio of letters vs other characters
-  const letters = trimmed.replace(/[^a-zA-Z]/g, '').length;
-  const ratio = letters / trimmed.length;
-  if (ratio < 0.5) return true;
-  
-  // Check for common OCR garbage patterns
-  if (/[|_\\{}[\]<>~`]+/.test(trimmed)) return true;
-  
-  return false;
-}
-
-/**
- * Returns a display-safe title for a recipe candidate.
- * Falls back to chapter + page when recipe_name looks like OCR noise.
- */
-function getRecipeDisplayTitle(recipe: DetectedRecipeCandidate): string {
-  const rawName = recipe.recipe_name?.trim() || '';
-  
-  if (!looksLikeOcrNoise(rawName)) {
-    return rawName;
-  }
-  
-  // Build a fallback from chapter and page
-  const chapter = recipe.chapter?.trim();
-  const page = recipe.page_number;
-  
-  if (chapter && page) {
-    return `${chapter}, p. ${page}`;
-  }
-  if (chapter) {
-    return chapter;
-  }
-  if (page) {
-    return `Recipe on p. ${page}`;
-  }
-  
-  return 'Untitled Recipe';
-}
 
 type SessionMode = SessionConceptSource;
 

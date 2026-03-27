@@ -301,7 +301,7 @@ describe('NewSessionPage', () => {
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
   });
 
-  it('falls back to chapter/page labels for OCR noise recipe names', async () => {
+  it('prefers inferred titles from chunk text before chapter/page fallback for OCR noise names', async () => {
     const recipesWithOcrNoise: DetectedRecipeCandidate[] = [
       {
         chunk_id: 'clean-chunk',
@@ -319,7 +319,7 @@ describe('NewSessionPage', () => {
         recipe_name: '3.5 oz /', // OCR noise: starts with number, short, odd characters
         chapter: 'Desserts',
         page_number: 88,
-        text: 'Some dessert recipe text.',
+        text: 'Burnt Honey Tart\nIngredients\nHoney\nCream',
       },
       {
         chunk_id: 'lowercase-chunk',
@@ -328,7 +328,7 @@ describe('NewSessionPage', () => {
         recipe_name: 'broken lowercase start', // starts with lowercase
         chapter: 'Appetizers',
         page_number: 12,
-        text: 'Appetizer recipe.',
+        text: 'Crisp Fennel Salad\nMethod\nSlice thinly.',
       },
       {
         chunk_id: 'empty-chunk',
@@ -359,9 +359,11 @@ describe('NewSessionPage', () => {
     // Good title should be used as-is
     expect(screen.getByText('Roast Chicken')).toBeInTheDocument();
 
-    // OCR noise should fall back to chapter + page
-    expect(screen.getByText('Desserts, p. 88')).toBeInTheDocument();
-    expect(screen.getByText('Appetizers, p. 12')).toBeInTheDocument();
+    // OCR noise should prefer recoverable titles from chunk text
+    expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();
+    expect(screen.getByText('Crisp Fennel Salad')).toBeInTheDocument();
+
+    // If no clean title can be inferred, fall back to chapter + page
     expect(screen.getByText('Soups, p. 55')).toBeInTheDocument();
     expect(screen.getByText('Salads, p. 23')).toBeInTheDocument();
 
