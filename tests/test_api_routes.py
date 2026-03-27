@@ -336,6 +336,33 @@ async def test_run_pipeline_202_enqueues(app_with_overrides, mock_db, test_user)
     assert resp.json()["status"] == "generating"
 
 
+@pytest.mark.asyncio
+async def test_run_pipeline_keeps_generating_as_only_direct_in_progress_status_write(app_with_overrides, mock_db, test_user):
+    """The enqueue route should only persist GENERATING and never skip ahead."""
+    session_id = uuid.uuid4()
+    session = Session(
+        session_id=session_id,
+        user_id=test_user.user_id,
+        status=SessionStatus.PENDING,
+        concept_json={},
+    )
+    mock_db.seed(Session, session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("app.workers.tasks.run_grasp_pipeline") as mock_task:
+            mock_task.delay = MagicMock(return_value=MagicMock(id="celery-task-123"))
+            resp = await ac.post(f"/api/v1/sessions/{session_id}/run")
+
+    assert resp.status_code == 202
+    assert session.status == SessionStatus.GENERATING
+    assert session.status not in {
+        SessionStatus.ENRICHING,
+        SessionStatus.VALIDATING,
+        SessionStatus.SCHEDULING,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Ingest routes (Fix #7)
 # ─────────────────────────────────────────────────────────────────────────────

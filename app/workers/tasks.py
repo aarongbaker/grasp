@@ -12,6 +12,8 @@ all state lives in Postgres, not in memory.
 import asyncio
 import uuid
 
+from pydantic import ValidationError
+
 from app.core.settings import get_settings
 from app.workers.celery_app import celery_app
 
@@ -34,7 +36,9 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
     from app.core.status import finalise_session
     from app.graph.graph import build_grasp_graph
-    from app.models.pipeline import DinnerConcept
+    from app.models.errors import NodeError
+    from app.models.enums import ErrorType
+    from app.models.pipeline import build_session_initial_state
     from app.models.session import Session
     from app.models.user import Equipment, KitchenConfig, UserProfile
 
@@ -62,23 +66,42 @@ async def _run_pipeline_async(session_id: str, user_id: str):
             equipment_result = await db.execute(select(Equipment).where(Equipment.user_id == uuid.UUID(user_id)))
             equipment_rows = equipment_result.scalars().all()
 
-            concept = DinnerConcept.model_validate(session.concept_json)
-
-            initial_state = {
-                "concept": concept.model_dump(),
-                "kitchen_config": kitchen.model_dump() if kitchen else {},
-                "equipment": [e.model_dump() for e in equipment_rows],
-                "user_id": user_id,
-                "rag_owner_key": user.rag_owner_key,
-                "raw_recipes": [],
-                "enriched_recipes": [],
-                "validated_recipes": [],
-                "recipe_dags": [],
-                "merged_dag": None,
-                "schedule": None,
-                "errors": [],
-                "test_mode": None,
-            }
+            try:
+                _, initial_state = build_session_initial_state(
+                    concept_payload=session.concept_json,
+                    user_id=user_id,
+                    rag_owner_key=user.rag_owner_key,
+                    kitchen_config=kitchen.model_dump() if kitchen else {},
+                    equipment=[e.model_dump() for e in equipment_rows],
+                )
+            except ValidationError as exc:
+                validation_error = NodeError(
+                    node_name="pipeline_startup",
+                    error_type=ErrorType.VALIDATION_FAILURE,
+                    recoverable=False,
+                    message=f"Persisted session concept is invalid: {exc}",
+                    metadata={"exception_type": type(exc).__name__},
+                )
+                await finalise_session(
+                    uuid.UUID(session_id),
+                    {
+                        "concept": session.concept_json,
+                        "kitchen_config": kitchen.model_dump() if kitchen else {},
+                        "equipment": [e.model_dump() for e in equipment_rows],
+                        "user_id": user_id,
+                        "rag_owner_key": user.rag_owner_key,
+                        "raw_recipes": [],
+                        "enriched_recipes": [],
+                        "validated_recipes": [],
+                        "recipe_dags": [],
+                        "merged_dag": None,
+                        "schedule": None,
+                        "errors": [validation_error.model_dump(mode="json")],
+                    },
+                    db,
+                )
+                await engine.dispose()
+                return
 
             config = {"configurable": {"thread_id": session_id}}
 

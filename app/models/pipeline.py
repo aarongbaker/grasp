@@ -20,11 +20,23 @@ every session.
 
 import operator
 import re
-from typing import Annotated, Any, Optional
+import uuid
+from typing import Annotated, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import MealType, Occasion
+
+
+class SelectedCookbookRecipe(BaseModel):
+    """Authoritative cookbook recipe reference captured at session creation."""
+
+    chunk_id: uuid.UUID
+    book_id: uuid.UUID
+    book_title: str = Field(max_length=500)
+    text: str = Field(min_length=1)
+    chapter: str = ""
+    page_number: int = Field(ge=0, default=0)
 
 
 class DinnerConcept(BaseModel):
@@ -40,6 +52,8 @@ class DinnerConcept(BaseModel):
     occasion: Occasion
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
+    concept_source: Literal["free_text", "cookbook"] = "free_text"
+    selected_recipes: list[SelectedCookbookRecipe] = []
 
     @field_validator("serving_time")
     @classmethod
@@ -49,6 +63,108 @@ class DinnerConcept(BaseModel):
         if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", v):
             raise ValueError("serving_time must be in HH:MM 24-hour format (e.g. '19:00')")
         return v
+
+    @model_validator(mode="after")
+    def validate_cookbook_source_contract(self) -> "DinnerConcept":
+        if self.concept_source == "cookbook" and not self.selected_recipes:
+            raise ValueError("selected_recipes is required when concept_source is 'cookbook'")
+        if self.concept_source == "free_text" and self.selected_recipes:
+            raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+        return self
+
+
+class CreateSessionLegacyRequest(BaseModel):
+    free_text: str = Field(max_length=2000)
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
+class CreateSessionCookbookSelection(BaseModel):
+    chunk_id: uuid.UUID
+
+
+class CreateSessionCookbookRequest(BaseModel):
+    selected_recipes: list[CreateSessionCookbookSelection] = Field(min_length=1)
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
+CreateSessionRequest = Annotated[
+    CreateSessionLegacyRequest | CreateSessionCookbookRequest,
+    Field(discriminator=None),
+]
+
+
+class InitialPipelineState(TypedDict):
+    concept: dict
+    kitchen_config: dict
+    equipment: list[dict]
+    user_id: str
+    rag_owner_key: str
+    raw_recipes: list[dict]
+    enriched_recipes: list[dict]
+    validated_recipes: list[dict]
+    recipe_dags: list[dict]
+    merged_dag: Optional[dict]
+    schedule: Optional[dict]
+    errors: list[dict]
+    test_mode: Optional[str]
+
+
+def build_initial_pipeline_state(
+    concept: DinnerConcept,
+    user_id: str,
+    rag_owner_key: str,
+    kitchen_config: dict,
+    equipment: list[dict],
+) -> InitialPipelineState:
+    """Build the initial GRASPState payload passed to LangGraph."""
+    return {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": kitchen_config,
+        "equipment": equipment,
+        "user_id": user_id,
+        "rag_owner_key": rag_owner_key,
+        "raw_recipes": [],
+        "enriched_recipes": [],
+        "validated_recipes": [],
+        "recipe_dags": [],
+        "merged_dag": None,
+        "schedule": None,
+        "errors": [],
+        "test_mode": None,
+    }
+
+
+def build_session_initial_state(
+    concept_payload: dict,
+    user_id: str,
+    rag_owner_key: str,
+    kitchen_config: dict,
+    equipment: list[dict],
+) -> tuple[DinnerConcept, InitialPipelineState]:
+    """
+    Validate persisted Session.concept_json and build the initial GRASP state.
+
+    This is the worker entry seam for both legacy free-text and cookbook-selected
+    sessions. It intentionally keeps cookbook selections inside the concept and
+    leaves raw_recipes empty so the graph still enters through recipe_generator,
+    which can deterministically seed cookbook recipes without LLM generation.
+    """
+    concept = DinnerConcept.model_validate(concept_payload)
+    return concept, build_initial_pipeline_state(
+        concept=concept,
+        user_id=user_id,
+        rag_owner_key=rag_owner_key,
+        kitchen_config=kitchen_config,
+        equipment=equipment,
+    )
 
 
 # ── GRASPState ────────────────────────────────────────────────────────────────
@@ -62,8 +178,6 @@ class DinnerConcept(BaseModel):
 # Storing as dicts and validating at node boundaries is the safe pattern.
 #
 # The one exception to dict storage is test_mode — it's a plain str | None.
-
-from typing import TypedDict
 
 
 class GRASPState(TypedDict, total=False):

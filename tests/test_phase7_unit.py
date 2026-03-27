@@ -10,10 +10,12 @@ no database, no LLM. They verify:
   - Error handling: missing merged_dag, LLM failure (recoverable)
 """
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.graph.nodes.generator import build_cookbook_raw_recipes, recipe_generator_node
 from app.graph.nodes.renderer import (
     ScheduleSummaryOutput,
     _build_summary_prompt,
@@ -24,7 +26,7 @@ from app.graph.nodes.renderer import (
     schedule_renderer_node,
 )
 from app.models.enums import ErrorType, MealType, Occasion, Resource
-from app.models.pipeline import DinnerConcept
+from app.models.pipeline import DinnerConcept, SelectedCookbookRecipe
 from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
@@ -48,6 +50,35 @@ CONCEPT_DICT = DinnerConcept(
     dietary_restrictions=[],
 ).model_dump()
 
+
+COOKBOOK_CONCEPT_DICT = DinnerConcept(
+    free_text="Cookbook-selected recipes: Roast chicken with bread salad.",
+    guest_count=4,
+    meal_type=MealType.DINNER,
+    occasion=Occasion.DINNER_PARTY,
+    dietary_restrictions=[],
+    concept_source="cookbook",
+    selected_recipes=[
+        SelectedCookbookRecipe(
+            chunk_id=uuid.uuid4(),
+            book_id=uuid.uuid4(),
+            book_title="The French Laundry Cookbook",
+            text="""Roast Chicken with Bread Salad
+Ingredients:
+- 1 whole chicken
+- 2 tbsp olive oil
+- 1 loaf country bread
+Method:
+1. Season the chicken generously and let it rest at room temperature.
+2. Roast the chicken at 220°C until the juices run clear.
+3. Toss torn bread with pan juices and serve alongside the carved chicken.
+""",
+            chapter="Poultry",
+            page_number=87,
+        )
+    ],
+).model_dump()
+
 KITCHEN_CONFIG = {
     "max_burners": 4,
     "max_oven_racks": 2,
@@ -63,6 +94,91 @@ def _make_state(merged_dag=None, errors=None, concept=None):
         "merged_dag": merged_dag,
         "errors": errors or [],
     }
+
+
+class TestCookbookGeneratorSeeding:
+    @pytest.mark.asyncio
+    async def test_cookbook_recipe_generator_skips_llm_and_builds_raw_recipe(self):
+        state = {
+            "concept": COOKBOOK_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with patch("app.graph.nodes.generator._create_llm") as create_llm:
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert "errors" not in result
+        assert len(result["raw_recipes"]) == 1
+
+        raw_recipe = result["raw_recipes"][0]
+        assert raw_recipe["name"] == "Roast Chicken with Bread Salad"
+        assert raw_recipe["servings"] == 4
+        assert raw_recipe["cuisine"] == "Cookbook: The French Laundry Cookbook"
+        assert len(raw_recipe["ingredients"]) == 3
+        assert len(raw_recipe["steps"]) == 3
+        assert raw_recipe["steps"][0].startswith("Season the chicken")
+
+    @pytest.mark.asyncio
+    async def test_cookbook_recipe_generator_returns_structured_validation_error_for_unparseable_chunk(self):
+        broken_state = {
+            "concept": DinnerConcept(
+                free_text="Cookbook-selected recipes.",
+                guest_count=2,
+                meal_type=MealType.DINNER,
+                occasion=Occasion.CASUAL,
+                concept_source="cookbook",
+                selected_recipes=[
+                    SelectedCookbookRecipe(
+                        chunk_id=uuid.uuid4(),
+                        book_id=uuid.uuid4(),
+                        book_title="Broken Cookbook",
+                        text="Only a title and no method section",
+                        chapter="Oops",
+                        page_number=12,
+                    )
+                ],
+            ).model_dump(mode="json"),
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with patch("app.graph.nodes.generator._create_llm") as create_llm:
+            result = await recipe_generator_node(broken_state)
+
+        create_llm.assert_not_called()
+        assert result["raw_recipes"] == []
+        assert len(result["errors"]) == 1
+        error = result["errors"][0]
+        assert error["node_name"] == "recipe_generator"
+        assert error["error_type"] == ErrorType.VALIDATION_FAILURE.value
+        assert error["recoverable"] is False
+        assert "did not contain at least 3 method steps" in error["message"]
+
+    def test_build_cookbook_raw_recipes_rejects_unparseable_chunk(self):
+        concept = DinnerConcept(
+            free_text="Cookbook-selected recipes.",
+            guest_count=2,
+            meal_type=MealType.DINNER,
+            occasion=Occasion.CASUAL,
+            concept_source="cookbook",
+            selected_recipes=[
+                SelectedCookbookRecipe(
+                    chunk_id=uuid.uuid4(),
+                    book_id=uuid.uuid4(),
+                    book_title="Broken Cookbook",
+                    text="Only a title and no method section",
+                    chapter="Oops",
+                    page_number=12,
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="did not contain at least 3 method steps"):
+            build_cookbook_raw_recipes(concept)
 
 
 # ── Timeline Entry Construction ──────────────────────────────────────────────

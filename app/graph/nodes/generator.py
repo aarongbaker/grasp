@@ -5,6 +5,10 @@ Real recipe generator — Phase 4. First LLM call in the system.
 Reads DinnerConcept + KitchenConfig + Equipment from GRASPState,
 calls Claude via LangChain structured output, returns List[RawRecipe].
 
+Cookbook-mode sessions are deterministic: persisted selected cookbook chunks
+are converted into downstream-compatible RawRecipe objects and skip the LLM
+free-text generation path entirely.
+
 Error handling: generator failure is always fatal (recoverable=False).
 Nothing can be enriched or scheduled without recipes.
 
@@ -17,6 +21,7 @@ the real Claude API while still exercising all node logic.
 """
 
 import logging
+import re
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -26,8 +31,9 @@ from app.core.llm import extract_token_usage, is_timeout_error, llm_retry
 from app.core.settings import get_settings
 from app.models.enums import ErrorType, MealType, Occasion
 from app.models.errors import NodeError
-from app.models.pipeline import DinnerConcept, GRASPState
-from app.models.recipe import RawRecipe
+from app.models.errors import NodeError
+from app.models.pipeline import DinnerConcept, GRASPState, SelectedCookbookRecipe
+from app.models.recipe import Ingredient, RawRecipe
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +136,7 @@ def _build_system_prompt(
 Your recipes are written for experienced home cooks who value precision, technique, and timing.
 
 ## DINNER CONCEPT
-"{concept.free_text}"
+\"{concept.free_text}\"
 
 ## MENU PARAMETERS
 - Meal type: {concept.meal_type.value}
@@ -160,6 +166,121 @@ Your recipes are written for experienced home cooks who value precision, techniq
 8. Provide realistic estimated_total_minutes for each recipe (prep through plating).
 9. Use the available equipment to unlock advanced techniques where appropriate.
 10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook."""
+
+
+# ── Cookbook-mode deterministic parsing ─────────────────────────────────────
+
+
+def _strip_markdown_heading_prefix(line: str) -> str:
+    return re.sub(r"^#{1,6}\s*", "", line).strip()
+
+
+def _normalise_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _extract_recipe_name(selection: SelectedCookbookRecipe) -> str:
+    for line in _normalise_lines(selection.text):
+        cleaned = _strip_markdown_heading_prefix(line)
+        if cleaned and not cleaned.lower().startswith(("ingredients", "method", "directions", "steps")):
+            return cleaned[:200]
+    fallback = selection.chapter.strip() or f"Cookbook recipe p.{selection.page_number}"
+    return fallback[:200]
+
+
+def _extract_ingredient_lines(lines: list[str]) -> list[str]:
+    ingredients: list[str] = []
+    in_ingredients = False
+    for line in lines:
+        lowered = _strip_markdown_heading_prefix(line).lower().rstrip(":")
+        if lowered in {"ingredients", "for the ingredients"}:
+            in_ingredients = True
+            continue
+        if lowered in {"method", "directions", "steps", "preparation"}:
+            break
+        if in_ingredients:
+            ingredients.append(line)
+    return ingredients
+
+
+def _extract_step_lines(lines: list[str]) -> list[str]:
+    steps: list[str] = []
+    in_steps = False
+    for line in lines:
+        cleaned = _strip_markdown_heading_prefix(line)
+        lowered = cleaned.lower().rstrip(":")
+        if lowered in {"method", "directions", "steps", "preparation"}:
+            in_steps = True
+            continue
+        if in_steps:
+            steps.append(re.sub(r"^(?:\d+[\.)]|[-*•])\s*", "", cleaned).strip())
+    return [step for step in steps if step]
+
+
+def _parse_ingredient(line: str) -> Ingredient:
+    cleaned = re.sub(r"^(?:[-*•])\s*", "", line).strip()
+    if not cleaned:
+        raise ValueError("Empty ingredient line")
+
+    if " – " in cleaned:
+        quantity, name = cleaned.split(" – ", 1)
+    elif " - " in cleaned:
+        quantity, name = cleaned.split(" - ", 1)
+    else:
+        parts = cleaned.split()
+        if len(parts) >= 3 and any(ch.isdigit() for ch in parts[0]):
+            quantity = " ".join(parts[:2])
+            name = " ".join(parts[2:])
+        elif len(parts) >= 2 and any(ch.isdigit() for ch in parts[0]):
+            quantity = parts[0]
+            name = " ".join(parts[1:])
+        else:
+            quantity = "as needed"
+            name = cleaned
+
+    return Ingredient(name=name.strip()[:200], quantity=quantity.strip()[:100] or "as needed")
+
+
+def _estimate_minutes(step_count: int) -> int:
+    return max(15, step_count * 15)
+
+
+def _build_cookbook_raw_recipe(selection: SelectedCookbookRecipe, guest_count: int) -> RawRecipe:
+    lines = _normalise_lines(selection.text)
+    if not lines:
+        raise ValueError(f"Selected cookbook chunk {selection.chunk_id} has no text")
+
+    steps = _extract_step_lines(lines)
+    if len(steps) < 3:
+        raise ValueError(
+            f"Selected cookbook chunk {selection.chunk_id} did not contain at least 3 method steps needed for scheduling"
+        )
+
+    ingredient_lines = _extract_ingredient_lines(lines)
+    ingredients = [_parse_ingredient(line) for line in ingredient_lines if line.strip()]
+    if not ingredients:
+        ingredients = [Ingredient(name="See cookbook source text", quantity="as needed")]
+
+    return RawRecipe(
+        name=_extract_recipe_name(selection),
+        description=(
+            f"Cookbook-selected recipe from {selection.book_title}"
+            + (f", chapter {selection.chapter}" if selection.chapter else "")
+            + (f", page {selection.page_number}" if selection.page_number else "")
+            + "."
+        ),
+        servings=guest_count,
+        cuisine=f"Cookbook: {selection.book_title}"[:200],
+        estimated_total_minutes=_estimate_minutes(len(steps)),
+        ingredients=ingredients,
+        steps=steps,
+    )
+
+
+def build_cookbook_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
+    if concept.concept_source != "cookbook":
+        return []
+    return [_build_cookbook_raw_recipe(selection, concept.guest_count) for selection in concept.selected_recipes]
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -194,6 +315,13 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         kitchen_config = state.get("kitchen_config", {})
         equipment = state.get("equipment", [])
 
+        if concept.concept_source == "cookbook":
+            cookbook_recipes = build_cookbook_raw_recipes(concept)
+            logger.info("Seeded %d cookbook recipes from persisted selections", len(cookbook_recipes))
+            return {
+                "raw_recipes": [recipe.model_dump(mode="json") for recipe in cookbook_recipes],
+            }
+
         # Derive recipe count from concept
         recipe_count = _derive_recipe_count(concept.meal_type, concept.occasion)
 
@@ -227,10 +355,12 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         }
 
     except Exception as exc:
-        # Classify error type
+        # Preserve cookbook parse failures as explicit validation failures.
         exc_type = type(exc).__name__
         if is_timeout_error(exc):
             error_type = ErrorType.LLM_TIMEOUT
+        elif isinstance(exc, ValueError):
+            error_type = ErrorType.VALIDATION_FAILURE
         else:
             error_type = ErrorType.LLM_PARSE_FAILURE
 
@@ -246,5 +376,5 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
         return {
             "raw_recipes": [],
-            "errors": [error.model_dump()],
+            "errors": [error.model_dump(mode="json")],
         }
