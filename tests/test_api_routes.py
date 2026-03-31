@@ -759,3 +759,119 @@ async def test_list_detected_recipes_falls_back_when_first_nonempty_line_is_sent
 
     assert resp.status_code == 200
     assert resp.json()[0]["recipe_name"] == "Recipe on page 91"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_filters_catalog_style_chunk_with_page_run_and_index_language(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    junk_chunk = CookbookChunk(
+        chunk_id=chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Oyster Recipes\n"
+            "Index page 17 page 18 page 19 page 20 page 21 page 22 page 23\n"
+            "17 18 19 20 21 22 23 24 25\n"
+            "The Southern Cook Book"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Index",
+        page_number=17,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(junk_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_filters_short_catalog_fragment_without_browseable_recipe_body(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    junk_chunk = CookbookChunk(
+        chunk_id=chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Cream Toast\nPage 44\nPage 45\nPage 46\nPage 47\nIndex entry for toast variations.",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Index",
+        page_number=44,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(junk_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_keeps_browseable_recipe_chunk_with_title_and_body_despite_ocr_noise(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    browseable_chunk = CookbookChunk(
+        chunk_id=chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Cream Toast\n"
+            "2 tablespoons butter\n"
+            "1 cup milk\n"
+            "Toast the bread, pour over the sauce, and serve at once."
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Breakfast",
+        page_number=44,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(browseable_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Cream Toast"
+    assert resp.json()[0]["page_number"] == 44

@@ -94,8 +94,9 @@ def _first_meaningful_line(text: str) -> str:
     return ""
 
 
-def _looks_like_detected_recipe_noise(chunk_text: str, recipe_name: str) -> bool:
+def _looks_like_detected_recipe_noise(chunk_text: str, recipe_name: str, chapter: str | None = None) -> bool:
     lowered_name = recipe_name.strip().lower()
+    lowered_chapter = (chapter or "").strip().lower()
     if any(lowered_name.startswith(prefix) for prefix in _NON_RECIPE_DETECTED_TITLES):
         return True
 
@@ -106,8 +107,68 @@ def _looks_like_detected_recipe_noise(chunk_text: str, recipe_name: str) -> bool
         return True
     if lowered_text.count("the southern cook book") >= 2:
         return True
+
+    lines = [_normalise_detected_recipe_line(line) for line in chunk_text.splitlines()]
+    nonempty_lines = [line for line in lines if line]
+    page_marker_lines = 0
+    index_entry_lines = 0
+    narrative_recipe_signals = 0
+    amount_lines = 0
+    embedded_number_lines = 0
+    catalog_prose_lines = 0
+
+    for line in nonempty_lines:
+        lowered_line = line.lower()
+        digit_count = len(re.findall(r"\b\d{1,3}\b", line))
+
+        if re.search(r"\bpage\b", lowered_line):
+            page_marker_lines += 1
+        if re.fullmatch(r"(?:page\s+)?\d{1,3}", lowered_line):
+            page_marker_lines += 1
+
+        if (
+            re.search(r"[a-z]", line)
+            and re.search(r"\b\d{1,3}\b\s*$", line)
+            and digit_count == 1
+            and not re.match(
+                r"^(?:\d+|a|an)\s+(cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|pound|pounds|lb|lbs|ounce|ounces|oz|clove|cloves)\b",
+                lowered_line,
+            )
+        ):
+            index_entry_lines += 1
+
+        if digit_count >= 2 and not re.match(
+            r"^(?:\d+|a|an)\s+(cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|pound|pounds|lb|lbs|ounce|ounces|oz|clove|cloves)\b",
+            lowered_line,
+        ):
+            embedded_number_lines += 1
+
+        if re.match(
+            r"^(?:\d+|a|an)\s+(cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|pound|pounds|lb|lbs|ounce|ounces|oz|clove|cloves|can|cans|quart|quarts|pint|pints|slice|slices|egg|eggs|ear|ears|package|packages|head|heads)\b",
+            lowered_line,
+        ):
+            amount_lines += 1
+
+        if re.search(r"\b(serves|yield|ingredients|method|directions|instructions)\b", lowered_line):
+            narrative_recipe_signals += 1
+        if re.search(r"\b(index|catalog|entry|continued|see also)\b", lowered_line):
+            catalog_prose_lines += 1
+
     if len(re.findall(r"\bpage\b", lowered_text)) >= 3 and len(re.findall(r"\b\d{1,3}\b", lowered_text)) >= 8:
         return True
+
+    has_recipe_body = amount_lines >= 1 or narrative_recipe_signals >= 1
+    if lowered_chapter in {"index", "contents", "introduction", "foreword", "preface"} and not has_recipe_body:
+        return True
+    if page_marker_lines >= 3 and not has_recipe_body:
+        return True
+    if index_entry_lines >= 2 and not has_recipe_body:
+        return True
+    if page_marker_lines >= 2 and embedded_number_lines >= 1 and not has_recipe_body:
+        return True
+    if page_marker_lines >= 2 and catalog_prose_lines >= 1 and not has_recipe_body:
+        return True
+
     return False
 
 
@@ -301,7 +362,9 @@ async def list_detected_recipes(db: DBSession, current_user: CurrentUser):
         }
         for chunk, book in rows
         if not _looks_like_detected_recipe_noise(
-            chunk.text, (recipe_name := _extract_detected_recipe_name(chunk.text, chunk.page_number))
+            chunk.text,
+            (recipe_name := _extract_detected_recipe_name(chunk.text, chunk.page_number)),
+            chunk.chapter,
         )
     ]
 
