@@ -79,6 +79,34 @@ _RECIPE_TITLE_MEASURE_WORDS = {
     "head",
     "heads",
 }
+_RECIPE_TITLE_LEADING_INGREDIENTS = {
+    "small",
+    "medium",
+    "large",
+    "fresh",
+    "hot",
+    "cold",
+    "lean",
+    "dried",
+    "ground",
+    "grated",
+    "minced",
+    "chopped",
+    "sliced",
+    "melted",
+    "beaten",
+    "cooked",
+    "peeled",
+    "diced",
+    "whole",
+    "white",
+    "brown",
+    "green",
+    "red",
+    "yellow",
+    "baking",
+    "dozen",
+}
 
 
 def _normalise_detected_recipe_line(line: str) -> str:
@@ -225,8 +253,24 @@ def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
     if len(tokens) < _RECIPE_TITLE_MIN_WORDS:
         return ""
 
+    def _normalise_token(token: str) -> str:
+        return re.sub(r"[^a-z]", "", token.lower())
+
+    def _is_numericish(token: str) -> bool:
+        return bool(re.fullmatch(r"[\d%.,^½¼¾⅓⅔⅛⅜⅝⅞/¥*#-]+", token))
+
+    def _looks_like_ingredient_lead(token: str) -> bool:
+        normalised = _normalise_token(token)
+        return bool(normalised) and normalised in _RECIPE_TITLE_LEADING_INGREDIENTS
+
+    def _looks_like_lowercase_ingredient(token: str) -> bool:
+        if not re.search(r"[A-Za-z]", token):
+            return False
+        stripped = re.sub(r"[^A-Za-z]", "", token)
+        return bool(stripped) and stripped[0].islower()
+
     for idx, token in enumerate(tokens):
-        normalised = re.sub(r"[^a-z]", "", token.lower())
+        normalised = _normalise_token(token)
         if normalised not in _RECIPE_TITLE_MEASURE_WORDS or idx == 0:
             continue
 
@@ -234,10 +278,36 @@ def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
         if re.fullmatch(r"[\divxlcdmIVXLCDM/%.,^½¼¾]+", tokens[idx - 1]):
             boundary = idx - 1
 
-        if boundary <= 0 or boundary > _RECIPE_TITLE_MAX_TOKENS_BEFORE_MEASURE:
+        lookback = boundary
+        while lookback > 0 and (_is_numericish(tokens[lookback - 1]) or _looks_like_ingredient_lead(tokens[lookback - 1])):
+            lookback -= 1
+
+        if lookback > 0 and _looks_like_lowercase_ingredient(tokens[lookback - 1]):
+            boundary = lookback - 1
+        else:
+            boundary = lookback
+
+        if boundary <= 0:
             return ""
 
-        candidate = " ".join(tokens[:boundary])
+        candidate_tokens = tokens[:boundary]
+        while candidate_tokens:
+            trailing = _normalise_token(candidate_tokens[-1])
+            if trailing.isdigit() or trailing in _RECIPE_TITLE_LEADING_INGREDIENTS:
+                candidate_tokens.pop()
+                continue
+            if _is_numericish(candidate_tokens[-1]):
+                candidate_tokens.pop()
+                continue
+            break
+
+        if not candidate_tokens:
+            return ""
+
+        if len(candidate_tokens) > _RECIPE_TITLE_MAX_WORDS:
+            candidate_tokens = candidate_tokens[:_RECIPE_TITLE_MAX_WORDS]
+
+        candidate = " ".join(candidate_tokens)
         candidate = _normalise_detected_recipe_line(candidate)
         if not candidate:
             return ""

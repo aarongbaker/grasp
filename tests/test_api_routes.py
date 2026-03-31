@@ -689,6 +689,82 @@ async def test_list_detected_recipes_recovers_short_single_word_title_from_ocr_r
 
 
 @pytest.mark.asyncio
+async def test_list_detected_recipes_trims_inline_ingredient_count_from_recovered_title(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Monticello Pandowdy 6 apples 1 1½ cups molasses 1 teaspoon nutmeg 2 teaspoons cinnamon "
+            "½ teaspoon ground cloves pie crust"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Desserts",
+        page_number=41,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Monticello Pandowdy"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_recovers_title_from_run_on_line_with_fraction_noise_after_ingredient_boundary(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Apple Pot Pie % dozen baking apples ¥*% cup butter or other shortening 4 cups flour "
+            "⅛ teaspoon salt ¥% teaspoon cinnamon"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Desserts",
+        page_number=40,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Apple Pot Pie"
+
+
+@pytest.mark.asyncio
 async def test_list_detected_recipes_falls_back_when_run_on_line_starts_with_ingredient_quantity(
     app_with_overrides, mock_db, test_user
 ):
