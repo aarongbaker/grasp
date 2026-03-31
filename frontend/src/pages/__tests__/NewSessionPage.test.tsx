@@ -207,6 +207,95 @@ describe('NewSessionPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
   });
 
+  it('filters recipes within the active cookbook, keeps selections pinned, and restores the full list after reset', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
+    expect(screen.getByText('Your menu')).toBeInTheDocument();
+    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+
+    const searchInput = screen.getByLabelText('Search this cookbook');
+    await userEvent.type(searchInput, 'greens');
+
+    expect(screen.queryByLabelText('Select Roast Chicken with Herbs')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Select Braised Greens')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText('1 matching')).toBeInTheDocument();
+    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset search' }));
+
+    expect(searchInput).toHaveValue('');
+    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select Braised Greens')).toBeInTheDocument();
+    expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
+    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+  });
+
+  it('shows a no-match state with a clear action and keeps the full selected set for submit', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
+    await userEvent.type(screen.getByLabelText('Search this cookbook'), 'custard');
+
+    expect(screen.getByText('No recipes match “custard”.')).toBeInTheDocument();
+    expect(screen.getByText(/Your selected recipes are still saved in the menu summary/i)).toBeInTheDocument();
+    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
+
+    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
+    expect(createSessionSpy).toHaveBeenCalledWith({
+      concept_source: 'cookbook',
+      free_text: 'Cookbook-selected recipes: Roast Chicken with Herbs',
+      selected_recipes: [{ chunk_id: 'aaa-chunk' }],
+      guest_count: 4,
+      meal_type: 'dinner',
+      occasion: 'dinner_party',
+      dietary_restrictions: [],
+      serving_time: undefined,
+    });
+    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+  });
+
+  it('matches against OCR-derived preview text and clears search when leaving the active cookbook', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    const searchInput = screen.getByLabelText('Search this cookbook');
+    await userEvent.type(searchInput, 'tender');
+
+    expect(screen.getByLabelText('Select Slow-Roasted Pork Shoulder')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Select Roast Chicken with Herbs')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    expect(screen.getByLabelText('Search this cookbook')).toHaveValue('');
+    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Select Slow-Roasted Pork Shoulder')).toBeInTheDocument();
+  });
+
   it('shows selection summary with removable pills and clear all button across cookbook navigation', async () => {
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 
