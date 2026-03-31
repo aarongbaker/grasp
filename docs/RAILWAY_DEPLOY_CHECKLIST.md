@@ -39,6 +39,8 @@ uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
 celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
 ```
 
+The checked-in worker config now sets `broker_connection_retry_on_startup=True` explicitly. That removes the Celery 5.4 pending-deprecation warning about startup retry behavior while preserving the current operator contract: broker reconnect on startup is allowed, but failed tasks are **not** auto-retried.
+
 ### Cloudflare Pages build
 
 ```bash
@@ -171,5 +173,6 @@ Run these against the live stack.
 
 - PDF ingestion currently sends PDF bytes through the API into Celery. This works for staging and small usage, but object storage is still the right production follow-up.
 - Provider keys are not enforced at API boot. Missing `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `PINECONE_API_KEY` shows up when ingestion / RAG / planning flows execute.
-- The worker's checked-in Celery config allows higher concurrency via `CELERY_WORKER_CONCURRENCY`, but the production deployment contract still pins the process command to `--pool=solo --concurrency=1` for current Railway memory assumptions.
+- The worker process must still be pinned to `--pool=solo --concurrency=1` for current Railway memory assumptions, even though the checked-in Celery config makes broker startup retry explicit.
+- Celery may still emit a warning when the worker runs as root inside a container. Treat that as container-user hygiene, not as a reachability or broker-startup blocker.
 - Frontend deployment is separate and must be validated with the Cloudflare build-time `VITE_API_URL` value, not only with API health.

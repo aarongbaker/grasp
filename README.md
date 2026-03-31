@@ -163,6 +163,8 @@ Required runtime/build surfaces:
 
 - **Railway API start command**: `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
 - **Railway worker start command**: `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
+  - The checked-in Celery app now sets `broker_connection_retry_on_startup=True` explicitly so Celery 5.4 startup logs do not emit the pending-deprecation warning for implicit broker retry behavior.
+  - This only clarifies broker-connect startup semantics. It does **not** enable task auto-retries; failed jobs still require operator inspection and an explicit re-run.
 - **Cloudflare Pages build env**: `VITE_API_URL=https://<railway-api-host>`
   - Set the API base URL only — no trailing slash and no `/api/v1`
   - The frontend appends `/api/v1` itself

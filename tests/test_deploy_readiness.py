@@ -104,6 +104,14 @@ def test_deploy_docs_reference_frontend_api_base_env() -> None:
     assert "VITE_API_URL" in checklist
 
 
+def test_celery_app_makes_worker_startup_retry_explicit() -> None:
+    from app.workers.celery_app import celery_app
+
+    assert celery_app.conf.broker_connection_retry is True
+    assert celery_app.conf.broker_connection_retry_on_startup is True
+    assert celery_app.conf.task_max_retries == 0
+
+
 def test_fresh_db_migrations_guard_missing_sessionstatus_enum() -> None:
     add_celery_migration = (
         REPO_ROOT / "alembic" / "versions" / "a1b2c3d4e5f6_add_celery_task_id_to_sessions.py"
