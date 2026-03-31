@@ -396,6 +396,31 @@ describe('NewSessionPage', () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
+  it('keeps the native checkbox directly clickable and preserves the mobile stacked selection layout', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    const checkbox = screen.getByLabelText('Select Roast Chicken with Herbs');
+    await userEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    const option = checkbox.closest('label');
+    expect(option).not.toBeNull();
+    expect(option?.className).toContain('recipeOption');
+
+    const selectionControl = option?.querySelector('[class*="recipeSelectionControl"]');
+    const optionBody = option?.querySelector('[class*="recipeOptionBody"]');
+    expect(selectionControl).not.toBeNull();
+    expect(optionBody).not.toBeNull();
+
+    await userEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+  });
+
   it('provides progressive disclosure for long recipe excerpts inside the active cookbook view', async () => {
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 

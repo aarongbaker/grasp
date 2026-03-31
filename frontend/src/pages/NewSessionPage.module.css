@@ -543,7 +543,10 @@ button.bookCard:focus-visible,
 
 .recipeOption {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.9rem;
   border: 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
   background:
@@ -577,18 +580,39 @@ button.bookCard:focus-visible,
   background: transparent;
 }
 
-.recipeOption input {
+.recipeSelectionControl {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1rem 0 1rem 1rem;
+}
+
+.recipeCheckbox {
   position: absolute;
+  inset: 0;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
+}
+
+.recipeCheckbox:focus-visible + .selectionIndicator {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.recipeOption:focus-within {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
 }
 
 .recipeOptionBody {
   display: grid;
   grid-template-columns: minmax(0, 2.2fr) minmax(140px, 0.9fr) minmax(0, 1.6fr);
   gap: var(--space-md);
-  padding: 1rem 1rem 1rem 1.25rem;
+  padding: 1rem 1rem 1rem 0;
   align-items: start;
+  min-width: 0;
 }
 
 .recipeOptionHeader {
@@ -731,9 +755,9 @@ button.bookCard:focus-visible,
 }
 
 .selectionIndicator {
-  position: absolute;
-  top: var(--space-sm);
-  right: var(--space-sm);
+  position: relative;
+  top: auto;
+  right: auto;
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -743,6 +767,7 @@ button.bookCard:focus-visible,
   align-items: center;
   justify-content: center;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  flex-shrink: 0;
 }
 
 .recipeOption:hover .selectionIndicator {
@@ -848,9 +873,20 @@ button.bookCard:focus-visible,
     max-height: none;
   }
 
+  .recipeOption {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .recipeSelectionControl {
+    padding: 0.95rem 1rem 0 1rem;
+    justify-content: flex-end;
+  }
+
   .recipeOptionBody {
     grid-template-columns: 1fr;
     gap: 0.65rem;
+    padding: 0.35rem 1rem 1rem;
   }
 
   .recipePreviewSummary {

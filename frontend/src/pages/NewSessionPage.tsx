@@ -537,19 +537,28 @@ export function NewSessionPage() {
                           const isExpanded = expandedExcerpts.has(recipe.chunk_id);
                           const excerptText = preview.excerpt;
                           const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD || preview.ingredients.length > 0 || preview.steps.length > 0;
+                          const checkboxId = `cookbook-recipe-${recipe.chunk_id}`;
                           return (
-                            <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
-                                aria-label={`Select ${displayTitle}`}
-                              />
-                              <span className={styles.selectionIndicator} aria-hidden="true">
-                                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2.5 6L5 8.5L9.5 3.5" />
-                                </svg>
-                              </span>
+                            <label
+                              key={recipe.chunk_id}
+                              className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}
+                              htmlFor={checkboxId}
+                            >
+                              <div className={styles.recipeSelectionControl}>
+                                <input
+                                  id={checkboxId}
+                                  className={styles.recipeCheckbox}
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
+                                  aria-label={`Select ${displayTitle}`}
+                                />
+                                <span className={styles.selectionIndicator} aria-hidden="true">
+                                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M2.5 6L5 8.5L9.5 3.5" />
+                                  </svg>
+                                </span>
+                              </div>
                               <div className={styles.recipeOptionBody}>
                                 <div className={styles.recipeOptionHeader}>
                                   <div className={styles.recipeIdentityBlock}>

@@ -1,30 +1,30 @@
 [
   {
-    "id": "6ea1b0ff",
-    "label": "grasp-frontend",
-    "command": "npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173",
-    "cwd": "/Users/aaronbaker/Desktop/Projects/grasp",
-    "ownerSessionFile": "/Users/aaronbaker/.gsd/sessions/--Users-aaronbaker-Desktop-Projects-grasp--/2026-03-31T16-16-34-744Z_678f8cce-8cf8-4694-bbeb-91fc75760898.jsonl",
-    "persistAcrossSessions": false,
-    "startedAt": 1774973894171,
-    "processType": "server",
-    "group": "m010-s03",
-    "readyPattern": null,
-    "readyPort": 5173,
-    "pid": 10995
-  },
-  {
-    "id": "d1aaf3ec",
-    "label": "grasp-api-dev",
+    "id": "c6875b01",
+    "label": "t02-api",
     "command": "env APP_ENV=development ./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
     "cwd": "/Users/aaronbaker/Desktop/Projects/grasp",
-    "ownerSessionFile": "/Users/aaronbaker/.gsd/sessions/--Users-aaronbaker-Desktop-Projects-grasp--/2026-03-31T16-16-34-744Z_678f8cce-8cf8-4694-bbeb-91fc75760898.jsonl",
+    "ownerSessionFile": "/Users/aaronbaker/.gsd/sessions/--Users-aaronbaker-Desktop-Projects-grasp--/2026-03-31T16-23-21-788Z_8ee72417-fdd1-40ef-b765-26a6ad7b6745.jsonl",
     "persistAcrossSessions": false,
-    "startedAt": 1774973907758,
+    "startedAt": 1774974381968,
     "processType": "server",
     "group": "m010-s03",
     "readyPattern": null,
     "readyPort": 8000,
-    "pid": 11029
+    "pid": 11437
+  },
+  {
+    "id": "2d8c84fb",
+    "label": "t02-frontend",
+    "command": "npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173",
+    "cwd": "/Users/aaronbaker/Desktop/Projects/grasp",
+    "ownerSessionFile": "/Users/aaronbaker/.gsd/sessions/--Users-aaronbaker-Desktop-Projects-grasp--/2026-03-31T16-23-21-788Z_8ee72417-fdd1-40ef-b765-26a6ad7b6745.jsonl",
+    "persistAcrossSessions": false,
+    "startedAt": 1774974381969,
+    "processType": "server",
+    "group": "m010-s03",
+    "readyPattern": null,
+    "readyPort": 5173,
+    "pid": 11438
   }
 ]
