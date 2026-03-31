@@ -403,7 +403,9 @@ async def test_run_pipeline_202_enqueues(app_with_overrides, mock_db, test_user)
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_keeps_generating_as_only_direct_in_progress_status_write(app_with_overrides, mock_db, test_user):
+async def test_run_pipeline_keeps_generating_as_only_direct_in_progress_status_write(
+    app_with_overrides, mock_db, test_user
+):
     """The enqueue route should only persist GENERATING and never skip ahead."""
     session_id = uuid.uuid4()
     session = Session(
@@ -541,7 +543,44 @@ async def test_list_detected_recipes_returns_recipe_chunks_with_book_metadata(ap
 
 
 @pytest.mark.asyncio
-async def test_list_detected_recipes_falls_back_when_chunk_text_has_no_nonempty_title(app_with_overrides, mock_db, test_user):
+async def test_list_detected_recipes_recovers_title_from_ocr_heavy_chunk_before_ingredient_lines(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Suppers",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="\nINGREDIENTS\nChicken Gumbo\n1 chicken, cut up\n2 onions, sliced\nSimmer until tender.",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Suppers",
+        page_number=114,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Chicken Gumbo"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_falls_back_when_chunk_text_has_no_nonempty_title(
+    app_with_overrides, mock_db, test_user
+):
     book_id = uuid.uuid4()
     recipe_chunk_id = uuid.uuid4()
     book = BookRecord(
@@ -571,3 +610,38 @@ async def test_list_detected_recipes_falls_back_when_chunk_text_has_no_nonempty_
 
     assert resp.status_code == 200
     assert resp.json()[0]["recipe_name"] == "Recipe on page 77"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_falls_back_when_first_nonempty_line_is_sentence_noise(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Field Notes",
+        author="Test Author",
+        total_pages=120,
+        total_chunks=8,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Stir well and bake for 45 minutes until brown.\nSERVES SIX\n1 cup stock",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Desserts",
+        page_number=91,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Recipe on page 91"

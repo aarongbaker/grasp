@@ -25,13 +25,36 @@ _NON_RECIPE_DETECTED_TITLES = (
     "preface",
     "contents",
 )
+_RECIPE_TITLE_STOPWORDS = {
+    "ingredients",
+    "ingredient",
+    "method",
+    "directions",
+    "direction",
+    "preparation",
+    "preparation.",
+    "instructions",
+    "notes",
+    "note",
+    "serves",
+    "yield",
+}
+_RECIPE_TITLE_CONNECTORS = {"with", "and", "or", "in", "with.", "style", "sauce"}
+_RECIPE_TITLE_MIN_WORDS = 2
+_RECIPE_TITLE_MAX_WORDS = 10
+_RECIPE_TITLE_MAX_CHARS = 160
+
+
+def _normalise_detected_recipe_line(line: str) -> str:
+    cleaned = re.sub(r"\s+", " ", line).strip(" \t-–—•*.:;,")
+    return cleaned
 
 
 def _first_meaningful_line(text: str) -> str:
     for line in text.splitlines():
-        stripped = line.strip()
+        stripped = _normalise_detected_recipe_line(line)
         if stripped:
-            return stripped[:160]
+            return stripped[:_RECIPE_TITLE_MAX_CHARS]
     return ""
 
 
@@ -50,6 +73,69 @@ def _looks_like_detected_recipe_noise(chunk_text: str, recipe_name: str) -> bool
     if len(re.findall(r"\bpage\b", lowered_text)) >= 3 and len(re.findall(r"\b\d{1,3}\b", lowered_text)) >= 8:
         return True
     return False
+
+
+def _looks_like_recipe_title_candidate(candidate: str) -> bool:
+    if not candidate:
+        return False
+
+    lowered = candidate.lower().strip()
+    if any(lowered.startswith(prefix) for prefix in _NON_RECIPE_DETECTED_TITLES):
+        return False
+
+    if any(marker in lowered for marker in ("index page", "chapter ", "menu ", "copyright", "appendix")):
+        return False
+
+    if re.match(r"^\d+(?:[\/.-]\d+)?\s", lowered):
+        return False
+    if re.match(
+        r"^(?:\d+|a|an)\s+(cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|pound|pounds|lb|lbs|ounce|ounces|oz|clove|cloves)\b",
+        lowered,
+    ):
+        return False
+
+    words = [word for word in re.split(r"\s+", lowered) if word]
+    if not words or len(words) > _RECIPE_TITLE_MAX_WORDS:
+        return False
+
+    if len(words) < _RECIPE_TITLE_MIN_WORDS:
+        return False
+
+    alpha_words = [word for word in words if re.search(r"[a-z]", word)]
+    if len(alpha_words) < _RECIPE_TITLE_MIN_WORDS:
+        return False
+
+    if words[0] in _RECIPE_TITLE_STOPWORDS:
+        return False
+
+    if all(word in _RECIPE_TITLE_STOPWORDS for word in words):
+        return False
+
+    if len(alpha_words) >= 3:
+        connector_count = sum(1 for word in alpha_words if word in _RECIPE_TITLE_CONNECTORS)
+        if connector_count >= max(2, len(alpha_words) - 1):
+            return False
+
+    sentence_like_markers = (" then ", " until ", " minutes", " hour", " oven", " stir ", " bake ", " combine ")
+    if any(marker in lowered for marker in sentence_like_markers):
+        return False
+
+    return True
+
+
+def _extract_detected_recipe_name(text: str, page_number: int | None) -> str:
+    lines = [_normalise_detected_recipe_line(line) for line in text.splitlines()]
+    nonempty_lines = [line for line in lines if line]
+
+    for line in nonempty_lines[:4]:
+        if _looks_like_recipe_title_candidate(line):
+            return line[:_RECIPE_TITLE_MAX_CHARS]
+
+    first_line = _first_meaningful_line(text)
+    if first_line and _looks_like_recipe_title_candidate(first_line):
+        return first_line[:_RECIPE_TITLE_MAX_CHARS]
+
+    return f"Recipe on page {page_number or '—'}"
 
 
 @router.post("", status_code=202)
@@ -95,9 +181,7 @@ async def upload_pdf(
 async def list_cookbooks(db: DBSession, current_user: CurrentUser):
     """Returns all ingested cookbooks for the current user, newest first."""
     statement = (
-        select(BookRecord)
-        .where(BookRecord.user_id == current_user.user_id)
-        .order_by(BookRecord.created_at.desc())
+        select(BookRecord).where(BookRecord.user_id == current_user.user_id).order_by(BookRecord.created_at.desc())
     )
     results = await db.exec(statement)
     books = results.all()
@@ -136,10 +220,6 @@ async def list_detected_recipes(db: DBSession, current_user: CurrentUser):
     results = await db.exec(statement)
     rows = results.all()
 
-    def _detect_recipe_name(chunk: CookbookChunk) -> str:
-        first_line = next((line.strip() for line in chunk.text.splitlines() if line.strip()), "")
-        return first_line[:160] if first_line else f"Recipe on page {chunk.page_number or '—'}"
-
     return [
         {
             "chunk_id": str(chunk.chunk_id),
@@ -151,7 +231,9 @@ async def list_detected_recipes(db: DBSession, current_user: CurrentUser):
             "text": chunk.text,
         }
         for chunk, book in rows
-        if not _looks_like_detected_recipe_noise(chunk.text, (recipe_name := _detect_recipe_name(chunk)))
+        if not _looks_like_detected_recipe_noise(
+            chunk.text, (recipe_name := _extract_detected_recipe_name(chunk.text, chunk.page_number))
+        )
     ]
 
 
