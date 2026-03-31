@@ -120,6 +120,43 @@ describe('NewSessionPage', () => {
     expect(preview.excerpt).toContain('1 cup corn meal');
   });
 
+  it('renders OCR-heavy cookbook rows with the backend title in the recipe column and body text in the preview column', async () => {
+    const ocrHeavyRecipes: DetectedRecipeCandidate[] = [
+      {
+        chunk_id: 'ocr-title-chunk',
+        book_id: 'book-ocr',
+        book_title: 'Southern Cakes',
+        recipe_name: 'Corn Bread Fritters',
+        chapter: 'Unsorted',
+        page_number: 30,
+        text: 'Corn Bread Fritters\n1 cup corn meal\n1 cup flour\n2 teaspoons baking powder\n½ teaspoon salt\n1 egg\nmilk to make a stiff batter',
+      },
+    ];
+
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(ocrHeavyRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Southern Cakes' }));
+
+    const recipeOption = screen.getByLabelText('Select Corn Bread Fritters').closest('label');
+    expect(recipeOption).not.toBeNull();
+    const recipeRow = within(recipeOption as HTMLLabelElement);
+
+    expect(recipeRow.getByText('Corn Bread Fritters')).toBeInTheDocument();
+    expect(recipeRow.getByText('Unsorted')).toBeInTheDocument();
+    expect(recipeRow.getByText('p. 30')).toBeInTheDocument();
+    expect(recipeRow.getByText(/1 cup corn meal/i)).toBeInTheDocument();
+    expect(recipeRow.queryByRole('heading', { name: 'Ingredients' })).not.toBeInTheDocument();
+
+    await userEvent.click(recipeRow.getByRole('button', { name: 'Show recipe preview' }));
+
+    expect(recipeRow.getByRole('heading', { name: 'Ingredients' })).toBeInTheDocument();
+    const ingredientsList = recipeRow.getByRole('list');
+    expect(within(ingredientsList).getByText('2 teaspoons baking powder')).toBeInTheDocument();
+  });
+
   it('keeps the meal-idea flow isolated and submits the legacy payload', async () => {
     const callOrder: string[] = [];
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
