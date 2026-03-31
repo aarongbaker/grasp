@@ -298,8 +298,19 @@ export function NewSessionPage() {
           />
         ) : (
           <section className={styles.cookbookSection} aria-labelledby="cookbook-recipes-heading">
-            <div className={styles.sectionHeader}>
-              <div>
+            <div className={`${styles.sectionHeader} ${showCookbookChooser ? styles.sectionHeaderChooser : styles.sectionHeaderActive}`}>
+              <div className={styles.sectionHeadingBlock}>
+                {!showCookbookChooser && (
+                  <button
+                    type="button"
+                    className={styles.backButton}
+                    onClick={() => setActiveCookbookId(null)}
+                    aria-label="Back to cookbook chooser"
+                  >
+                    <span aria-hidden="true">←</span>
+                    <span>All cookbooks</span>
+                  </button>
+                )}
                 <h2 id="cookbook-recipes-heading" className={styles.sectionTitle}>
                   {showCookbookChooser ? 'Choose a cookbook to browse' : activeCookbook ? activeCookbook.bookTitle : 'Select cookbook recipes'}
                 </h2>
@@ -309,16 +320,21 @@ export function NewSessionPage() {
                     : 'Pick the exact recipes you want to cook from this cookbook. Your selected recipes stay pinned while you browse.'}
                 </p>
               </div>
-              {!showCookbookChooser && (
-                <button
-                  type="button"
-                  className={styles.clearAllButton}
-                  onClick={() => setActiveCookbookId(null)}
-                  aria-label="Back to cookbook chooser"
-                >
-                  Back to all cookbooks
-                </button>
-              )}
+              {showCookbookChooser ? (
+                <div className={styles.sectionStatBlock}>
+                  <span className={styles.sectionStatEyebrow}>Available now</span>
+                  <span className={styles.sectionStatValue}>{groupedRecipes.length}</span>
+                  <span className={styles.sectionStatLabel}>cookbook{groupedRecipes.length !== 1 ? 's' : ''}</span>
+                </div>
+              ) : activeCookbook ? (
+                <div className={styles.activeCookbookSummary}>
+                  <span className={styles.activeCookbookKicker}>Browsing now</span>
+                  <div className={styles.activeCookbookMetrics}>
+                    <span>{activeCookbook.recipes.length} recipes</span>
+                    <span>{activeCookbook.chapterCount} chapter{activeCookbook.chapterCount !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {selectedRecipes.length > 0 && (
