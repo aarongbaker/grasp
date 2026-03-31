@@ -29,6 +29,7 @@ import asyncio
 import os
 import uuid
 
+import psycopg
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -38,6 +39,15 @@ from sqlmodel import SQLModel
 from app.core.settings import get_settings
 
 settings = get_settings()
+TEST_DB_SKIP_REASON = "Postgres test database 'grasp_test' is not available locally — skipping DB-backed integration tests"
+
+
+def _ensure_test_postgres_available() -> None:
+    try:
+        with psycopg.connect(settings.test_langgraph_checkpoint_url, connect_timeout=2):
+            return
+    except psycopg.Error:
+        pytest.skip(TEST_DB_SKIP_REASON)
 
 
 # ── Enricher mock control ────────────────────────────────────────────────────
@@ -73,6 +83,7 @@ async def test_checkpointer():
     Uses psycopg3 connection pool (not SQLAlchemy — different driver).
     This is intentional: LangGraph's PostgresSaver requires psycopg3 directly.
     """
+    _ensure_test_postgres_available()
     try:
         import psycopg_pool
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -289,6 +300,7 @@ def generator_ft_mode():
 @pytest_asyncio.fixture(scope="session")
 async def test_db_engine():
     """Session-scoped test DB engine. Creates all SQLModel tables once."""
+    _ensure_test_postgres_available()
     engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
     # Import all SQLModel table models to register metadata

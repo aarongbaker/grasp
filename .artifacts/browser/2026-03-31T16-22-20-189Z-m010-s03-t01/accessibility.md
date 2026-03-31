@@ -1,0 +1,70 @@
+- complementary:
+  - text: GRASP meal scheduling engine
+  - navigation:
+    - link "▣ Dashboard":
+      - /url: /
+    - link "+ New Session":
+      - /url: /sessions/new
+    - link "◖ Cookbooks":
+      - /url: /ingest
+    - link "⌘ Kitchen":
+      - /url: /profile
+  - text: M010 S03 Browser User m010-s03@example.com
+  - button "Sign out"
+- main:
+  - heading "Plan a Dinner" [level=1]
+  - paragraph: Choose between a fresh meal idea or exact recipes from your uploaded cookbooks.
+  - radiogroup "Session mode":
+    - button "Meal idea Describe the menu you want Keep the classic free-text flow for a brand-new plan."
+    - button "Cookbook mode Schedule exact uploaded recipes Select detected recipes across books and run the scheduler on those exact cookbook chunks." [pressed]
+  - region "Weeknight Classics":
+    - button "Back to cookbook chooser": All cookbooks
+    - heading "Weeknight Classics" [level=2]
+    - paragraph: Pick the exact recipes you want to cook from this cookbook. Your selected recipes stay pinned while you browse.
+    - text: Browsing now 3 recipes 2 chapters
+    - region "Weeknight Classics":
+      - heading "Weeknight Classics" [level=3]
+      - text: 3 recipes
+      - paragraph: Roast Chicken with Herbs, Braised Greens, Slow-Roasted Pork Shoulder
+      - paragraph: Within this cookbook
+      - paragraph: Search titles, chapters, ingredients, or OCR fragments without losing your pinned picks.
+      - text: Showing 3 of 3 Selections stay pinned while you refine the list. Search this cookbook
+      - textbox "Search this cookbook":
+        - /placeholder: Search by title, chapter, ingredient, or excerpt
+      - checkbox "Select Roast Chicken with Herbs"
+      - text: Roast Chicken with Herbs Centerpieces ·11aa34fc p. 42 3 ingredients shown 2 steps previewed
+      - paragraph: Roast Chicken with Herbs Ingredients 1 chicken…
+      - button "Show recipe preview"
+      - checkbox "Select Braised Greens"
+      - text: Braised Greens Sides ·43149696 p. 117 3 ingredients shown 1 steps previewed
+      - paragraph: Braised Greens Ingredients greens…
+      - button "Show recipe preview"
+      - checkbox "Select Slow-Roasted Pork Shoulder"
+      - text: Slow-Roasted Pork Shoulder Centerpieces ·7c06e322 p. 58 3 ingredients shown 1 steps previewed
+      - paragraph: Slow-Roasted Pork Shoulder Ingredients pork shoulder…
+      - button "Show recipe preview"
+  - text: Guests
+  - spinbutton "Guests": "4"
+  - text: Meal type
+  - combobox "Meal type":
+    - option "Breakfast"
+    - option "Brunch"
+    - option "Lunch"
+    - option "Dinner" [selected]
+    - option "Appetizers"
+    - option "Snacks"
+    - option "Dessert"
+    - option "Meal Prep"
+  - text: Serving time
+  - textbox "Serving time"
+  - text: Occasion
+  - combobox "Occasion":
+    - option "Casual"
+    - option "Dinner Party" [selected]
+    - option "Tasting Menu"
+    - option "Meal Prep"
+  - text: Dietary restrictions
+  - textbox "Dietary restrictions":
+    - /placeholder: Type and press Enter
+  - button "Schedule Selected Recipes" [disabled]
+  - button "Cancel"
