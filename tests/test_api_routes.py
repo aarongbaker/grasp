@@ -765,6 +765,117 @@ async def test_list_detected_recipes_recovers_title_from_run_on_line_with_fracti
 
 
 @pytest.mark.asyncio
+async def test_list_detected_recipes_trims_inline_ingredient_phrase_after_numeric_boundary(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Apple Stuffing 1 small onion 6 tablespoons butter 1 cup chopped celery 3 cups stale bread crumbs "
+            "4 cups chopped apples"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Stuffing",
+        page_number=24,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Apple Stuffing"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_trims_inline_ingredient_phrase_after_numeric_boundary_for_soup_title(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Chicken Gumbo 1 small stewing chicken 2 tablespoons flour 3 tablespoons butter, melted "
+            "1 onion, chopped"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Soups",
+        page_number=9,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Chicken Gumbo"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_trims_short_title_before_numeric_boundary_for_bone_based_soup(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Okra Soup 1 soup bone 4 cups cold water 4 cups okra, cut fine 2 cups tomato pulp salt and pepper",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Soups",
+        page_number=9,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Okra Soup"
+
+
+@pytest.mark.asyncio
 async def test_list_detected_recipes_falls_back_when_run_on_line_starts_with_ingredient_quantity(
     app_with_overrides, mock_db, test_user
 ):

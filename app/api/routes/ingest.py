@@ -269,6 +269,27 @@ def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
         stripped = re.sub(r"[^A-Za-z]", "", token)
         return bool(stripped) and stripped[0].islower()
 
+    def _trim_candidate_tokens(candidate_tokens: list[str]) -> list[str]:
+        trimmed = candidate_tokens[:]
+        while trimmed:
+            trailing = _normalise_token(trimmed[-1])
+            if trailing.isdigit() or trailing in _RECIPE_TITLE_LEADING_INGREDIENTS:
+                trimmed.pop()
+                continue
+            if _is_numericish(trimmed[-1]):
+                trimmed.pop()
+                continue
+            break
+        return trimmed
+
+    def _contains_numeric_or_ingredient_spill(candidate_tokens: list[str]) -> bool:
+        return any(
+            _is_numericish(token)
+            or _looks_like_ingredient_lead(token)
+            or _looks_like_lowercase_ingredient(token)
+            for token in candidate_tokens
+        )
+
     for idx, token in enumerate(tokens):
         normalised = _normalise_token(token)
         if normalised not in _RECIPE_TITLE_MEASURE_WORDS or idx == 0:
@@ -290,19 +311,11 @@ def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
         if boundary <= 0:
             return ""
 
-        candidate_tokens = tokens[:boundary]
-        while candidate_tokens:
-            trailing = _normalise_token(candidate_tokens[-1])
-            if trailing.isdigit() or trailing in _RECIPE_TITLE_LEADING_INGREDIENTS:
-                candidate_tokens.pop()
-                continue
-            if _is_numericish(candidate_tokens[-1]):
-                candidate_tokens.pop()
-                continue
-            break
-
+        candidate_tokens = _trim_candidate_tokens(tokens[:boundary])
         if not candidate_tokens:
             return ""
+        if _contains_numeric_or_ingredient_spill(candidate_tokens):
+            continue
 
         if len(candidate_tokens) > _RECIPE_TITLE_MAX_WORDS:
             candidate_tokens = candidate_tokens[:_RECIPE_TITLE_MAX_WORDS]
@@ -316,6 +329,21 @@ def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
         if _looks_like_recipe_title_candidate(candidate):
             return candidate[:_RECIPE_TITLE_MAX_CHARS]
         return ""
+
+    first_numericish_index = next((i for i, token in enumerate(tokens) if _is_numericish(token)), None)
+    if first_numericish_index is not None and first_numericish_index >= _RECIPE_TITLE_MIN_WORDS:
+        boundary = first_numericish_index
+        while boundary < len(tokens) and _is_numericish(tokens[boundary]):
+            boundary += 1
+        while boundary < len(tokens) and _looks_like_ingredient_lead(tokens[boundary]):
+            boundary += 1
+        if boundary < len(tokens) and _looks_like_lowercase_ingredient(tokens[boundary]):
+            candidate_tokens = _trim_candidate_tokens(tokens[:first_numericish_index])
+            if candidate_tokens:
+                candidate = _normalise_detected_recipe_line(" ".join(candidate_tokens))
+                if candidate and _looks_like_recipe_title_candidate(candidate):
+                    return candidate[:_RECIPE_TITLE_MAX_CHARS]
+
     return ""
 
 
