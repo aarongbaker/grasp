@@ -1,9 +1,11 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { IngestPage } from '../IngestPage';
+import { ApiError, apiFetch } from '../../api/client';
 import * as ingestApi from '../../api/ingest';
+import { getErrorMessage } from '../../utils/errors';
 import type { BookRecord, IngestionJob } from '../../types/api';
+import { IngestPage } from '../IngestPage';
 
 const ACTIVE_INGEST_JOB_KEY = 'grasp_active_ingest_job_id';
 const storage = new Map<string, string>();
@@ -62,6 +64,43 @@ describe('IngestPage', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('classifies network-unreachable upload failures separately from timeouts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(apiFetch('/ingest')).rejects.toMatchObject({
+      name: 'ApiError',
+      kind: 'network-unreachable',
+      detail: 'Could not reach the API. The backend may be down, still starting, or blocked by a local network issue.',
+    });
+  });
+
+  it('classifies offline upload failures separately from generic network errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    await expect(apiFetch('/ingest')).rejects.toMatchObject({
+      name: 'ApiError',
+      kind: 'network-offline',
+      detail: 'You appear to be offline, so the upload could not reach the API.',
+    });
+  });
+
+  it('surfaces startup/config failures with explicit context', () => {
+    const error = new ApiError(
+      500,
+      'CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production.',
+      'startup-config',
+    );
+
+    expect(getErrorMessage(error, 'Upload failed')).toBe(
+      'The API responded with a startup/configuration failure: CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production.',
+    );
   });
 
   it('persists the active ingest job id after upload starts', async () => {
@@ -125,5 +164,51 @@ describe('IngestPage', () => {
     await waitFor(() => expect(ingestApi.getIngestionStatus).toHaveBeenCalledWith('job-123'));
     await waitFor(() => expect(window.localStorage.getItem(ACTIVE_INGEST_JOB_KEY)).toBeNull());
     expect(await screen.findByText('Done! 1 book(s) processed successfully.')).toBeInTheDocument();
+  });
+
+  it('renders a clearer upload error when the API is unreachable', async () => {
+    vi.spyOn(ingestApi, 'uploadPdf').mockRejectedValue(
+      new ApiError(
+        0,
+        'Could not reach the API. The backend may be down, still starting, or blocked by a local network issue.',
+        'network-unreachable',
+      ),
+    );
+
+    render(<IngestPage />);
+
+    const file = new File(['pdf'], 'southern.pdf', { type: 'application/pdf' });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, file);
+    await userEvent.click(screen.getByRole('button', { name: 'Upload & Process' }));
+
+    expect(
+      await screen.findByText(
+        'Could not reach the API. The backend may be down, still starting, or blocked by a local network issue.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a clearer upload error when the API reports a startup/config failure', async () => {
+    vi.spyOn(ingestApi, 'uploadPdf').mockRejectedValue(
+      new ApiError(
+        500,
+        'CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production.',
+        'startup-config',
+      ),
+    );
+
+    render(<IngestPage />);
+
+    const file = new File(['pdf'], 'southern.pdf', { type: 'application/pdf' });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, file);
+    await userEvent.click(screen.getByRole('button', { name: 'Upload & Process' }));
+
+    expect(
+      await screen.findByText(
+        'The API responded with a startup/configuration failure: CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production.',
+      ),
+    ).toBeInTheDocument();
   });
 });

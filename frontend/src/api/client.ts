@@ -2,16 +2,62 @@ const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const normalizedApiUrl = configuredApiUrl ? configuredApiUrl.replace(/\/$/, '') : '';
 const API_BASE = normalizedApiUrl ? `${normalizedApiUrl}/api/v1` : '/api/v1';
 
+export type ApiErrorKind =
+  | 'http'
+  | 'timeout'
+  | 'network-unreachable'
+  | 'network-offline'
+  | 'startup-config';
+
 export class ApiError extends Error {
   status: number;
   detail: string;
+  kind: ApiErrorKind;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, kind: ApiErrorKind = 'http') {
     super(detail);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.kind = kind;
   }
+}
+
+function looksLikeStartupConfigFailure(detail: string): boolean {
+  const normalized = detail.toLowerCase();
+  return [
+    'must be set',
+    'check langgraph_checkpoint_url',
+    'check postgres connectivity',
+    'check postgres permissions',
+    'cors_allowed_origins',
+    'jwt_secret_key',
+    'production domain',
+  ].some((snippet) => normalized.includes(snippet));
+}
+
+function classifyTransportError(error: unknown, controller: AbortController): ApiError {
+  if (controller.signal.aborted) {
+    return new ApiError(
+      0,
+      'Request timed out while the server was processing your upload. The API may be slow, but it is still reachable.',
+      'timeout',
+    );
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return new ApiError(
+      0,
+      'You appear to be offline, so the upload could not reach the API.',
+      'network-offline',
+    );
+  }
+
+  return new ApiError(
+    0,
+    'Could not reach the API. The backend may be down, still starting, or blocked by a local network issue.',
+    'network-unreachable',
+  );
 }
 
 /** Tracks whether a token refresh is already in flight so concurrent
@@ -78,12 +124,9 @@ async function rawFetch(
       headers,
       signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
     clearTimeout(timer);
-    if (controller.signal.aborted) {
-      throw new ApiError(0, 'Request timed out — is the server running?');
-    }
-    throw new ApiError(0, 'Network error — could not reach the server');
+    throw classifyTransportError(error, controller);
   }
   clearTimeout(timer);
 
@@ -113,7 +156,9 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new ApiError(res.status, body.detail || res.statusText);
+    const detail = body.detail || res.statusText;
+    const kind = looksLikeStartupConfigFailure(detail) ? 'startup-config' : 'http';
+    throw new ApiError(status, detail, kind);
   }
 
   if (res.status === 204) return undefined as T;
