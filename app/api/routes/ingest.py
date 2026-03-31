@@ -43,6 +43,42 @@ _RECIPE_TITLE_CONNECTORS = {"with", "and", "or", "in", "with.", "style", "sauce"
 _RECIPE_TITLE_MIN_WORDS = 2
 _RECIPE_TITLE_MAX_WORDS = 10
 _RECIPE_TITLE_MAX_CHARS = 160
+_RECIPE_TITLE_MAX_TOKENS_BEFORE_MEASURE = 5
+_RECIPE_TITLE_MEASURE_WORDS = {
+    "cup",
+    "cups",
+    "tablespoon",
+    "tablespoons",
+    "tbsp",
+    "teaspoon",
+    "teaspoons",
+    "tsp",
+    "pound",
+    "pounds",
+    "lb",
+    "lbs",
+    "ounce",
+    "ounces",
+    "oz",
+    "clove",
+    "cloves",
+    "can",
+    "cans",
+    "quart",
+    "quarts",
+    "pint",
+    "pints",
+    "slice",
+    "slices",
+    "egg",
+    "eggs",
+    "ear",
+    "ears",
+    "package",
+    "packages",
+    "head",
+    "heads",
+}
 
 
 def _normalise_detected_recipe_line(line: str) -> str:
@@ -123,15 +159,48 @@ def _looks_like_recipe_title_candidate(candidate: str) -> bool:
     return True
 
 
+def _extract_recipe_title_prefix_from_run_on_line(line: str) -> str:
+    tokens = [token for token in re.split(r"\s+", line.strip()) if token]
+    if len(tokens) < _RECIPE_TITLE_MIN_WORDS:
+        return ""
+
+    for idx, token in enumerate(tokens):
+        normalised = re.sub(r"[^a-z]", "", token.lower())
+        if normalised not in _RECIPE_TITLE_MEASURE_WORDS or idx == 0:
+            continue
+
+        boundary = idx
+        if re.fullmatch(r"[\divxlcdmIVXLCDM/%.,^½¼¾]+", tokens[idx - 1]):
+            boundary = idx - 1
+
+        if boundary <= 0 or boundary > _RECIPE_TITLE_MAX_TOKENS_BEFORE_MEASURE:
+            return ""
+
+        candidate = " ".join(tokens[:boundary])
+        candidate = _normalise_detected_recipe_line(candidate)
+        if not candidate:
+            return ""
+        if len(candidate.split()) == 1 and re.search(r"[A-Za-z]", candidate):
+            return candidate[:_RECIPE_TITLE_MAX_CHARS]
+        if _looks_like_recipe_title_candidate(candidate):
+            return candidate[:_RECIPE_TITLE_MAX_CHARS]
+        return ""
+    return ""
+
+
 def _extract_detected_recipe_name(text: str, page_number: int | None) -> str:
     lines = [_normalise_detected_recipe_line(line) for line in text.splitlines()]
     nonempty_lines = [line for line in lines if line]
 
     for line in nonempty_lines[:4]:
+        if title_prefix := _extract_recipe_title_prefix_from_run_on_line(line):
+            return title_prefix
         if _looks_like_recipe_title_candidate(line):
             return line[:_RECIPE_TITLE_MAX_CHARS]
 
     first_line = _first_meaningful_line(text)
+    if title_prefix := _extract_recipe_title_prefix_from_run_on_line(first_line):
+        return title_prefix
     if first_line and _looks_like_recipe_title_candidate(first_line):
         return first_line[:_RECIPE_TITLE_MAX_CHARS]
 

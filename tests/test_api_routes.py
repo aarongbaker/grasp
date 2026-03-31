@@ -613,6 +613,120 @@ async def test_list_detected_recipes_falls_back_when_chunk_text_has_no_nonempty_
 
 
 @pytest.mark.asyncio
+async def test_list_detected_recipes_recovers_title_from_ocr_run_on_line_when_ingredients_follow_inline(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Cook Book",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Creole Stuffed Peppers 4 ears of corn 6 green peppers 4 tomatoes 1 small onion "
+            "1 tablespoon butter 6 green olives salt and pepper to taste Cut off tops and remove centers from peppers."
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Suppers",
+        page_number=29,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Creole Stuffed Peppers"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_recovers_short_single_word_title_from_ocr_run_on_line(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Sweets",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "Pralines 2 cups sugar 2 cups freshly-grated cocoanut 1/2 cup water Cook the sugar and water together "
+            "until it makes a syrup."
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Sweets",
+        page_number=48,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Pralines"
+
+
+@pytest.mark.asyncio
+async def test_list_detected_recipes_falls_back_when_run_on_line_starts_with_ingredient_quantity(
+    app_with_overrides, mock_db, test_user
+):
+    book_id = uuid.uuid4()
+    recipe_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Southern Soups",
+        author="Test Author",
+        total_pages=320,
+        total_chunks=44,
+    )
+    recipe_chunk = CookbookChunk(
+        chunk_id=recipe_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text=(
+            "1 tablespoon butter, melted 1 tablespoon chopped green pepper 1 tablespoon chopped red pepper "
+            "1 tablespoon flour 1 1/2 cups soup stock"
+        ),
+        chunk_type=ChunkType.RECIPE,
+        chapter="Soups",
+        page_number=11,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(recipe_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/detected-recipes")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["recipe_name"] == "Recipe on page 11"
+
+
+@pytest.mark.asyncio
 async def test_list_detected_recipes_falls_back_when_first_nonempty_line_is_sentence_noise(
     app_with_overrides, mock_db, test_user
 ):

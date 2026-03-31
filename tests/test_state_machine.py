@@ -16,7 +16,12 @@ from pathlib import Path
 
 import fitz
 
-from app.ingestion.state_machine import CookbookState, _tripwire_check, run_state_machine
+from app.ingestion.state_machine import (
+    CookbookState,
+    _is_front_matter_or_index_page,
+    _tripwire_check,
+    run_state_machine,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Empty / minimal input
@@ -189,6 +194,28 @@ def test_header_detection_rejects_front_matter_and_all_caps_noise():
     assert "DELICIOUS RECIPES" in chunks[0]["text"]
 
 
+def test_index_and_intro_pages_are_classified_as_front_matter():
+    """Catalog-style index pages and intro prose should be blocked from recipe entry."""
+    index_lines = [
+        "INDEX",
+        "APPETIZERS",
+        "Page",
+        "Papaya Canape 26",
+        "Shrimp Paste 18",
+        "Mint Tea 21",
+        "Egg Nog 48",
+    ]
+    intro_lines = [
+        "Introduction",
+        "The editors hope you will find this cook book helpful.",
+        "It became the editors' problem to select as many, as varied and as useful a collection.",
+        "Many fine dishes had to be omitted to make way for better ones.",
+    ]
+
+    assert _is_front_matter_or_index_page(index_lines)
+    assert _is_front_matter_or_index_page(intro_lines)
+
+
 def test_ocr_split_title_lines_merge_back_into_single_recipe_header():
     """A title followed by ingredient-style content should stay attached to one recipe chunk."""
     pages = [
@@ -337,6 +364,25 @@ def test_southern_cookbook_pdf_yields_more_than_collapsed_single_recipe_result()
     recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
 
     assert len(recipe_chunks) > 16
+
+
+def test_southern_cookbook_front_matter_does_not_emit_recipe_chunks():
+    """Real OCR-heavy southern cookbook front matter should stay out of the recipe stream."""
+    pdf_path = Path("/Users/aaronbaker/Desktop/cookbooks/southerncookbook00lustrich.pdf")
+    if not pdf_path.exists():
+        return
+
+    doc = fitz.open(str(pdf_path))
+    pages = [{"page_number": i + 1, "text": doc[i].get_text("text") or ""} for i in range(len(doc))]
+    chunks = run_state_machine(pages)
+    early_recipe_chunks = [
+        c for c in chunks if c["chunk_type"] == "recipe" and c["page_number"] <= 7
+    ]
+
+    assert not early_recipe_chunks
+    intro_text = " ".join(c["text"] for c in chunks if c["chunk_type"] == "intro")
+    assert "Papaya Canape" in intro_text
+    assert "Introduction" in intro_text
 
 
 def test_recipe_state_flushes_when_new_page_starts_with_front_matter_noise():

@@ -26,7 +26,7 @@ from app.models.enums import ChunkType
 _MAX_CHUNK_WORDS = 500
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
-_AMOUNT_START = re.compile(r"^(?:\d|[%¼½¾⅓⅔⅛⅜⅝⅞]|[IVXivx]+[½¼¾⅓⅔⅛⅜⅝⅞]?)")
+_AMOUNT_START = re.compile(r"^(?:\d|[%¼½¾⅓⅔⅛⅜⅝⅞])")
 _RECIPE_VERB_START = re.compile(
     r"^(?:heat|add|stir|fold|whisk|season|bake|roast|cook|combine|mix|beat|drop|pour|brush|chop|mold|fry|put|cover|serve)\b",
     re.I,
@@ -44,6 +44,44 @@ _GENERIC_NON_RECIPE_HEADINGS = {
     "CAKES",
     "PIES",
 }
+_INDEX_HEADING_TERMS = frozenset(
+    {
+        "APPETIZERS",
+        "BEVERAGES",
+        "BREAD",
+        "BISCUITS",
+        "CAKES",
+        "CANDIES",
+        "EGGS",
+        "FRITTERS",
+        "PANCAKES",
+        "WAFFLES",
+        "MUSH",
+        "FRUIT",
+        "VEGETABLES",
+        "ICINGS",
+        "JELLIES",
+        "JAMS",
+        "MEAT",
+        "POULTRY",
+        "PUDDINGS",
+        "SALADS",
+        "RELISHES",
+        "SAUCES",
+        "DRESSINGS",
+        "SEA",
+        "FOOD",
+        "SMALL",
+        "COOKIES",
+        "SOUPS",
+    }
+)
+_RECIPE_START_STATES = frozenset(
+    {
+        "recipe_header",
+        "recipe_end",
+    }
+)
 
 # States that belong to a recipe lifecycle — these accumulate into one chunk
 _RECIPE_STATES = frozenset(
@@ -119,6 +157,8 @@ def _normalize_page_lines(page_text: str) -> list[str]:
             prev_is_short_header = _looks_like_recipe_header(prev) and len(prev.split()) <= 3
             should_merge = (
                 not prev_is_short_header
+                and not _looks_like_catalog_line(prev)
+                and not _looks_like_catalog_line(line)
                 and (
                     len(line) <= 18
                     or prev.endswith((",", ";", "(", "of", "and", "with", "to", "the", "a", "an", "-"))
@@ -154,6 +194,12 @@ def _looks_like_recipe_header(line: str) -> bool:
         return False
     if any(ch in text for ch in [":", ";", "!", "...."]):
         return False
+    if len(re.findall(r"\b\d{1,3}\b", text)) >= 2:
+        return False
+    if re.search(r"\b(?:page|pages)\b", text, re.I):
+        return False
+    if re.search(r"\.{2,}", text):
+        return False
 
     words = text.split()
     if len(words) == 0 or len(words) > 5:
@@ -163,6 +209,8 @@ def _looks_like_recipe_header(line: str) -> bool:
     if not alpha_words:
         return False
     if len(alpha_words) == 1 and len(re.sub(r"[^A-Za-z]", "", alpha_words[0])) <= 4:
+        return False
+    if len(alpha_words) == 1:
         return False
     if all(len(re.sub(r"[^A-Za-z]", "", w)) <= 2 for w in alpha_words):
         return False
@@ -186,6 +234,25 @@ def _looks_like_ingredient_line(line: str) -> bool:
     if _AMOUNT_START.match(text):
         return True
     return bool(re.match(r"^(salt|pepper|paprika|parsley|flour|butter|sugar)\b", text, re.I))
+
+
+def _looks_like_catalog_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    digit_tokens = re.findall(r"\b\d{1,3}\b", stripped)
+    if len(digit_tokens) < 2:
+        return False
+    if _RECIPE_VERB_START.match(stripped) or _AMOUNT_START.match(stripped):
+        return False
+    if any(ch in stripped for ch in (":", ";", "!", "?")):
+        return False
+    words = re.findall(r"[A-Za-z']+", stripped)
+    if len(words) < 3:
+        return False
+    if sum(1 for word in words if word[:1].isupper()) < max(2, len(words) // 2):
+        return False
+    return True
 
 
 def _line_state_candidates(line: str, next_line: str | None = None) -> list[CookbookState]:
@@ -226,6 +293,96 @@ def _sentence_state_candidates(text: str) -> list[CookbookState]:
         if state not in {CookbookState.RECIPE_HEADER, CookbookState.INGREDIENTS, CookbookState.METHOD}
     )
     return candidates
+
+
+def _looks_like_index_entry(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if len(re.findall(r"\b\d{1,3}\b", stripped)) != 1:
+        return False
+    if not re.search(r"[A-Za-z]", stripped):
+        return False
+    if not re.search(r"\b\d{1,3}\b\s*$", stripped):
+        return False
+    if _RECIPE_VERB_START.match(stripped) or _AMOUNT_START.match(stripped):
+        return False
+    if any(ch in stripped for ch in (":", ";", "!", "?")):
+        return False
+    words = re.findall(r"[A-Za-z']+", stripped)
+    if len(words) < 2:
+        return False
+    return sum(1 for word in words if word[:1].isupper()) >= max(2, len(words) - 1)
+
+
+def _is_front_matter_or_index_page(lines: list[str]) -> bool:
+    if not lines:
+        return False
+
+    heading_lines = 0
+    index_entries = 0
+    intro_like_lines = 0
+    page_marker_lines = 0
+    embedded_index_numbers = 0
+    catalog_cluster_lines = 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        upper = stripped.upper()
+        if upper in _GENERIC_NON_RECIPE_HEADINGS or upper in _INDEX_HEADING_TERMS:
+            heading_lines += 1
+            continue
+        if re.search(r"\bINDEX\b", stripped, re.I):
+            heading_lines += 1
+        if re.search(r"\b(?:page|continued)\b", stripped, re.I):
+            page_marker_lines += 1
+        if re.fullmatch(r"(?:page|\(continued\)|continued)", stripped, re.I):
+            continue
+        if _looks_like_index_entry(stripped):
+            index_entries += 1
+            continue
+        digit_tokens = re.findall(r"\b\d{1,3}\b", stripped)
+        if len(digit_tokens) >= 2 and not _RECIPE_VERB_START.match(stripped) and not _AMOUNT_START.match(stripped):
+            embedded_index_numbers += len(digit_tokens)
+            catalog_cluster_lines += 1
+        if re.match(r"^(?:introduction|foreword|preface|contents)\b", stripped, re.I):
+            intro_like_lines += 1
+            continue
+        if re.search(r"\b(editors?|compiled|copyright|collection|library|pamphlet|problem to select)\b", stripped, re.I):
+            intro_like_lines += 1
+
+    if heading_lines >= 2 and index_entries >= 3:
+        return True
+    if heading_lines >= 1 and embedded_index_numbers >= 6:
+        return True
+    if page_marker_lines >= 1 and catalog_cluster_lines >= 3:
+        return True
+    if index_entries >= max(5, len(lines) // 3):
+        return True
+    if intro_like_lines >= 2 and index_entries == 0:
+        return True
+    if intro_like_lines >= 1 and heading_lines >= 1 and page_marker_lines >= 1:
+        return True
+    return False
+
+
+def _allows_recipe_entry_from_narrative(
+    candidates: list[CookbookState],
+    event_text: str,
+    lines: list[str],
+) -> bool:
+    if not candidates:
+        return False
+    if _is_front_matter_or_index_page(lines):
+        return False
+    if any(candidate.value in _RECIPE_START_STATES for candidate in candidates):
+        return True
+    stripped = event_text.strip()
+    if _looks_like_recipe_header(stripped):
+        return True
+    return not _looks_like_catalog_line(stripped)
 
 
 def _is_recipe_state(state: CookbookState) -> bool:
@@ -340,6 +497,7 @@ def run_state_machine(pages: list[dict]) -> list[dict]:
             continue
 
         lines = _normalize_page_lines(page_text)
+        page_blocks_recipe_entry = _is_front_matter_or_index_page(lines)
         if current_chunk and _is_recipe_state(current_state) and page_num != current_page_num:
             first_line = next((line for line in lines if line.strip()), "")
             if _looks_like_non_recipe_heading(first_line) or not _looks_like_recipe_continuation(first_line):
@@ -363,6 +521,14 @@ def run_state_machine(pages: list[dict]) -> list[dict]:
 
                 if event_index > 0 and current_state == CookbookState.NARRATIVE:
                     candidates = [c for c in candidates if c != CookbookState.METHOD]
+
+                if current_state == CookbookState.NARRATIVE and candidates:
+                    if not _allows_recipe_entry_from_narrative(candidates, event_text, lines):
+                        candidates = []
+                    elif page_blocks_recipe_entry and all(
+                        candidate != CookbookState.RECIPE_HEADER for candidate in candidates
+                    ):
+                        candidates = []
 
                 if not _is_recipe_state(current_state):
                     candidates = [
