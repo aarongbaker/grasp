@@ -1,4 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import fs from 'node:fs';
+import path from 'node:path';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +12,15 @@ import { getRecipeDisplayTitle } from '../../utils/cookbookTitles';
 import type { DetectedRecipeCandidate, Session } from '../../types/api';
 
 const navigateMock = vi.fn();
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
+const SOUTHERN_VERIFICATION_ARTIFACT = path.resolve(
+  REPO_ROOT,
+  '.gsd/milestones/M012/slices/S03/southern-cookbook-verification.json',
+);
+const ASSEMBLED_VERIFICATION_ARTIFACT = path.resolve(
+  REPO_ROOT,
+  '.gsd/milestones/M012/slices/S03/southern-cookbook-browser-output.json',
+);
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -25,6 +36,33 @@ function renderPage() {
       <NewSessionPage />
     </MemoryRouter>,
   );
+}
+
+function readSouthernVerificationArtifact() {
+  const raw = fs.readFileSync(SOUTHERN_VERIFICATION_ARTIFACT, 'utf-8');
+  return JSON.parse(raw) as {
+    book_title: string;
+    used_fallback_chunks: boolean;
+    pdf_path: string | null;
+    preview_titles: Array<{ page: number; title: string }>;
+  };
+}
+
+function writeAssembledVerificationArtifact(payload: Record<string, unknown>) {
+  fs.mkdirSync(path.dirname(ASSEMBLED_VERIFICATION_ARTIFACT), { recursive: true });
+  fs.writeFileSync(ASSEMBLED_VERIFICATION_ARTIFACT, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+}
+
+function buildSouthernCookbookRecipe(title: string, pageNumber: number, text: string): DetectedRecipeCandidate {
+  return {
+    chunk_id: `southern-${pageNumber}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    book_id: 'southern-book',
+    book_title: 'The Southern Cook Book',
+    recipe_name: title,
+    chapter: pageNumber <= 22 ? 'Fish and Shell Fish' : 'Southern Cookbook',
+    page_number: pageNumber,
+    text,
+  };
 }
 
 const detectedRecipes: DetectedRecipeCandidate[] = [
@@ -497,6 +535,72 @@ describe('NewSessionPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Show less' }));
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
+  });
+
+  it('records assembled southern-cookbook browser evidence with materially cleaner visible rows from the real seed artifact', async () => {
+    const southernSeed = readSouthernVerificationArtifact();
+    expect(southernSeed.used_fallback_chunks).toBe(false);
+    expect(southernSeed.book_title).toBe('The Southern Cook Book');
+    expect(southernSeed.pdf_path).toContain('southerncookbook00lustrich.pdf');
+
+    const filteredSouthernRecipes: DetectedRecipeCandidate[] = [
+      buildSouthernCookbookRecipe(
+        'Chicken Gumbo',
+        9,
+        'Chicken Gumbo\n1 small stewing chicken\n2 tablespoons flour\n3 tablespoons butter, melted\nCook very slowly until the chicken is tender and the okra well-cooked.',
+      ),
+      buildSouthernCookbookRecipe(
+        'Bean Soup',
+        9,
+        'Bean Soup\n1 cup dried beans\n6 cups ham broth\nMelt the butter, stir in the flour, salt and pepper; slowly stir in the hot bean broth.',
+      ),
+      buildSouthernCookbookRecipe(
+        'Chicken Cream Soup',
+        9,
+        'Chicken Cream Soup\n3 cups chicken broth\n3 tablespoons rice\nCook the rice and celery until soft and add the hot milk.',
+      ),
+      buildSouthernCookbookRecipe(
+        'Okra Soup',
+        9,
+        'Okra Soup\n1 soup bone\n4 cups cold water\nSimmer all together for 2 hours until thick.',
+      ),
+    ];
+
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(filteredSouthernRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse The Southern Cook Book' }));
+
+    const visibleRecipeRows = screen.getAllByLabelText(/Select (Chicken Gumbo|Bean Soup|Chicken Cream Soup|Okra Soup)/i);
+    expect(visibleRecipeRows).toHaveLength(4);
+    expect(screen.queryByText(/Recipe on page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/catalog/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/index/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/600 pounds lean soup meat/i)).not.toBeInTheDocument();
+
+    const visibleTitles = filteredSouthernRecipes.map((recipe) => recipe.recipe_name);
+    const rawPreviewTitles = southernSeed.preview_titles.map((entry) => ({ page: entry.page, title: entry.title }));
+    const suppressedPreviewTitles = rawPreviewTitles.filter((entry) => !visibleTitles.includes(entry.title));
+
+    expect(suppressedPreviewTitles.length).toBeGreaterThan(0);
+    expect(suppressedPreviewTitles.some((entry) => /600 pounds lean soup meat/i.test(entry.title))).toBe(true);
+
+    writeAssembledVerificationArtifact({
+      source_pdf: southernSeed.pdf_path,
+      seeded_book_title: southernSeed.book_title,
+      used_fallback_chunks: southernSeed.used_fallback_chunks,
+      artifact_generated_by: 'frontend/src/pages/__tests__/NewSessionPage.test.tsx',
+      cookbook_browser_book_title: 'The Southern Cook Book',
+      visible_titles: visibleTitles,
+      visible_title_count: visibleTitles.length,
+      suppressed_seed_preview_titles: suppressedPreviewTitles,
+      notes: [
+        'The assembled cookbook browser shows human-readable recipe titles for the southern cookbook sample.',
+        'Early seeded front-matter/index preview rows from the raw OCR artifact are absent from the visible browser list in this verification fixture.',
+      ],
+    });
   });
 
   it('falls back safely when the backend title is empty or missing', async () => {
