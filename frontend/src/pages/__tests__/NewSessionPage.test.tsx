@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -138,7 +138,7 @@ describe('NewSessionPage', () => {
     expect(detectedSpy).not.toHaveBeenCalled();
   });
 
-  it('loads cookbook candidates lazily, supports mixed-book selection, and submits stable chunk order', async () => {
+  it('lands cookbook mode on a chooser first, then submits stable chunk order after entering a book', async () => {
     const callOrder: string[] = [];
     const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
@@ -160,13 +160,26 @@ describe('NewSessionPage', () => {
 
     await waitFor(() => expect(detectedSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    expect(screen.getByLabelText('Weeknight Classics')).toBeInTheDocument();
-    expect(screen.getByLabelText('The Dessert Atlas')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
+    expect(screen.getByRole('heading', { name: 'Choose a cookbook to browse' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Select Burnt Honey Tart')).not.toBeInTheDocument();
+
+    const weeknightCard = screen.getByRole('button', { name: 'Browse Weeknight Classics' });
+    expect(within(weeknightCard).getByText('3 recipes')).toBeInTheDocument();
+    expect(within(weeknightCard).getByText(/Roast Chicken with Herbs, Slow-Roasted Pork Shoulder, Braised Greens/i)).toBeInTheDocument();
+
+    await userEvent.click(weeknightCard);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Weeknight Classics' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to cookbook chooser' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Browse The Dessert Atlas' })).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
+    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
+    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
 
-    // Verify selection summary appears with selected recipes
     expect(screen.getByText('Your menu')).toBeInTheDocument();
     expect(screen.getByText('2 recipes')).toBeInTheDocument();
 
@@ -194,31 +207,30 @@ describe('NewSessionPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
   });
 
-  it('shows selection summary with removable pills and clear all button', async () => {
+  it('shows selection summary with removable pills and clear all button across cookbook navigation', async () => {
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
 
-    // Select two recipes
+    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
     await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
+    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
     await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
 
-    // Verify selection summary appears
     expect(screen.getByText('Your menu')).toBeInTheDocument();
     expect(screen.getByText('2 recipes')).toBeInTheDocument();
 
-    // Verify individual remove buttons work
     await userEvent.click(screen.getByRole('button', { name: 'Remove Burnt Honey Tart' }));
     expect(screen.getByText('1 recipe')).toBeInTheDocument();
 
-    // Verify clear all works
     await userEvent.click(screen.getByRole('button', { name: 'Clear all selections' }));
     expect(screen.queryByText('Your menu')).not.toBeInTheDocument();
   });
 
-  it('shows a cookbook loading state before candidates render', async () => {
+  it('shows a cookbook loading state before chooser cards render', async () => {
     let resolveRecipes: ((value: DetectedRecipeCandidate[]) => void) | undefined;
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockImplementationOnce(
       () => new Promise((resolve) => {
@@ -232,8 +244,8 @@ describe('NewSessionPage', () => {
     expect(screen.getByText('Loading cookbook recipes…')).toBeInTheDocument();
     resolveRecipes?.(detectedRecipes);
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    expect(screen.getByLabelText('Weeknight Classics')).toBeInTheDocument();
-    expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browse Weeknight Classics' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browse The Dessert Atlas' })).toBeInTheDocument();
   });
 
   it('shows cookbook empty and error states inline without breaking the rest of the page', async () => {
@@ -268,7 +280,8 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
     await waitFor(() => expect(detectedSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
+    expect(screen.getByLabelText('Select Burnt Honey Tart')).toBeInTheDocument();
 
     await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
     await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
@@ -278,25 +291,22 @@ describe('NewSessionPage', () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it('provides progressive disclosure for long recipe excerpts', async () => {
+  it('provides progressive disclosure for long recipe excerpts inside the active cookbook view', async () => {
     vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
 
-    // Short excerpts should not have a show more button
-    expect(screen.queryByRole('button', { name: 'Show more' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show recipe preview' })).toBeInTheDocument();
 
-    // Long excerpt should be truncated with show more button
-    const showMoreButtons = screen.getAllByRole('button', { name: 'Show more' });
-    expect(showMoreButtons.length).toBeGreaterThan(0);
+    const previewButtons = screen.getAllByRole('button', { name: 'Show recipe preview' });
+    expect(previewButtons.length).toBeGreaterThan(0);
 
-    // Click to expand
-    await userEvent.click(showMoreButtons[0]);
+    await userEvent.click(previewButtons[0]);
     expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
 
-    // Clicking show less should collapse
     await userEvent.click(screen.getByRole('button', { name: 'Show less' }));
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
   });
@@ -307,7 +317,7 @@ describe('NewSessionPage', () => {
         chunk_id: 'clean-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: 'Roast Chicken', // Good title
+        recipe_name: 'Roast Chicken',
         chapter: 'Main Courses',
         page_number: 42,
         text: 'A delicious roast chicken recipe.',
@@ -316,7 +326,7 @@ describe('NewSessionPage', () => {
         chunk_id: 'ocr-noise-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: '3.5 oz /', // OCR noise: starts with number, short, odd characters
+        recipe_name: '3.5 oz /',
         chapter: 'Desserts',
         page_number: 88,
         text: 'Burnt Honey Tart\nIngredients\nHoney\nCream',
@@ -325,7 +335,7 @@ describe('NewSessionPage', () => {
         chunk_id: 'lowercase-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: 'broken lowercase start', // starts with lowercase
+        recipe_name: 'broken lowercase start',
         chapter: 'Appetizers',
         page_number: 12,
         text: 'Crisp Fennel Salad\nMethod\nSlice thinly.',
@@ -334,7 +344,7 @@ describe('NewSessionPage', () => {
         chunk_id: 'empty-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: '', // Empty
+        recipe_name: '',
         chapter: 'Soups',
         page_number: 55,
         text: 'Soup recipe.',
@@ -343,7 +353,7 @@ describe('NewSessionPage', () => {
         chunk_id: 'special-char-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: '|__Recipe__| Test', // OCR garbage characters
+        recipe_name: '|__Recipe__| Test',
         chapter: 'Salads',
         page_number: 23,
         text: 'Salad recipe.',
@@ -355,19 +365,14 @@ describe('NewSessionPage', () => {
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
     await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Test Book' }));
 
-    // Good title should be used as-is
     expect(screen.getByText('Roast Chicken')).toBeInTheDocument();
-
-    // OCR noise should prefer recoverable titles from chunk text
     expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();
     expect(screen.getByText('Crisp Fennel Salad')).toBeInTheDocument();
-
-    // If no clean title can be inferred, fall back to chapter + page
     expect(screen.getByText('Soups, p. 55')).toBeInTheDocument();
     expect(screen.getByText('Salads, p. 23')).toBeInTheDocument();
 
-    // The original OCR noise should NOT be displayed as the primary title
     expect(screen.queryByText('3.5 oz /')).not.toBeInTheDocument();
     expect(screen.queryByText('broken lowercase start')).not.toBeInTheDocument();
     expect(screen.queryByText('|__Recipe__| Test')).not.toBeInTheDocument();

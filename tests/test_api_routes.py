@@ -220,6 +220,69 @@ async def test_create_session_201(app_with_overrides, test_user):
 
 
 @pytest.mark.asyncio
+async def test_create_cookbook_session_201_hydrates_selected_recipes(app_with_overrides, mock_db, test_user):
+    book_id = uuid.uuid4()
+    first_chunk_id = uuid.uuid4()
+    second_chunk_id = uuid.uuid4()
+    book = BookRecord(
+        book_id=book_id,
+        user_id=test_user.user_id,
+        title="Sunday Suppers",
+        author="Test Author",
+        total_pages=240,
+        total_chunks=12,
+    )
+    first_chunk = CookbookChunk(
+        chunk_id=first_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Roast Chicken with Herbs\n1. Season the bird.\n2. Roast until done.\n3. Rest and carve.",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Mains",
+        page_number=42,
+    )
+    second_chunk = CookbookChunk(
+        chunk_id=second_chunk_id,
+        book_id=book_id,
+        user_id=test_user.user_id,
+        text="Burnt Honey Tart\n1. Blind bake shell.\n2. Cook filling.\n3. Bake and cool.",
+        chunk_type=ChunkType.RECIPE,
+        chapter="Desserts",
+        page_number=118,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(first_chunk, book), (second_chunk, book)]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "cookbook",
+                "free_text": "Cookbook-selected recipes: Roast Chicken with Herbs, Burnt Honey Tart",
+                "selected_recipes": [
+                    {"chunk_id": str(first_chunk_id)},
+                    {"chunk_id": str(second_chunk_id)},
+                ],
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+                "serving_time": "19:00",
+            },
+        )
+
+    assert resp.status_code == 201
+    concept = resp.json()["concept_json"]
+    assert concept["concept_source"] == "cookbook"
+    assert [recipe["chunk_id"] for recipe in concept["selected_recipes"]] == [str(first_chunk_id), str(second_chunk_id)]
+    assert [recipe["book_title"] for recipe in concept["selected_recipes"]] == ["Sunday Suppers", "Sunday Suppers"]
+    assert concept["selected_recipes"][0]["chapter"] == "Mains"
+    assert concept["selected_recipes"][1]["page_number"] == 118
+
+
+@pytest.mark.asyncio
 async def test_create_session_invalid_guest_count(app_with_overrides):
     """guest_count=0 is rejected at the request body layer (422)."""
     transport = ASGITransport(app=app_with_overrides)

@@ -15,7 +15,7 @@ export function looksLikeOcrNoise(name: string): boolean {
   if (trimmed.length < 3) return true;
   if (trimmed.length > 80) return true;
 
-  if (/^[0-9.,;:!?\'"—–-]/.test(trimmed)) return true;
+  if (/^[0-9.,;:!?'"—–-]/.test(trimmed)) return true;
 
   const words = trimmed.split(/\s+/).filter(Boolean);
   const hasMultipleWords = words.length >= 2;

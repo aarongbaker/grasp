@@ -74,6 +74,8 @@ class DinnerConcept(BaseModel):
 
 
 class CreateSessionLegacyRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
     meal_type: MealType
@@ -87,6 +89,10 @@ class CreateSessionCookbookSelection(BaseModel):
 
 
 class CreateSessionCookbookRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    concept_source: Literal["cookbook"] = "cookbook"
+    free_text: str = Field(max_length=2000)
     selected_recipes: list[CreateSessionCookbookSelection] = Field(min_length=1)
     guest_count: int = Field(ge=1, le=100)
     meal_type: MealType

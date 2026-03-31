@@ -12,7 +12,7 @@ by status_projection(). This is the V1.6 single-source-of-truth contract.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,7 +22,13 @@ from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
 from app.models.enums import MealType, Occasion, SessionStatus
-from app.models.pipeline import DinnerConcept
+from app.models.ingestion import BookRecord, CookbookChunk
+from app.models.pipeline import (
+    CreateSessionCookbookRequest,
+    CreateSessionLegacyRequest,
+    DinnerConcept,
+    SelectedCookbookRecipe,
+)
 from app.models.session import Session
 
 limiter = Limiter(key_func=get_remote_address)
@@ -33,13 +39,41 @@ def _session_status(value: SessionStatus | str) -> SessionStatus:
     return value if isinstance(value, SessionStatus) else SessionStatus(value)
 
 
-class CreateSessionRequest(BaseModel):
-    free_text: str = Field(max_length=2000)
-    guest_count: int = Field(ge=1, le=100)
-    meal_type: MealType
-    occasion: Occasion
-    dietary_restrictions: list[str] = []
-    serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
+CreateSessionRequest = Annotated[CreateSessionLegacyRequest | CreateSessionCookbookRequest, Field(discriminator=None)]
+
+
+async def _hydrate_selected_cookbook_recipes(
+    db: DBSession,
+    current_user: CurrentUser,
+    body: CreateSessionCookbookRequest,
+) -> list[SelectedCookbookRecipe]:
+    chunk_ids = [selection.chunk_id for selection in body.selected_recipes]
+    statement = (
+        select(CookbookChunk, BookRecord)
+        .join(BookRecord, CookbookChunk.book_id == BookRecord.book_id)
+        .where(CookbookChunk.user_id == current_user.user_id)
+        .where(CookbookChunk.chunk_id.in_(chunk_ids))
+    )
+    results = await db.exec(statement)
+    rows = results.all()
+
+    chunk_map = {
+        chunk.chunk_id: SelectedCookbookRecipe(
+            chunk_id=chunk.chunk_id,
+            book_id=book.book_id,
+            book_title=book.title,
+            text=chunk.text,
+            chapter=chunk.chapter,
+            page_number=chunk.page_number,
+        )
+        for chunk, book in rows
+    }
+
+    missing_ids = [str(chunk_id) for chunk_id in chunk_ids if chunk_id not in chunk_map]
+    if missing_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown cookbook recipe selections: {', '.join(missing_ids)}")
+
+    return [chunk_map[chunk_id] for chunk_id in chunk_ids]
 
 
 @router.post("", status_code=201)
@@ -48,19 +82,32 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     # Merge chef's dietary_defaults into every session automatically
     merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
 
-    concept = DinnerConcept(
-        free_text=body.free_text,
-        guest_count=body.guest_count,
-        meal_type=body.meal_type,
-        occasion=body.occasion,
-        dietary_restrictions=merged_restrictions,
-        serving_time=body.serving_time,
-    )
+    if isinstance(body, CreateSessionCookbookRequest):
+        selected_recipes = await _hydrate_selected_cookbook_recipes(db, current_user, body)
+        concept = DinnerConcept(
+            free_text=body.free_text or "Cookbook-selected session",
+            guest_count=body.guest_count,
+            meal_type=body.meal_type,
+            occasion=body.occasion,
+            dietary_restrictions=merged_restrictions,
+            serving_time=body.serving_time,
+            concept_source="cookbook",
+            selected_recipes=selected_recipes,
+        )
+    else:
+        concept = DinnerConcept(
+            free_text=body.free_text,
+            guest_count=body.guest_count,
+            meal_type=body.meal_type,
+            occasion=body.occasion,
+            dietary_restrictions=merged_restrictions,
+            serving_time=body.serving_time,
+        )
 
     session = Session(
         user_id=current_user.user_id,
         status=SessionStatus.PENDING,
-        concept_json=concept.model_dump(),
+        concept_json=concept.model_dump(mode="json"),
     )
     db.add(session)
     await db.commit()
