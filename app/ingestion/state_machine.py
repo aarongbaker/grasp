@@ -145,6 +145,9 @@ def _normalize_page_lines(page_text: str) -> list[str]:
     if not raw_lines:
         return []
 
+    def _is_page_marker(text: str) -> bool:
+        return bool(re.fullmatch(r"\d{1,3}", text.strip()))
+
     merged: list[str] = []
     for line in raw_lines:
         if not merged:
@@ -155,8 +158,10 @@ def _normalize_page_lines(page_text: str) -> list[str]:
         should_merge = False
         if not _looks_like_recipe_header(line):
             prev_is_short_header = _looks_like_recipe_header(prev) and len(prev.split()) <= 3
+            next_to_page_marker = _is_page_marker(prev) and _looks_like_recipe_header(line)
             should_merge = (
                 not prev_is_short_header
+                and not next_to_page_marker
                 and not _looks_like_catalog_line(prev)
                 and not _looks_like_catalog_line(line)
                 and (
@@ -500,7 +505,11 @@ def run_state_machine(pages: list[dict]) -> list[dict]:
         page_blocks_recipe_entry = _is_front_matter_or_index_page(lines)
         if current_chunk and _is_recipe_state(current_state) and page_num != current_page_num:
             first_line = next((line for line in lines if line.strip()), "")
-            if _looks_like_non_recipe_heading(first_line) or not _looks_like_recipe_continuation(first_line):
+            if (
+                _looks_like_non_recipe_heading(first_line)
+                or _looks_like_recipe_header(first_line)
+                or not _looks_like_recipe_continuation(first_line)
+            ):
                 flush_chunk(current_state, current_page_num)
                 current_state = CookbookState.NARRATIVE
 

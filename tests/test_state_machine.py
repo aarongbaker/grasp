@@ -352,8 +352,8 @@ brown.
     assert any("Crab Croquettes" in c["text"] for c in recipe_chunks)
 
 
-def test_southern_cookbook_pdf_yields_more_than_collapsed_single_recipe_result():
-    """Regression check against the real OCR-heavy PDF that previously collapsed to one recipe chunk."""
+def test_southern_cookbook_pdf_retains_recipe_heavy_pages_as_recipe_chunks():
+    """Regression check against the real OCR-heavy PDF: recipe-heavy pages should still produce anchored recipe chunks."""
     pdf_path = Path("/Users/aaronbaker/Desktop/cookbooks/southerncookbook00lustrich.pdf")
     if not pdf_path.exists():
         return
@@ -364,6 +364,14 @@ def test_southern_cookbook_pdf_yields_more_than_collapsed_single_recipe_result()
     recipe_chunks = [c for c in chunks if c["chunk_type"] == "recipe"]
 
     assert len(recipe_chunks) > 16
+
+    bouillabaisse_chunk = next(c for c in recipe_chunks if "Bouillabaisse" in c["text"])
+    crab_croquettes_chunk = next(c for c in recipe_chunks if "Crab Croquettes" in c["text"])
+
+    assert bouillabaisse_chunk["page_number"] == 19
+    assert "place on buttered slices of toast" in bouillabaisse_chunk["text"]
+    assert crab_croquettes_chunk["page_number"] == 20
+    assert "golden brown" in crab_croquettes_chunk["text"]
 
 
 def test_southern_cookbook_front_matter_does_not_emit_recipe_chunks():
