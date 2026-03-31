@@ -73,6 +73,7 @@ export function FileUpload({ accept = '.pdf', maxSizeMB = 100, onFile, disabled 
         type="file"
         accept={accept}
         className={styles.hidden}
+        data-testid="file-upload-input"
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) handleFile(file);

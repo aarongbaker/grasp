@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { uploadPdf, getIngestionStatus, listCookbooks, deleteCookbook } from '../api/ingest';
 import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
@@ -7,9 +7,26 @@ import type { BookRecord, IngestionJob } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './IngestPage.module.css';
 
+const ACTIVE_INGEST_JOB_KEY = 'grasp_active_ingest_job_id';
+
+function readStoredIngestJobId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const value = window.localStorage.getItem(ACTIVE_INGEST_JOB_KEY)?.trim();
+  return value || null;
+}
+
+function writeStoredIngestJobId(jobId: string | null) {
+  if (typeof window === 'undefined') return;
+  if (jobId) {
+    window.localStorage.setItem(ACTIVE_INGEST_JOB_KEY, jobId);
+    return;
+  }
+  window.localStorage.removeItem(ACTIVE_INGEST_JOB_KEY);
+}
+
 export function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(() => readStoredIngestJobId());
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [cookbooks, setCookbooks] = useState<BookRecord[]>([]);
@@ -31,10 +48,14 @@ export function IngestPage() {
     return () => window.clearTimeout(id);
   }, [fetchCookbooks]);
 
-  const { data: job } = usePolling<IngestionJob>({
-    fetcher: () => getIngestionStatus(jobId!),
-    interval: 3000,
-    shouldStop: (j) => {
+  useEffect(() => {
+    writeStoredIngestJobId(jobId);
+  }, [jobId]);
+
+  const pollIngestionStatus = useCallback(() => getIngestionStatus(jobId!), [jobId]);
+
+  const shouldStopPolling = useCallback(
+    (j: IngestionJob) => {
       if (j.status === 'complete' || j.status === 'failed') {
         if (j.status === 'complete') {
           setFile(null);
@@ -45,6 +66,13 @@ export function IngestPage() {
       }
       return false;
     },
+    [fetchCookbooks],
+  );
+
+  const { data: job } = usePolling<IngestionJob>({
+    fetcher: pollIngestionStatus,
+    interval: 3000,
+    shouldStop: shouldStopPolling,
     enabled: !!jobId,
   });
 
