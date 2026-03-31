@@ -109,11 +109,14 @@
 
 .sectionHeaderChooser {
   padding: clamp(1rem, 2vw, 1.4rem);
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 20%, transparent);
   border-radius: 20px;
   background:
-    linear-gradient(135deg, rgba(201, 129, 58, 0.08), rgba(35, 31, 26, 0.86) 52%),
-    var(--bg-raised);
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-primary) 11%, var(--bg-raised)), color-mix(in srgb, var(--bg-surface) 92%, transparent)),
+    radial-gradient(circle at top left, rgba(212, 149, 106, 0.14), transparent 52%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 240, 0.08),
+    0 0 0 1px color-mix(in srgb, var(--accent-primary) 12%, transparent);
 }
 
 .sectionHeaderActive {
