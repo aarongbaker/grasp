@@ -101,20 +101,20 @@ describe('NewSessionPage', () => {
     cleanup();
   });
 
-  it('promotes inferred recipe titles into the recipe column and keeps the preview focused on body text', () => {
-    const inferredRecipe: DetectedRecipeCandidate = {
+  it('trusts corrected backend recipe names while keeping preview excerpts focused on body text', () => {
+    const correctedRecipe: DetectedRecipeCandidate = {
       chunk_id: 'ocr-title-chunk',
       book_id: 'book-ocr',
       book_title: 'Southern Cakes',
-      recipe_name: '',
+      recipe_name: 'Corn Bread Fritters',
       chapter: 'Unsorted',
       page_number: 30,
       text: 'Corn Bread Fritters\n1 cup corn meal\n1 cup flour\n2 teaspoons baking powder\n½ teaspoon salt\n1 egg\nmilk to make a stiff batter',
     };
 
-    expect(getRecipeDisplayTitle(inferredRecipe)).toBe('Corn Bread Fritters');
+    expect(getRecipeDisplayTitle(correctedRecipe)).toBe('Corn Bread Fritters');
 
-    const preview = buildCookbookCandidatePreview(inferredRecipe);
+    const preview = buildCookbookCandidatePreview(correctedRecipe);
     expect(preview.title).toBe('Corn Bread Fritters');
     expect(preview.excerpt).not.toContain('Corn Bread Fritters');
     expect(preview.excerpt).toContain('1 cup corn meal');
@@ -462,8 +462,8 @@ describe('NewSessionPage', () => {
     expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
   });
 
-  it('prefers inferred titles from chunk text before chapter/page fallback for OCR noise names', async () => {
-    const recipesWithOcrNoise: DetectedRecipeCandidate[] = [
+  it('falls back safely when the backend title is empty or missing', async () => {
+    const recipesWithMissingTitles: DetectedRecipeCandidate[] = [
       {
         chunk_id: 'clean-chunk',
         book_id: 'book-a',
@@ -472,24 +472,6 @@ describe('NewSessionPage', () => {
         chapter: 'Main Courses',
         page_number: 42,
         text: 'A delicious roast chicken recipe.',
-      },
-      {
-        chunk_id: 'ocr-noise-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: '3.5 oz /',
-        chapter: 'Desserts',
-        page_number: 88,
-        text: 'Burnt Honey Tart\nIngredients\nHoney\nCream',
-      },
-      {
-        chunk_id: 'lowercase-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: 'broken lowercase start',
-        chapter: 'Appetizers',
-        page_number: 12,
-        text: 'Crisp Fennel Salad\nMethod\nSlice thinly.',
       },
       {
         chunk_id: 'empty-chunk',
@@ -501,17 +483,26 @@ describe('NewSessionPage', () => {
         text: 'Soup recipe.',
       },
       {
-        chunk_id: 'special-char-chunk',
+        chunk_id: 'blank-chapter-chunk',
         book_id: 'book-a',
         book_title: 'Test Book',
-        recipe_name: '|__Recipe__| Test',
+        recipe_name: '   ',
         chapter: 'Salads',
         page_number: 23,
         text: 'Salad recipe.',
       },
+      {
+        chunk_id: 'page-only-chunk',
+        book_id: 'book-a',
+        book_title: 'Test Book',
+        recipe_name: '',
+        chapter: '',
+        page_number: 91,
+        text: 'Unknown recipe.',
+      },
     ];
 
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(recipesWithOcrNoise);
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(recipesWithMissingTitles);
 
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
@@ -519,13 +510,8 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Browse Test Book' }));
 
     expect(screen.getByText('Roast Chicken')).toBeInTheDocument();
-    expect(screen.getByText('Burnt Honey Tart')).toBeInTheDocument();
-    expect(screen.getByText('Crisp Fennel Salad')).toBeInTheDocument();
     expect(screen.getByText('Soups, p. 55')).toBeInTheDocument();
     expect(screen.getByText('Salads, p. 23')).toBeInTheDocument();
-
-    expect(screen.queryByText('3.5 oz /')).not.toBeInTheDocument();
-    expect(screen.queryByText('broken lowercase start')).not.toBeInTheDocument();
-    expect(screen.queryByText('|__Recipe__| Test')).not.toBeInTheDocument();
+    expect(screen.getByText('Recipe on page 91')).toBeInTheDocument();
   });
 });
