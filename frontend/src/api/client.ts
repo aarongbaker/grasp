@@ -36,7 +36,7 @@ function looksLikeStartupConfigFailure(detail: string): boolean {
   ].some((snippet) => normalized.includes(snippet));
 }
 
-function classifyTransportError(error: unknown, controller: AbortController): ApiError {
+function classifyTransportError(_error: unknown, controller: AbortController): ApiError {
   if (controller.signal.aborted) {
     return new ApiError(
       0,

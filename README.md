@@ -21,6 +21,8 @@ GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbo
 
 Development startup should not require shell overrides for `APP_ENV`, JWT, or CORS. Production-only values belong in deploy environments, not in your local `.env`.
 
+If your existing `.env` still contains `APP_ENV=production` from prior deploy testing, the repo-root API command will now fail fast with the production CORS/JWT guards. Reset local startup to the documented development contract by re-copying `.env.example` or changing `.env` back to `APP_ENV=development` before running host-run startup commands.
+
 The meal-planning and cookbook ingestion flows still require real provider keys:
 
 - `ANTHROPIC_API_KEY`
