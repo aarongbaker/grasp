@@ -98,15 +98,17 @@ async def lifespan(app: FastAPI):
         )
 
     # ── 0b. Validate CORS origins ──────────────────────────────────────────────
-    _DEV_ORIGINS = {"http://localhost:3000", "http://localhost:8501"}
+    from app.core.settings import _DEV_ORIGINS
+
+    dev_origins = set(_DEV_ORIGINS)
+    configured_origins = set(settings.cors_allowed_origins)
     if settings.app_env == "production":
-        configured_origins = set(settings.cors_allowed_origins)
-        if configured_origins == _DEV_ORIGINS or configured_origins <= _DEV_ORIGINS:
+        if configured_origins == dev_origins or configured_origins <= dev_origins:
             raise RuntimeError(
                 "CORS_ALLOWED_ORIGINS must be set to your production domain(s) when APP_ENV=production. "
                 'Example: CORS_ALLOWED_ORIGINS=\'["https://grasp.pages.dev"]\''
             )
-    elif set(settings.cors_allowed_origins) != _DEV_ORIGINS:
+    elif configured_origins != dev_origins:
         logger.info("CORS origins: %s", settings.cors_allowed_origins)
 
     # ── 1. Migrations run in deploy/pre-deploy, not app startup ─────────────

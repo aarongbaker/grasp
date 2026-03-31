@@ -7,31 +7,50 @@ GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbo
 ## Prerequisites
 
 - **Python 3.12**
+- **Node.js 20+**
 - **Docker** (for Postgres and Redis)
+
+## Local environment contract
+
+`cp .env.example .env` gives you the intended **development** defaults:
+
+- `APP_ENV=development`
+- localhost database / Redis URLs
+- no `CORS_ALLOWED_ORIGINS` override required for local startup
+- placeholder `JWT_SECRET_KEY=change-me-in-production` is allowed locally and rejected only in production
+
+Development startup should not require shell overrides for `APP_ENV`, JWT, or CORS. Production-only values belong in deploy environments, not in your local `.env`.
+
+The meal-planning and cookbook ingestion flows still require real provider keys:
+
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `PINECONE_API_KEY`
+
+The API can boot without those keys, but LLM / RAG workflows will fail until they are set.
 
 ## Quick Start
 
 GRASP supports two local workflows:
 
-- **Host-run app**: run FastAPI/Streamlit on your machine, use Docker only for Postgres/Redis
-- **Docker-run app**: run API, worker, Postgres, and Redis together in Docker Compose
+- **Host-run app**: run FastAPI, Celery, and the Vite frontend on your machine; use Docker only for Postgres/Redis
+- **Docker-run backend**: run API, worker, Postgres, and Redis in Docker Compose; run the Vite frontend separately if you want the current web UI
 
-### Option A — Host-run app
+### Option A — Host-run app from the repo root
 
 ```bash
 # 1. Clone and enter the repo
 git clone <repo-url> && cd grasp
 
-# 2. Create a virtual environment and install dependencies
+# 2. Create a virtual environment and install backend dependencies
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 3. Copy the example env and fill in your API keys (see next section)
-cp .env.example .env
+# 3. Install frontend dependencies
+npm --prefix frontend install
 
-# 4. Generate a JWT secret key and add it to .env
-python -c "import secrets; print(secrets.token_urlsafe(64))"
-# Copy the output into .env as JWT_SECRET_KEY=...
+# 4. Copy the example env and add API keys for the flows you want to exercise
+cp .env.example .env
 
 # 5. Start Postgres and Redis
 docker compose up -d postgres redis
@@ -39,25 +58,34 @@ docker compose up -d postgres redis
 # 6. Start the API
 .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 7. In another shell, start the archived Streamlit UI if needed
-.venv/bin/streamlit run scripts/streamlit_app.py
+# 7. In another shell, start the worker if you need background pipeline execution
+.venv/bin/celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
+
+# 8. In another shell, start the frontend
+npm --prefix frontend run dev
 ```
 
-### Option B — Docker-run app
+Local URLs:
+- API: `http://localhost:8000`
+- Frontend: `http://localhost:5173`
+
+> The checked-in `.env.example` is written for **host-run development** (`localhost` URLs). In Docker Compose, the `app` and `worker` services override those connection URLs to use Docker service names (`postgres`, `redis`) so the same `.env` still works locally.
+
+### Option B — Docker-run backend
 
 ```bash
 # 1. Clone and enter the repo
 git clone <repo-url> && cd grasp
 
-# 2. Copy the example env and fill in your API keys
+# 2. Copy the example env and add API keys
 cp .env.example .env
 
-# 3. Generate a JWT secret key and add it to .env
-python -c "import secrets; print(secrets.token_urlsafe(64))"
-# Copy the output into .env as JWT_SECRET_KEY=...
-
-# 4. Build and run the local stack
+# 3. Build and run the backend stack
 docker compose up --build
+
+# 4. In another shell, start the frontend if you want the current web UI
+npm --prefix frontend install
+npm --prefix frontend run dev
 ```
 
 This starts:
@@ -66,11 +94,9 @@ This starts:
 - `postgres` → local dev database on `localhost:5432`
 - `redis` → local Redis on `localhost:6379`
 
-> The checked-in `.env.example` is written for **host-run development** (`localhost` URLs). In Docker Compose, the `app` and `worker` services override those connection URLs to use Docker service names (`postgres`, `redis`) so the same `.env` still works locally.
-
 ## API Keys
 
-GRASP requires three API keys. Add them to your `.env` file:
+GRASP requires three API keys for the full pipeline. Add them to your `.env` file when you want LLM / RAG-backed features to work:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -105,7 +131,7 @@ docker compose up -d postgres redis
 
 ### Local full Docker stack
 
-Run the full stack in containers:
+Run the backend stack in containers:
 
 ```bash
 docker compose up --build
@@ -147,33 +173,19 @@ This will:
 2. Process each PDF: OCR, classify, chunk, embed
 3. Print a summary with page/chunk counts and your user ID
 
-### Option B: Archived Streamlit UI
-
-```bash
-.venv/bin/streamlit run scripts/streamlit_app.py
-```
-
-Go to the **"Ingest Cookbooks"** tab, upload your PDFs, and click **Ingest**. The UI shows progress and a summary when done.
-
-> **Supported formats:** PDF files (scanned or digital). The OCR pipeline handles both.
-
 ## Generate Meal Schedules
 
-Launch the archived Streamlit UI:
+Run the API, worker, and frontend as described above, then open the Vite app in your browser:
 
-```bash
-.venv/bin/streamlit run scripts/streamlit_app.py
+```text
+http://localhost:5173
 ```
 
-In the **"Plan a Meal"** tab:
-
-1. **Describe your meal** — e.g., "A rustic Italian dinner: handmade pasta with bolognese, arugula salad, and tiramisu"
-2. **Set guest count, meal type, and occasion**
-3. **Add dietary restrictions** if needed
-4. **Configure your kitchen** — number of burners and oven racks (this affects scheduling)
-5. Click **Run Pipeline**
-
-The pipeline will generate recipes, enrich them with your cookbook knowledge, validate, build dependency graphs, merge into a parallel schedule, and render a timeline with prep-ahead and cook-day steps.
+From there you can:
+1. Upload and browse cookbook recipes
+2. Create a new session
+3. Run the planning pipeline
+4. Review schedule and results views
 
 ## Running Tests
 
@@ -183,6 +195,10 @@ The pipeline will generate recipes, enrich them with your cookbook knowledge, va
 
 # Full suite including integration tests (requires API keys)
 .venv/bin/python -m pytest tests/ -v
+
+# Frontend lint / build
+npm --prefix frontend run lint
+npm --prefix frontend run build
 ```
 
 ## Project Structure
@@ -197,7 +213,7 @@ grasp/
 │   ├── ingestion/      # Cookbook ingestion pipeline (OCR, classify, chunk, embed)
 │   ├── models/         # Pydantic/SQLModel data models
 │   └── workers/        # Celery task workers
-├── scripts/            # Archived utilities (Streamlit UI, bulk ingestion, smoke test)
+├── scripts/            # Archived utilities and bulk-ingestion helpers
 ├── tests/              # Test suite
 ├── frontend/           # React frontend
 ├── docker-compose.yml  # Local Postgres + Redis + API + worker

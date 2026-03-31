@@ -12,9 +12,11 @@ Keeping them separate avoids driver confusion and connection pool collisions.
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _JWT_SECRET_DEFAULT = "change-me-in-production"
+_DEV_ORIGINS = ["http://localhost:3000", "http://localhost:8501", "http://localhost:5173"]
 
 
 class Settings(BaseSettings):
@@ -23,7 +25,7 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     log_level: str = "INFO"
-    cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:8501"]
+    cors_allowed_origins: list[str] = _DEV_ORIGINS.copy()
 
     # Auth
     jwt_secret_key: str = _JWT_SECRET_DEFAULT
@@ -34,6 +36,26 @@ class Settings(BaseSettings):
     @property
     def jwt_secret_is_default(self) -> bool:
         return self.jwt_secret_key == _JWT_SECRET_DEFAULT
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in {"development", "production"}:
+            raise ValueError('APP_ENV must be either "development" or "production"')
+        return normalized
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def validate_cors_allowed_origins(cls, value):
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS must be a JSON array string such as "
+                    "'[\"http://localhost:5173\", \"http://localhost:8000\"]'"
+                )
+        return value
 
     # FastAPI / SQLAlchemy (asyncpg driver)
     database_url: str = "postgresql+asyncpg://grasp:grasp@localhost:5432/grasp"
