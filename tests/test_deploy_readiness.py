@@ -76,6 +76,13 @@ def test_readme_documents_vite_frontend_local_flow() -> None:
     assert "Production-only values belong in deploy environments" in readme
 
 
+def test_readme_documents_deploy_step_migrations_instead_of_startup() -> None:
+    readme = (REPO_ROOT / "README.md").read_text()
+
+    assert "Migrations are **not** run by app startup anymore." in readme
+    assert "alembic upgrade head" in readme
+
+
 def test_railway_docs_use_real_worker_module_path() -> None:
     guide = (REPO_ROOT / "docs" / "RAILWAY_CLOUDFLARE_DEPLOY_GUIDE.md").read_text()
     checklist = (REPO_ROOT / "docs" / "RAILWAY_DEPLOY_CHECKLIST.md").read_text()

@@ -1,46 +1,68 @@
 # Railway Deploy Checklist
 
-Use this when promoting the backend to Railway.
+Use this when promoting GRASP to production with **Railway for the API + worker** and **Cloudflare Pages for the frontend**.
 
-If you deploy the frontend separately from the API (for example Cloudflare Pages → Railway API),
-you must also set `VITE_API_URL` in the frontend build environment. The frontend defaults
-to same-origin `/api/v1` only when `VITE_API_URL` is unset.
+The checked-in app expects a three-surface deployment contract:
+
+1. **api** service on Railway — FastAPI / `/api/v1`
+2. **worker** service on Railway — Celery background execution
+3. **frontend** on Cloudflare Pages — Vite build that calls the Railway API over HTTPS
+
+If you leave `VITE_API_URL` unset, the frontend falls back to same-origin `/api/v1`. That is only correct when the frontend and API are served from the same origin. For the normal Cloudflare Pages → Railway split, you must set `VITE_API_URL` in Cloudflare Pages at build time.
 
 ## Services
 
-Create four services in one Railway project:
+Create these production services across Railway and Cloudflare:
+
+### Railway
 
 1. **api** — FastAPI service from this repo
 2. **worker** — Celery worker from this repo
 3. **postgres** — Railway Postgres
 4. **redis** — Railway Redis
 
+### Cloudflare Pages
+
+5. **frontend** — Vite/React app from `frontend/`
+
 ## Start Commands
 
-### API
+### Railway API
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
 ```
 
-### Worker
+### Railway Worker
 
 ```bash
 celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
 ```
 
+### Cloudflare Pages build
+
+```bash
+cd frontend && npm ci && npm run build
+```
+
+Cloudflare Pages output directory:
+
+```text
+frontend/dist
+```
+
 ## Required Environment Variables
 
-Set these on **both** api and worker unless noted otherwise.
+Set these on **both** Railway services (`api` and `worker`) unless noted otherwise.
 
-### App
+### App (Railway api + worker)
 
 ```env
 APP_ENV=production
 LOG_LEVEL=INFO
 ```
 
-### Auth
+### Auth (Railway api + worker)
 
 ```env
 JWT_SECRET_KEY=<generate-a-strong-random-secret>
@@ -49,13 +71,15 @@ JWT_EXPIRE_MINUTES=60
 JWT_REFRESH_EXPIRE_DAYS=7
 ```
 
+The checked-in API startup code rejects the default placeholder JWT secret when `APP_ENV=production`.
+
 Generate a secret locally with:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-### CORS (API only)
+### CORS (Railway api only)
 
 Must be a JSON array string:
 
@@ -63,16 +87,18 @@ Must be a JSON array string:
 CORS_ALLOWED_ORIGINS=["https://your-frontend-domain.com"]
 ```
 
-### Postgres
+The checked-in API startup code also rejects the localhost dev-origin default when `APP_ENV=production`.
 
-Railway usually gives one connection string. Derive both forms:
+### Postgres (Railway api + worker)
+
+Railway usually gives one connection string. Derive both forms because the app uses two different drivers against the same Postgres instance:
 
 ```env
 DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db
 LANGGRAPH_CHECKPOINT_URL=postgresql://user:pass@host:port/db
 ```
 
-### Redis / Celery
+### Redis / Celery (Railway api + worker)
 
 ```env
 REDIS_URL=redis://default:password@host:port/0
@@ -80,7 +106,7 @@ CELERY_BROKER_URL=redis://default:password@host:port/0
 CELERY_RESULT_BACKEND=redis://default:password@host:port/1
 ```
 
-### Providers
+### Providers (Railway api + worker)
 
 ```env
 ANTHROPIC_API_KEY=...
@@ -89,6 +115,20 @@ PINECONE_API_KEY=...
 PINECONE_INDEX_NAME=grasp-cookbooks
 PINECONE_ENVIRONMENT=us-east-1-aws
 ```
+
+The API can boot without provider keys, but cookbook ingestion / RAG / meal-planning flows will fail until they are set.
+
+### Frontend build env (Cloudflare Pages only)
+
+```env
+VITE_API_URL=https://<railway-api-url>
+```
+
+Rules:
+- set the API origin only
+- do **not** add `/api/v1`
+- do **not** leave a trailing slash
+- Vite reads this at build time, not runtime
 
 ## Preflight Checks
 
@@ -99,13 +139,18 @@ Before deploy, confirm:
 - [ ] `npm --prefix frontend run lint` passes if deploying the frontend
 - [ ] Pinecone index exists
 - [ ] JWT secret is not the default value
-- [ ] CORS origin is not localhost
+- [ ] `CORS_ALLOWED_ORIGINS` is a JSON array string containing only real frontend origin(s), not localhost defaults
+- [ ] Railway API env includes both `DATABASE_URL` and `LANGGRAPH_CHECKPOINT_URL` with the correct schemes
+- [ ] Railway API env includes `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND`
 - [ ] Worker uses `--pool=solo --concurrency=1`
-- [ ] If frontend and API are on different origins, frontend build env sets `VITE_API_URL=https://<railway-api-url>`
+- [ ] Cloudflare Pages build env sets `VITE_API_URL=https://<railway-api-url>` if frontend and API are on different origins
+- [ ] Alembic migrations have been run in a deploy/pre-deploy step (`alembic upgrade head`)
 
 ## Smoke Test After Deploy
 
-Run these against the live API.
+Run these against the live stack.
+
+### Railway API
 
 1. `GET /api/v1/health` returns 200
 2. Register a user
@@ -116,7 +161,15 @@ Run these against the live API.
 7. Poll `/api/v1/sessions/{id}` until terminal
 8. Fetch `/api/v1/sessions/{id}/results`
 
+### Cloudflare Pages frontend
+
+9. Load the Pages site in the browser
+10. Confirm login/register screens can reach the API without CORS failures
+11. Confirm the app is talking to the intended Railway host (not same-origin `/api/v1` on the Pages domain)
+
 ## Known Constraints
 
 - PDF ingestion currently sends PDF bytes through the API into Celery. This works for staging and small usage, but object storage is still the right production follow-up.
-- Frontend deployment is separate and should be validated independently.
+- Provider keys are not enforced at API boot. Missing `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `PINECONE_API_KEY` shows up when ingestion / RAG / planning flows execute.
+- The worker's checked-in Celery config allows higher concurrency via `CELERY_WORKER_CONCURRENCY`, but the production deployment contract still pins the process command to `--pool=solo --concurrency=1` for current Railway memory assumptions.
+- Frontend deployment is separate and must be validated with the Cloudflare build-time `VITE_API_URL` value, not only with API health.

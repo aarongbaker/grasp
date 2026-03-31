@@ -153,11 +153,41 @@ Database migrations run automatically on app startup via Alembic. You can also r
 
 ### Deployment notes
 
-- **Railway API service**: start command `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
-- **Railway worker service**: start command `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
-- **Cloudflare / separate frontend deploys**: set `CORS_ALLOWED_ORIGINS` to your Cloudflare-hosted frontend origin(s) as a JSON array string, and set `VITE_API_URL` in the frontend build environment to your Railway API base URL.
-- Keep environment variables for deploy targets in the platform environment, not in your local `.env`.
-- Full checklist: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
+GRASP's production deployment is a **three-surface contract**:
+
+1. **Railway API service** — serves FastAPI at `/api/v1`
+2. **Railway worker service** — runs Celery background jobs against the same Postgres + Redis
+3. **Cloudflare Pages frontend** — serves the built Vite app and talks to the Railway API over HTTPS
+
+Required runtime/build surfaces:
+
+- **Railway API start command**: `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
+- **Railway worker start command**: `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
+- **Cloudflare Pages build env**: `VITE_API_URL=https://<railway-api-host>`
+  - Set the API base URL only — no trailing slash and no `/api/v1`
+  - The frontend appends `/api/v1` itself
+- **Railway API CORS env**: `CORS_ALLOWED_ORIGINS=["https://<your-pages-domain>"]`
+  - This must be a JSON array string, not a bare URL
+
+Production guardrails enforced by the checked-in code:
+
+- `APP_ENV=production` enables startup validation for JWT + CORS
+- `JWT_SECRET_KEY` may not use the default placeholder in production
+- `CORS_ALLOWED_ORIGINS` may not remain at the localhost dev default in production
+- `LANGGRAPH_CHECKPOINT_URL` must point at reachable Postgres with a psycopg-compatible URL scheme
+- The worker must stay on `--pool=solo --concurrency=1` for current Railway memory assumptions
+
+Migrations are **not** run by app startup anymore. Run Alembic in a deploy/pre-deploy step before promoting the API service:
+
+```bash
+alembic upgrade head
+```
+
+Keep deploy-only environment variables in Railway / Cloudflare, not in your local `.env`.
+
+Deployment references:
+- quick contract: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
+- full walkthrough: `docs/RAILWAY_CLOUDFLARE_DEPLOY_GUIDE.md`
 
 ## Ingest Your Cookbooks
 
