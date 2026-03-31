@@ -237,6 +237,22 @@ describe('NewSessionPage', () => {
     expect(screen.getByText('1 recipe')).toBeInTheDocument();
   });
 
+  it('shows editorial list hierarchy cues for the active cookbook browser', async () => {
+    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
+
+    expect(screen.getByText('Within this cookbook')).toBeInTheDocument();
+    expect(screen.getByText(/Search titles, chapters, ingredients, or OCR fragments/i)).toBeInTheDocument();
+    expect(screen.getByText('Recipe')).toBeInTheDocument();
+    expect(screen.getByText('Source')).toBeInTheDocument();
+    expect(screen.getByText('Preview')).toBeInTheDocument();
+    expect(screen.getByText('Selections stay pinned while you refine the list.')).toBeInTheDocument();
+  });
+
   it('shows a no-match state with a clear action and keeps the full selected set for submit', async () => {
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
     const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({

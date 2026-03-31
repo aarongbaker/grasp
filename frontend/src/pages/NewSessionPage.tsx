@@ -481,128 +481,144 @@ export function NewSessionPage() {
                   </div>
                   <p className={styles.bookSummary}>{activeCookbook.summary}</p>
                   <div className={styles.recipeFilterBar}>
+                    <div className={styles.recipeFilterHeader}>
+                      <div>
+                        <p className={styles.recipeFilterEyebrow}>Within this cookbook</p>
+                        <p className={styles.recipeFilterPrompt}>Search titles, chapters, ingredients, or OCR fragments without losing your pinned picks.</p>
+                      </div>
+                      <div className={styles.recipeFilterMeta}>
+                        <span className={styles.recipeFilterCount}>
+                          Showing {filteredActiveRecipes.length} of {activeCookbook.recipes.length}
+                        </span>
+                        {hasCookbookSearch ? (
+                          <button
+                            type="button"
+                            className={styles.recipeFilterReset}
+                            onClick={() => setCookbookSearch('')}
+                          >
+                            Reset search
+                          </button>
+                        ) : (
+                          <span>Selections stay pinned while you refine the list.</span>
+                        )}
+                      </div>
+                    </div>
                     <Input
                       label="Search this cookbook"
                       placeholder="Search by title, chapter, ingredient, or excerpt"
                       value={cookbookSearch}
                       onChange={(e) => setCookbookSearch(e.target.value)}
                     />
-                    <div className={styles.recipeFilterMeta}>
-                      <span>
-                        Showing {filteredActiveRecipes.length} of {activeCookbook.recipes.length}
-                      </span>
-                      {hasCookbookSearch ? (
+                  </div>
+                  <div className={styles.recipeListHeader} aria-hidden="true">
+                    <span>Recipe</span>
+                    <span>Source</span>
+                    <span>Preview</span>
+                  </div>
+                  <div className={styles.recipeListFrame}>
+                    {filteredActiveRecipes.length === 0 ? (
+                      <div className={styles.cookbookState}>
+                        <p className={styles.emptyStateTitle}>No recipes match “{cookbookSearch.trim()}”.</p>
+                        <p className={styles.emptyStateCopy}>
+                          Try a different title, chapter, ingredient, or OCR fragment. Your selected recipes are still saved in the menu summary.
+                        </p>
                         <button
                           type="button"
                           className={styles.recipeFilterReset}
                           onClick={() => setCookbookSearch('')}
                         >
-                          Reset search
+                          Clear search
                         </button>
-                      ) : (
-                        <span>Selections stay pinned while you refine the list.</span>
-                      )}
-                    </div>
-                  </div>
-                  {filteredActiveRecipes.length === 0 ? (
-                    <div className={styles.cookbookState}>
-                      <p className={styles.emptyStateTitle}>No recipes match “{cookbookSearch.trim()}”.</p>
-                      <p className={styles.emptyStateCopy}>
-                        Try a different title, chapter, ingredient, or OCR fragment. Your selected recipes are still saved in the menu summary.
-                      </p>
-                      <button
-                        type="button"
-                        className={styles.recipeFilterReset}
-                        onClick={() => setCookbookSearch('')}
-                      >
-                        Clear search
-                      </button>
-                    </div>
-                  ) : (
-                    <div className={styles.recipeList}>
-                      {filteredActiveRecipes.map(({ recipe, displayTitle, preview }) => {
-                        const checked = selectedRecipeIds.includes(recipe.chunk_id);
-                        const isExpanded = expandedExcerpts.has(recipe.chunk_id);
-                        const excerptText = preview.excerpt;
-                        const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD || preview.ingredients.length > 0 || preview.steps.length > 0;
-                        return (
-                          <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
-                              aria-label={`Select ${displayTitle}`}
-                            />
-                            <span className={styles.selectionIndicator} aria-hidden="true">
-                              <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M2.5 6L5 8.5L9.5 3.5" />
-                              </svg>
-                            </span>
-                            <div className={styles.recipeOptionBody}>
-                              <div className={styles.recipeOptionHeader}>
-                                <span className={styles.recipeName}>{displayTitle}</span>
-                                {recipe.page_number && <span className={styles.recipePage}>p. {recipe.page_number}</span>}
-                              </div>
-                              <div className={styles.recipeMetaRow}>
-                                <span>{recipe.chapter || 'Unsorted'}</span>
-                                <span className={styles.chunkId}>{recipe.chunk_id.slice(0, 8)}</span>
-                              </div>
-                              <div className={styles.recipePreviewSummary}>
-                                {preview.ingredients.length > 0 && (
-                                  <span>{preview.ingredients.length} ingredients shown</span>
-                                )}
-                                {preview.steps.length > 0 && (
-                                  <span>{preview.steps.length} steps previewed</span>
-                                )}
-                              </div>
-                              {excerptText && (
-                                <div className={styles.excerptContainer}>
-                                  <p className={`${styles.recipeExcerpt} ${isExpanded ? styles.recipeExcerptExpanded : ''}`}>
-                                    {isExpanded || !needsExpand ? excerptText : `${excerptText.slice(0, EXCERPT_COLLAPSE_THRESHOLD)}…`}
-                                  </p>
-                                  {isExpanded && preview.ingredients.length > 0 && (
-                                    <div className={styles.recipePreviewBlock}>
-                                      <h4 className={styles.recipePreviewHeading}>Ingredients</h4>
-                                      <ul className={styles.recipePreviewList}>
-                                        {preview.ingredients.map((line) => (
-                                          <li key={line}>{line}</li>
-                                        ))}
-                                      </ul>
+                      </div>
+                    ) : (
+                      <div className={styles.recipeList}>
+                        {filteredActiveRecipes.map(({ recipe, displayTitle, preview }) => {
+                          const checked = selectedRecipeIds.includes(recipe.chunk_id);
+                          const isExpanded = expandedExcerpts.has(recipe.chunk_id);
+                          const excerptText = preview.excerpt;
+                          const needsExpand = excerptText.length > EXCERPT_COLLAPSE_THRESHOLD || preview.ingredients.length > 0 || preview.steps.length > 0;
+                          return (
+                            <label key={recipe.chunk_id} className={`${styles.recipeOption} ${checked ? styles.recipeOptionSelected : ''}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleSelectedRecipe(recipe.chunk_id)}
+                                aria-label={`Select ${displayTitle}`}
+                              />
+                              <span className={styles.selectionIndicator} aria-hidden="true">
+                                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M2.5 6L5 8.5L9.5 3.5" />
+                                </svg>
+                              </span>
+                              <div className={styles.recipeOptionBody}>
+                                <div className={styles.recipeOptionHeader}>
+                                  <div className={styles.recipeIdentityBlock}>
+                                    <span className={styles.recipeName}>{displayTitle}</span>
+                                    <div className={styles.recipeMetaRow}>
+                                      <span>{recipe.chapter || 'Unsorted'}</span>
+                                      <span className={styles.chunkId}>{recipe.chunk_id.slice(0, 8)}</span>
                                     </div>
+                                  </div>
+                                  {recipe.page_number && <span className={styles.recipePage}>p. {recipe.page_number}</span>}
+                                </div>
+                                <div className={styles.recipePreviewSummary}>
+                                  {preview.ingredients.length > 0 && (
+                                    <span>{preview.ingredients.length} ingredients shown</span>
                                   )}
-                                  {isExpanded && preview.steps.length > 0 && (
-                                    <div className={styles.recipePreviewBlock}>
-                                      <h4 className={styles.recipePreviewHeading}>Method</h4>
-                                      <ol className={styles.recipePreviewListOrdered}>
-                                        {preview.steps.map((line) => (
-                                          <li key={line}>{line}</li>
-                                        ))}
-                                      </ol>
-                                    </div>
-                                  )}
-                                  {needsExpand && (
-                                    <button
-                                      type="button"
-                                      className={styles.excerptToggle}
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        toggleExcerpt(recipe.chunk_id);
-                                      }}
-                                      aria-expanded={isExpanded}
-                                      aria-label={isExpanded ? 'Show less' : 'Show recipe preview'}
-                                    >
-                                      {isExpanded ? 'Show less' : 'Show recipe preview'}
-                                    </button>
+                                  {preview.steps.length > 0 && (
+                                    <span>{preview.steps.length} steps previewed</span>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
+                                {excerptText && (
+                                  <div className={styles.excerptContainer}>
+                                    <p className={`${styles.recipeExcerpt} ${isExpanded ? styles.recipeExcerptExpanded : ''}`}>
+                                      {isExpanded || !needsExpand ? excerptText : `${excerptText.slice(0, EXCERPT_COLLAPSE_THRESHOLD)}…`}
+                                    </p>
+                                    {isExpanded && preview.ingredients.length > 0 && (
+                                      <div className={styles.recipePreviewBlock}>
+                                        <h4 className={styles.recipePreviewHeading}>Ingredients</h4>
+                                        <ul className={styles.recipePreviewList}>
+                                          {preview.ingredients.map((line) => (
+                                            <li key={line}>{line}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                    {isExpanded && preview.steps.length > 0 && (
+                                      <div className={styles.recipePreviewBlock}>
+                                        <h4 className={styles.recipePreviewHeading}>Method</h4>
+                                        <ol className={styles.recipePreviewListOrdered}>
+                                          {preview.steps.map((line) => (
+                                            <li key={line}>{line}</li>
+                                          ))}
+                                        </ol>
+                                      </div>
+                                    )}
+                                    {needsExpand && (
+                                      <button
+                                        type="button"
+                                        className={styles.excerptToggle}
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          toggleExcerpt(recipe.chunk_id);
+                                        }}
+                                        aria-expanded={isExpanded}
+                                        aria-label={isExpanded ? 'Show less' : 'Show recipe preview'}
+                                      >
+                                        {isExpanded ? 'Show less' : 'Show recipe preview'}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                 </section>
               </div>
             ) : null}
