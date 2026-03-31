@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewSessionPage } from '../NewSessionPage';
 import * as ingestApi from '../../api/ingest';
 import * as sessionsApi from '../../api/sessions';
+import { buildCookbookCandidatePreview } from '../../components/session/cookbookCandidatePreview';
+import { getRecipeDisplayTitle } from '../../utils/cookbookTitles';
 import type { DetectedRecipeCandidate, Session } from '../../types/api';
 
 const navigateMock = vi.fn();
@@ -97,6 +99,25 @@ describe('NewSessionPage', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('promotes inferred recipe titles into the recipe column and keeps the preview focused on body text', () => {
+    const inferredRecipe: DetectedRecipeCandidate = {
+      chunk_id: 'ocr-title-chunk',
+      book_id: 'book-ocr',
+      book_title: 'Southern Cakes',
+      recipe_name: '',
+      chapter: 'Unsorted',
+      page_number: 30,
+      text: 'Corn Bread Fritters\n1 cup corn meal\n1 cup flour\n2 teaspoons baking powder\n½ teaspoon salt\n1 egg\nmilk to make a stiff batter',
+    };
+
+    expect(getRecipeDisplayTitle(inferredRecipe)).toBe('Corn Bread Fritters');
+
+    const preview = buildCookbookCandidatePreview(inferredRecipe);
+    expect(preview.title).toBe('Corn Bread Fritters');
+    expect(preview.excerpt).not.toContain('Corn Bread Fritters');
+    expect(preview.excerpt).toContain('1 cup corn meal');
   });
 
   it('keeps the meal-idea flow isolated and submits the legacy payload', async () => {

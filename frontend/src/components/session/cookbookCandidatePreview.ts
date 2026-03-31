@@ -25,8 +25,19 @@ function cleanLine(line: string): string {
   return line.replace(/^(?:\d+[.)]|[-*•])\s*/, '').replace(/\s+/g, ' ').trim();
 }
 
-function buildExcerpt(lines: string[]): string {
-  return lines.slice(0, 3).join(' ');
+function buildExcerpt(lines: string[], displayTitle: string, subtitle: string): string {
+  const normalizedTitle = displayTitle.trim().toLowerCase();
+  const normalizedSubtitle = subtitle.trim().toLowerCase();
+
+  const excerptLines = lines.filter((line) => {
+    const normalizedLine = line.trim().toLowerCase();
+    if (!normalizedLine) return false;
+    if (normalizedTitle && normalizedLine === normalizedTitle) return false;
+    if (normalizedSubtitle && normalizedLine === normalizedSubtitle) return false;
+    return true;
+  });
+
+  return excerptLines.slice(0, 3).join(' ');
 }
 
 export function buildCookbookCandidatePreview(recipe: DetectedRecipeCandidate): CookbookCandidatePreview {
@@ -76,9 +87,9 @@ export function buildCookbookCandidatePreview(recipe: DetectedRecipeCandidate): 
     notes.push(line);
   }
 
-  const fallbackExcerpt = buildExcerpt(lines);
   const title = getRecipeDisplayTitle(recipe);
   const subtitle = recipe.chapter?.trim() || recipe.book_title;
+  const fallbackExcerpt = buildExcerpt(lines, title, subtitle);
 
   return {
     title,

@@ -44,13 +44,21 @@ function normalizeTitleCandidate(value: string): string | null {
 
   if (!normalized) return null;
   if (OCR_HEADING_RE.test(normalized)) return null;
-  if (/[.!?]$/.test(value.trim())) return null;
 
+  const trimmedValue = value.trim();
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length < 2) return null;
 
   const titleCaseWords = words.filter((word) => /^[A-Z][a-z]/.test(word)).length;
-  if (titleCaseWords === 0) return null;
+  const uppercaseWords = words.filter((word) => /^[A-Z]{2,}$/.test(word)).length;
+  const lowerCaseWords = words.filter((word) => /^[a-z]/.test(word)).length;
+  const lowerCaseRatio = lowerCaseWords / words.length;
+
+  if (titleCaseWords === 0 && uppercaseWords === 0) return null;
+  if (/[.!?]$/.test(trimmedValue)) {
+    const stopwordCount = words.filter((word) => /^(a|an|and|for|from|in|into|of|on|or|the|to|with)$/i.test(word)).length;
+    if (lowerCaseRatio > 0.34 || stopwordCount > 0) return null;
+  }
 
   if (looksLikeOcrNoise(normalized)) return null;
   return normalized;
