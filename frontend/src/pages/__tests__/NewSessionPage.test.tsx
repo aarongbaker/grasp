@@ -57,6 +57,19 @@ describe('NewSessionPage', () => {
     cleanup();
   });
 
+  it('renders only menu intent form with no cookbook mode switcher', () => {
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
+    expect(screen.getByText(/Describe the meal you want to cook/i)).toBeInTheDocument();
+    
+    // Verify no cookbook mode exists
+    expect(screen.queryByText(/Select from cookbook/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cookbook mode/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/free-text mode/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /switch.*mode/i })).not.toBeInTheDocument();
+  });
+
   it('renders the menu intent form with all required fields', () => {
     renderPage();
 

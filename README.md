@@ -1,11 +1,10 @@
 # GRASP
 
-**Generative Retrieval-Augmented Scheduling & Planning** — a hosted web app for turning your cookbook collection into personalized, time-coordinated cooking schedules.
+**Generative Retrieval-Augmented Scheduling & Planning** - a hosted web app for creating personalized, time-coordinated cooking schedules from meal descriptions.
 
-GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for cookbook retrieval, and a LangGraph-driven scheduling pipeline to:
-- ingest cookbook PDFs
-- extract and browse recipe-like content
-- generate or assemble meal plans
+GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for curated content enrichment, and a LangGraph-driven scheduling pipeline to:
+- generate recipes from free-text menu intent
+- enrich with curated culinary knowledge
 - build dependency-aware cooking timelines
 - render a step-by-step schedule for service
 
@@ -15,22 +14,19 @@ GRASP is now primarily a **hosted website**, not a local-only tool.
 
 In the hosted app, a user can:
 1. Sign in
-2. Upload cookbook PDFs
-3. Wait for ingestion to finish in the background
-4. Browse detected cookbook recipes
-5. Create a planning session
-6. Run the scheduling pipeline
-7. Review the generated schedule and results
+2. Describe the meal they want to prepare
+3. Run the scheduling pipeline
+4. Review the generated schedule and results
 
 ### Hosted architecture
 
 Production GRASP runs as a three-surface system:
 
-1. **Railway API service** — FastAPI at `/api/v1`
-2. **Railway worker service** — Celery worker for ingestion and planning jobs
-3. **Cloudflare Pages frontend** — the public web UI
+1. **Railway API service** - FastAPI at `/api/v1`
+2. **Railway worker service** - Celery worker for ingestion and planning jobs
+3. **Cloudflare Pages frontend** - the public web UI
 
-Background work such as cookbook ingestion and meal-planning execution happens asynchronously in the worker. The frontend polls the API for status and now surfaces:
+Background work such as meal-planning execution happens asynchronously in the worker. The frontend polls the API for status and surfaces:
 - ingestion phase
 - OCR page progress
 - stale-progress warnings
@@ -53,7 +49,6 @@ Required runtime/build surfaces:
   Notes:
   - The worker must remain on `--pool=solo --concurrency=1` for current memory assumptions.
   - The checked-in Celery app sets `broker_connection_retry_on_startup=True` explicitly.
-  - Failed jobs still require inspection and explicit re-run; this does **not** enable task auto-retries.
 
 - **Cloudflare Pages build env**
   ```bash
@@ -83,7 +78,7 @@ When `APP_ENV=production`, the checked-in code enforces:
 
 ### Production migrations
 
-Migrations are **not** run automatically on app startup.
+Migrations are **not** run by app startup anymore.
 Run Alembic before promoting the new API/worker revision:
 
 ```bash
@@ -119,7 +114,7 @@ Development startup should not require shell overrides for `APP_ENV`, JWT, or CO
 
 If your existing `.env` still contains `APP_ENV=production` from prior deploy testing, the repo-root API command will fail fast with production CORS/JWT guards. Reset local startup to the documented development contract by re-copying `.env.example` or setting `.env` back to `APP_ENV=development`.
 
-The meal-planning and cookbook ingestion flows still require real provider keys:
+The meal-planning flow requires real provider keys:
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `PINECONE_API_KEY`
@@ -133,7 +128,7 @@ GRASP supports two local workflows:
 - **Host-run app**: run FastAPI, Celery, and the Vite frontend on your machine; use Docker only for Postgres/Redis
 - **Docker-run backend**: run API, worker, Postgres, and Redis in Docker Compose; run the Vite frontend separately
 
-### Option A — Host-run app from the repo root
+### Option A - Host-run app from the repo root
 
 ```bash
 # 1. Clone and enter the repo
@@ -168,7 +163,7 @@ Local URLs:
 
 > The checked-in `.env.example` is written for **host-run development** (`localhost` URLs). In Docker Compose, the `app` and `worker` services override those connection URLs to use Docker service names (`postgres`, `redis`) so the same `.env` still works locally.
 
-### Option B — Docker-run backend
+### Option B - Docker-run backend
 
 ```bash
 # 1. Clone and enter the repo
@@ -204,13 +199,13 @@ PINECONE_API_KEY=pcsk_...
 | Key | What it does | Where to get it |
 |-----|-------------|-----------------|
 | `ANTHROPIC_API_KEY` | Powers Claude for recipe generation, step enrichment, and schedule summaries | [console.anthropic.com](https://console.anthropic.com/) |
-| `OPENAI_API_KEY` | Generates text embeddings for cookbook content | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| `PINECONE_API_KEY` | Vector database for cookbook embeddings | [app.pinecone.io](https://app.pinecone.io/) |
+| `OPENAI_API_KEY` | Generates text embeddings for curated content enrichment | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| `PINECONE_API_KEY` | Vector database for curated content embeddings | [app.pinecone.io](https://app.pinecone.io/) |
 
-You’ll also want to configure your Pinecone index:
+You'll also want to configure your Pinecone index:
 
 ```env
-PINECONE_INDEX_NAME=grasp-cookbooks
+PINECONE_INDEX_NAME=grasp-content
 PINECONE_ENVIRONMENT=us-east-1-aws
 ```
 
@@ -235,33 +230,16 @@ docker compose up --build
 ```
 
 This launches:
-- **app** on port 8000 — FastAPI API server
-- **worker** — Celery background worker with memory-safe local settings
-- **Postgres** on port 5432 — stores users, sessions, and ingestion records
-- **Redis** on port 6379 — Celery broker/result backend and rate-limit storage
+- **app** on port 8000 - FastAPI API server
+- **worker** - Celery background worker with memory-safe local settings
+- **Postgres** on port 5432 - stores users, sessions, and ingestion records
+- **Redis** on port 6379 - Celery broker/result backend and rate-limit storage
 
 For local/manual database upgrades:
 
 ```bash
 .venv/bin/alembic upgrade head
 ```
-
-## Cookbook ingestion
-
-In production, cookbook ingestion happens through the hosted web UI.
-
-For local development, you can still exercise ingestion through the app UI or through the bulk-ingestion helper.
-
-### Bulk ingestion helper (development/admin use)
-
-```bash
-.venv/bin/python scripts/ingest_folder.py ~/path/to/your/cookbooks/
-```
-
-This will:
-1. Auto-create a dev user (`dev@grasp.local`)
-2. Process each PDF: OCR, classify, chunk, embed
-3. Print a summary with page/chunk counts and your user ID
 
 ## Generating meal schedules
 
@@ -274,10 +252,9 @@ http://localhost:5173
 ```
 
 From there you can:
-1. Upload and browse cookbook recipes
-2. Create a new session
-3. Run the planning pipeline
-4. Review schedule and results views
+1. Describe your meal plan
+2. Run the planning pipeline
+3. Review schedule and results views
 
 ## Running tests
 
