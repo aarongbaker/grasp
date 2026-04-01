@@ -2,7 +2,7 @@
 
 **Generative Retrieval-Augmented Scheduling & Planning** - a hosted web app for creating personalized, time-coordinated cooking schedules from meal descriptions.
 
-GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for curated content enrichment, and a LangGraph-driven scheduling pipeline to:
+GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for curated culinary-text enrichment, and a LangGraph-driven scheduling pipeline to:
 - generate recipes from free-text menu intent
 - enrich with curated culinary knowledge
 - build dependency-aware cooking timelines
@@ -17,6 +17,8 @@ In the hosted app, a user can:
 2. Describe the meal they want to prepare
 3. Run the scheduling pipeline
 4. Review the generated schedule and results
+
+Cookbook and culinary text ingestion/retrieval machinery still exists behind the scenes, but only as an internal curated-text enrichment seam. The hosted product no longer promises user-managed cookbook upload, browse, or exact uploaded-recipe scheduling workflows.
 
 ### Hosted architecture
 
