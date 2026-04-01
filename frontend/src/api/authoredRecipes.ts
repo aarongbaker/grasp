@@ -1,5 +1,6 @@
 import { apiFetch } from './client';
 import type {
+  AuthoredRecipeCookbookUpdateRequest,
   AuthoredRecipeCreateRequest,
   AuthoredRecipeDetail,
   AuthoredRecipeListItem,
@@ -18,4 +19,14 @@ export function listAuthoredRecipes(): Promise<AuthoredRecipeListItem[]> {
 
 export function getAuthoredRecipe(recipeId: string): Promise<AuthoredRecipeDetail> {
   return apiFetch<AuthoredRecipeDetail>(`/authored-recipes/${recipeId}`);
+}
+
+export function updateAuthoredRecipeCookbook(
+  recipeId: string,
+  body: AuthoredRecipeCookbookUpdateRequest,
+): Promise<AuthoredRecipeDetail> {
+  return apiFetch<AuthoredRecipeDetail>(`/authored-recipes/${recipeId}/cookbook`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }

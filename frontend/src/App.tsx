@@ -8,6 +8,7 @@ import { NewSessionPage } from './pages/NewSessionPage';
 import { SessionDetailPage } from './pages/SessionDetailPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { AuthoredRecipeWorkspacePage } from './pages/AuthoredRecipeWorkspacePage';
+import { RecipeLibraryPage } from './pages/RecipeLibraryPage';
 
 export function App() {
   return (
@@ -18,6 +19,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/sessions/new" element={<NewSessionPage />} />
+        <Route path="/recipes" element={<RecipeLibraryPage />} />
         <Route path="/recipes/new" element={<AuthoredRecipeWorkspacePage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />

@@ -1,0 +1,392 @@
+.page {
+  display: grid;
+  gap: var(--space-xl);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
+  gap: var(--space-xl);
+  align-items: stretch;
+}
+
+.heroCopy {
+  position: relative;
+  display: grid;
+  gap: var(--space-md);
+  padding: clamp(1.75rem, 3vw, 2.75rem);
+  background:
+    radial-gradient(circle at top left, rgba(201, 129, 58, 0.18), transparent 36%),
+    linear-gradient(145deg, rgba(35, 31, 26, 0.98), rgba(46, 40, 34, 0.94));
+  border: 1px solid rgba(212, 149, 106, 0.18);
+  border-radius: 30px;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.26);
+  overflow: hidden;
+}
+
+.heroCopy::after {
+  content: '';
+  position: absolute;
+  inset: auto -40px -40px auto;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201, 129, 58, 0.18), transparent 68%);
+  pointer-events: none;
+}
+
+.kicker,
+.sectionEyebrow,
+.errorEyebrow,
+.emptyEyebrow,
+.recipeKicker {
+  margin: 0;
+  font-size: var(--text-xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-warm);
+}
+
+.title {
+  margin: 0;
+  max-width: 13ch;
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 5vw, 4.8rem);
+  line-height: 0.98;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.subtitle,
+.sectionText,
+.metricText,
+.errorText,
+.emptyText,
+.sectionEmpty,
+.recipeCuisine,
+.cookbookDescription,
+.secondaryLink {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding-top: var(--space-sm);
+}
+
+.secondaryLink {
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.secondaryLink:hover,
+.secondaryLink:focus-visible,
+.recipeLink:hover,
+.recipeLink:focus-visible {
+  color: var(--text-primary);
+}
+
+.heroAside {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.metricCard,
+.composer,
+.libraryColumn,
+.errorState,
+.emptyState,
+.inlineError {
+  padding: clamp(1.25rem, 2vw, 1.8rem);
+  border-radius: 26px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+}
+
+.metricCard {
+  display: grid;
+  gap: var(--space-sm);
+  background:
+    linear-gradient(180deg, rgba(46, 40, 34, 0.96), rgba(35, 31, 26, 0.96)),
+    var(--bg-surface);
+}
+
+.metricLabel,
+.metricCaption,
+.selectLabel {
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.metricValue {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.65rem, 2.2vw, 2.25rem);
+  color: var(--text-primary);
+}
+
+.metricRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  border-radius: 22px;
+  border: 1px solid rgba(212, 149, 106, 0.14);
+  background: rgba(46, 40, 34, 0.92);
+}
+
+.metricNumber {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  color: var(--text-primary);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: var(--space-xl);
+  background:
+    linear-gradient(135deg, rgba(201, 129, 58, 0.08), transparent 48%),
+    var(--bg-surface);
+}
+
+.composerHeader {
+  display: grid;
+  gap: var(--space-sm);
+  align-content: start;
+}
+
+.sectionTitle,
+.errorTitle,
+.emptyTitle,
+.cookbookTitle,
+.recipeTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  color: var(--text-primary);
+}
+
+.sectionTitle {
+  font-size: var(--text-2xl);
+}
+
+.composerForm {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.inlineError,
+.errorState,
+.emptyState {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.inlineError {
+  color: var(--cost-negative);
+  border-color: rgba(196, 107, 107, 0.32);
+  background: rgba(196, 107, 107, 0.08);
+}
+
+.loadingState {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+.loadingCard {
+  min-height: 220px;
+  border-radius: 24px;
+  border: 1px solid rgba(212, 149, 106, 0.12);
+  background:
+    linear-gradient(90deg, rgba(46, 40, 34, 0.94), rgba(61, 53, 48, 0.88), rgba(46, 40, 34, 0.94));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.libraryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: var(--space-xl);
+}
+
+.libraryColumn,
+.cookbookCard,
+.recipeCard,
+.recipeCardInset {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.libraryColumn {
+  align-content: start;
+}
+
+.sectionHeader,
+.cookbookHeader,
+.recipeCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.countPill {
+  align-self: flex-start;
+  min-width: 2.25rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(201, 129, 58, 0.24);
+  background: rgba(201, 129, 58, 0.09);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.recipeStack,
+.cookbookStack {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.recipeCard,
+.recipeCardInset,
+.cookbookCard {
+  padding: var(--space-lg);
+  border-radius: 22px;
+  border: 1px solid rgba(212, 149, 106, 0.12);
+  background: rgba(46, 40, 34, 0.72);
+}
+
+.recipeCardInset {
+  background: rgba(35, 31, 26, 0.82);
+}
+
+.recipeMeta {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.recipeActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.recipeLink {
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.selectField {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 220px;
+}
+
+.selectField select {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(212, 149, 106, 0.18);
+  background: rgba(26, 22, 18, 0.88);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.selectField select:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.emptyState,
+.errorState {
+  justify-items: start;
+}
+
+.emptyPlate {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  display: grid;
+  place-items: center;
+}
+
+.emptyPlateRing {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px dashed rgba(212, 149, 106, 0.34);
+  box-shadow: inset 0 0 0 18px rgba(201, 129, 58, 0.05);
+}
+
+.emptyPlateLine {
+  position: absolute;
+  width: 54px;
+  height: 1px;
+  background: rgba(212, 149, 106, 0.4);
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 1080px) {
+  .hero,
+  .composer,
+  .libraryGrid,
+  .loadingState {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .metricRow {
+    grid-template-columns: 1fr;
+  }
+
+  .heroActions,
+  .recipeActions,
+  .sectionHeader,
+  .cookbookHeader,
+  .recipeCardHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .selectField {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .secondaryLink,
+  .recipeLink,
+  .loadingCard {
+    transition: none;
+    animation: none;
+  }
+}

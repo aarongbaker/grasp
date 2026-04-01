@@ -75,13 +75,17 @@ describe('DashboardPage discoverability', () => {
     cleanup();
   });
 
-  it('shows separate creation paths for dinner planning and chef-authored drafting', async () => {
+  it('shows separate creation paths for dinner planning, private library browsing, and chef-authored drafting', async () => {
     renderWithAuth(<DashboardPage />);
 
     expect(screen.getByRole('heading', { name: 'Your Sessions' })).toBeInTheDocument();
 
     const planLinks = screen.getAllByRole('link', { name: /plan a dinner|open dinner planner/i });
     expect(planLinks.some((link) => link.getAttribute('href') === '/sessions/new')).toBe(true);
+
+    const libraryLink = screen.getByRole('link', { name: /open recipe library/i });
+    expect(libraryLink).toHaveAttribute('href', '/recipes');
+    expect(screen.getByRole('heading', { name: 'Browse Recipe Library' })).toBeInTheDocument();
 
     const recipeWorkspaceLink = screen.getByRole('link', { name: /open recipe workspace/i });
     expect(recipeWorkspaceLink).toHaveAttribute('href', '/recipes/new');
@@ -90,12 +94,13 @@ describe('DashboardPage discoverability', () => {
     await waitFor(() => expect(sessionsApi.listSessions).toHaveBeenCalledWith('user-1'));
   });
 
-  it('keeps the sidebar exposing both protected entry paths', () => {
-    renderWithAuth(<Sidebar />, ['/recipes/new']);
+  it('keeps the sidebar exposing the library and draft entry paths separately', () => {
+    renderWithAuth(<Sidebar />, ['/recipes']);
 
     expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: /plan a dinner/i })).toHaveAttribute('href', '/sessions/new');
-    expect(screen.getByRole('link', { name: /recipe drafts/i })).toHaveAttribute('href', '/recipes/new');
-    expect(screen.getByRole('link', { name: /recipe drafts/i }).className).toMatch(/navLinkActive/);
+    expect(screen.getByRole('link', { name: /recipe library/i })).toHaveAttribute('href', '/recipes');
+    expect(screen.getByRole('link', { name: /new draft/i })).toHaveAttribute('href', '/recipes/new');
+    expect(screen.getByRole('link', { name: /recipe library/i }).className).toMatch(/navLinkActive/);
   });
 });

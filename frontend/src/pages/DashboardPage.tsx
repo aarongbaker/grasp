@@ -16,6 +16,12 @@ const CREATION_PATHS = [
     cta: 'Open dinner planner',
   },
   {
+    title: 'Browse Recipe Library',
+    description: 'Reopen private authored dishes, gather them into cookbook folders, and keep your working repertoire close at hand.',
+    to: '/recipes',
+    cta: 'Open recipe library',
+  },
+  {
     title: 'Start a Recipe Draft',
     description: 'Capture a chef-authored dish in kitchen language before you shape the finer prep and service details.',
     to: '/recipes/new',
@@ -74,7 +80,7 @@ export function DashboardPage() {
             Begin from the right workspace
           </h2>
           <p className={styles.creationRailText}>
-            Keep dinner planning and chef-authored recipe drafting separate so each flow speaks the language of the work.
+            Keep dinner planning, private recipe browsing, and chef-authored drafting separate so each flow speaks the language of the work.
           </p>
         </div>
 

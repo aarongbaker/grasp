@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthoredRecipe, getAuthoredRecipe } from '../api/authoredRecipes';
 import { AuthoringSectionCard } from '../components/authoring/AuthoringSectionCard';
 import { Button } from '../components/shared/Button';
@@ -373,6 +373,8 @@ function dependencyLabelForStep(steps: StepDraft[], dependencyStepId: string): s
 
 export function AuthoredRecipeWorkspacePage() {
   const { userId } = useAuth();
+  const [searchParams] = useSearchParams();
+  const requestedRecipeId = searchParams.get('recipeId')?.trim() ?? '';
   const [draft, setDraft] = useState<AuthoredRecipeCreateRequest | null>(null);
   const [draftStatus, setDraftStatus] = useState<DraftStatus>('new');
   const [savedRecipeId, setSavedRecipeId] = useState<string | null>(null);
@@ -390,6 +392,14 @@ export function AuthoredRecipeWorkspacePage() {
     }
     setDraft((current) => current ?? createBlankDraft(userId));
   }, [userId]);
+
+  useEffect(() => {
+    if (!requestedRecipeId || requestedRecipeId === savedRecipeId || draftStatus === 'loading') {
+      return;
+    }
+
+    void loadDraftById(requestedRecipeId);
+  }, [draftStatus, loadDraftById, requestedRecipeId, savedRecipeId]);
 
   const currentDraft = draft;
   const currentStep = currentDraft?.steps[activeStepIndex] ?? null;
@@ -420,6 +430,26 @@ export function AuthoredRecipeWorkspacePage() {
     steps: Array.from(new Set(stepMessages)),
     advance: Array.from(new Set(advanceMessages)),
   };
+
+  const loadDraftById = useCallback(async (recipeId: string) => {
+    if (!recipeId) return;
+    setError('');
+    setSaveGuidanceSummary(null);
+    setServerGuidance([]);
+    setDraftStatus('loading');
+    setLoadRecipeId(recipeId);
+
+    try {
+      const recipe = await getAuthoredRecipe(recipeId);
+      setDraft(hydrateDraft(recipe));
+      setSavedRecipeId(recipe.recipe_id);
+      setDraftStatus('saved');
+      setActiveStepIndex(0);
+    } catch (err) {
+      setDraftStatus('ready');
+      setError(getErrorMessage(err, 'Could not load that recipe draft.'));
+    }
+  }, []);
 
   function updateDraft(updater: (current: AuthoredRecipeCreateRequest) => AuthoredRecipeCreateRequest) {
     setDraft((current) => (current ? updater(current) : current));
@@ -524,20 +554,7 @@ export function AuthoredRecipeWorkspacePage() {
   async function handleLoadDraft(e: FormEvent) {
     e.preventDefault();
     if (!loadRecipeId.trim()) return;
-    setError('');
-    setSaveGuidanceSummary(null);
-    setServerGuidance([]);
-    setDraftStatus('loading');
-    try {
-      const recipe = await getAuthoredRecipe(loadRecipeId.trim());
-      setDraft(hydrateDraft(recipe));
-      setSavedRecipeId(recipe.recipe_id);
-      setDraftStatus('saved');
-      setActiveStepIndex(0);
-    } catch (err) {
-      setDraftStatus('ready');
-      setError(getErrorMessage(err, 'Could not load that recipe draft.'));
-    }
+    await loadDraftById(loadRecipeId.trim());
   }
 
   async function handleSaveDraft(e: FormEvent) {

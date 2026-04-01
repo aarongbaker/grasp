@@ -5,7 +5,8 @@ import styles from './Sidebar.module.css';
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '\u25A3' },
   { to: '/sessions/new', label: 'Plan a Dinner', icon: '+' },
-  { to: '/recipes/new', label: 'Recipe Drafts', icon: '\u270E' },
+  { to: '/recipes', label: 'Recipe Library', icon: '\u2630' },
+  { to: '/recipes/new', label: 'New Draft', icon: '\u270E' },
   { to: '/profile', label: 'Kitchen', icon: '\u2318' },
 ];
 

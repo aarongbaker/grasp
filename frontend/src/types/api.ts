@@ -278,13 +278,36 @@ export interface AuthoredRecipeBase {
   chef_notes: string | null;
 }
 
+export interface RecipeCookbookBase {
+  name: string;
+  description: string;
+}
+
+export interface RecipeCookbookCreateRequest extends RecipeCookbookBase {}
+
+export interface RecipeCookbookDetail extends RecipeCookbookBase {
+  cookbook_id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthoredRecipeCookbookSummary {
+  cookbook_id: string;
+  name: string;
+  description: string;
+}
+
 export interface AuthoredRecipeCreateRequest extends AuthoredRecipeBase {
   user_id: string;
+  cookbook_id?: string | null;
 }
 
 export interface AuthoredRecipeDetail extends AuthoredRecipeBase {
   recipe_id: string;
   user_id: string;
+  cookbook_id: string | null;
+  cookbook: AuthoredRecipeCookbookSummary | null;
   created_at: string;
   updated_at: string;
 }
@@ -294,8 +317,14 @@ export interface AuthoredRecipeListItem {
   user_id: string;
   title: string;
   cuisine: string;
+  cookbook_id: string | null;
+  cookbook: AuthoredRecipeCookbookSummary | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AuthoredRecipeCookbookUpdateRequest {
+  cookbook_id: string | null;
 }
 
 export interface AuthoredRecipeValidationIssue {
