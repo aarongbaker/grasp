@@ -100,6 +100,13 @@
   color: var(--text-secondary);
 }
 
+.creationCardRelationship {
+  margin: var(--space-md) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
 .creationCardLink {
   align-self: flex-start;
   color: var(--accent-primary);

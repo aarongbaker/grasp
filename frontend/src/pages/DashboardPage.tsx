@@ -5,29 +5,9 @@ import { useAuth } from '../context/useAuth';
 import { Button } from '../components/shared/Button';
 import { Skeleton } from '../components/shared/Skeleton';
 import { SessionCard } from '../components/session/SessionCard';
+import { PATHWAYS } from '../components/layout/pathways';
 import type { Session } from '../types/api';
 import styles from './DashboardPage.module.css';
-
-const CREATION_PATHS = [
-  {
-    title: 'Plan a Dinner',
-    description: 'Turn a menu idea into a paced dinner service with timing, equipment flow, and a finished schedule.',
-    to: '/sessions/new',
-    cta: 'Open dinner planner',
-  },
-  {
-    title: 'Browse Recipe Library',
-    description: 'Reopen private authored dishes, gather them into cookbook folders, and keep your working repertoire close at hand.',
-    to: '/recipes',
-    cta: 'Open recipe library',
-  },
-  {
-    title: 'Start a Recipe Draft',
-    description: 'Capture a chef-authored dish in kitchen language before you shape the finer prep and service details.',
-    to: '/recipes/new',
-    cta: 'Open recipe workspace',
-  },
-];
 
 export function DashboardPage() {
   const { userId } = useAuth();
@@ -85,11 +65,12 @@ export function DashboardPage() {
         </div>
 
         <div className={styles.creationGrid}>
-          {CREATION_PATHS.map((path) => (
+          {PATHWAYS.map((path) => (
             <article key={path.to} className={styles.creationCard}>
               <div>
                 <h3 className={styles.creationCardTitle}>{path.title}</h3>
-                <p className={styles.creationCardDescription}>{path.description}</p>
+                <p className={styles.creationCardDescription}>{path.purpose}</p>
+                <p className={styles.creationCardRelationship}>{path.relationship}</p>
               </div>
               <Link to={path.to} className={styles.creationCardLink}>
                 {path.cta}

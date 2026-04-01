@@ -1,12 +1,15 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
+import { PATHWAYS } from './pathways';
 import styles from './Sidebar.module.css';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '\u25A3' },
-  { to: '/sessions/new', label: 'Plan a Dinner', icon: '+' },
-  { to: '/recipes', label: 'Recipe Library', icon: '\u2630' },
-  { to: '/recipes/new', label: 'New Draft', icon: '\u270E' },
+  ...PATHWAYS.map((pathway) => ({
+    to: pathway.to,
+    label: pathway.navLabel,
+    icon: pathway.icon,
+  })),
   { to: '/profile', label: 'Kitchen', icon: '\u2318' },
 ];
 

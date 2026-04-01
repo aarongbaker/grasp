@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from '../DashboardPage';
 import { Sidebar } from '../../components/layout/Sidebar';
+import { PATHWAYS } from '../../components/layout/pathways';
 import { AuthContext } from '../../context/auth-context';
 import * as sessionsApi from '../../api/sessions';
 import type { Session, UserProfile } from '../../types/api';
@@ -80,16 +81,15 @@ describe('DashboardPage discoverability', () => {
 
     expect(screen.getByRole('heading', { name: 'Your Sessions' })).toBeInTheDocument();
 
+    for (const pathway of PATHWAYS) {
+      expect(screen.getByRole('heading', { name: pathway.title })).toBeInTheDocument();
+      expect(screen.getByText(pathway.purpose)).toBeInTheDocument();
+      expect(screen.getByText(pathway.relationship)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: pathway.cta })).toHaveAttribute('href', pathway.to);
+    }
+
     const planLinks = screen.getAllByRole('link', { name: /plan a dinner|open dinner planner/i });
     expect(planLinks.some((link) => link.getAttribute('href') === '/sessions/new')).toBe(true);
-
-    const libraryLink = screen.getByRole('link', { name: /open recipe library/i });
-    expect(libraryLink).toHaveAttribute('href', '/recipes');
-    expect(screen.getByRole('heading', { name: 'Browse Recipe Library' })).toBeInTheDocument();
-
-    const recipeWorkspaceLink = screen.getByRole('link', { name: /open recipe workspace/i });
-    expect(recipeWorkspaceLink).toHaveAttribute('href', '/recipes/new');
-    expect(screen.getByRole('heading', { name: 'Start a Recipe Draft' })).toBeInTheDocument();
 
     await waitFor(() => expect(sessionsApi.listSessions).toHaveBeenCalledWith('user-1'));
   });
@@ -98,9 +98,9 @@ describe('DashboardPage discoverability', () => {
     renderWithAuth(<Sidebar />, ['/recipes']);
 
     expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: /plan a dinner/i })).toHaveAttribute('href', '/sessions/new');
-    expect(screen.getByRole('link', { name: /recipe library/i })).toHaveAttribute('href', '/recipes');
-    expect(screen.getByRole('link', { name: /new draft/i })).toHaveAttribute('href', '/recipes/new');
+    for (const pathway of PATHWAYS) {
+      expect(screen.getByRole('link', { name: new RegExp(pathway.navLabel, 'i') })).toHaveAttribute('href', pathway.to);
+    }
     expect(screen.getByRole('link', { name: /recipe library/i }).className).toMatch(/navLinkActive/);
   });
 });
