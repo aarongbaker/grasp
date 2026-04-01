@@ -248,6 +248,7 @@ export interface BookStatus {
   phase?: string;
   error?: string;
   book_id?: string;
+  pages_done?: number;
   pages_total?: number;
   chunks_total?: number;
   embedded_chunks?: number;

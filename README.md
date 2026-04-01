@@ -1,14 +1,110 @@
 # GRASP
 
-**Generative Retrieval-Augmented Scheduling & Planning** — AI-powered multi-course meal planning that turns your cookbook collection into personalized, time-coordinated cooking schedules.
+**Generative Retrieval-Augmented Scheduling & Planning** — a hosted web app for turning your cookbook collection into personalized, time-coordinated cooking schedules.
 
-GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbook RAG, and a LangGraph state machine to orchestrate the full pipeline: generate recipes, enrich them with your cookbook knowledge, build dependency graphs, merge into a parallel schedule, and render a step-by-step timeline.
+GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for cookbook retrieval, and a LangGraph-driven scheduling pipeline to:
+- ingest cookbook PDFs
+- extract and browse recipe-like content
+- generate or assemble meal plans
+- build dependency-aware cooking timelines
+- render a step-by-step schedule for service
+
+## Use GRASP
+
+GRASP is now primarily a **hosted website**, not a local-only tool.
+
+In the hosted app, a user can:
+1. Sign in
+2. Upload cookbook PDFs
+3. Wait for ingestion to finish in the background
+4. Browse detected cookbook recipes
+5. Create a planning session
+6. Run the scheduling pipeline
+7. Review the generated schedule and results
+
+### Hosted architecture
+
+Production GRASP runs as a three-surface system:
+
+1. **Railway API service** — FastAPI at `/api/v1`
+2. **Railway worker service** — Celery worker for ingestion and planning jobs
+3. **Cloudflare Pages frontend** — the public web UI
+
+Background work such as cookbook ingestion and meal-planning execution happens asynchronously in the worker. The frontend polls the API for status and now surfaces:
+- ingestion phase
+- OCR page progress
+- stale-progress warnings
+- upload cancellation for new jobs
+
+## Production deployment contract
+
+Required runtime/build surfaces:
+
+- **Railway API start command**
+  ```bash
+  uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+  ```
+
+- **Railway worker start command**
+  ```bash
+  celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
+  ```
+
+  Notes:
+  - The worker must remain on `--pool=solo --concurrency=1` for current memory assumptions.
+  - The checked-in Celery app sets `broker_connection_retry_on_startup=True` explicitly.
+  - Failed jobs still require inspection and explicit re-run; this does **not** enable task auto-retries.
+
+- **Cloudflare Pages build env**
+  ```bash
+  VITE_API_URL=https://<railway-api-host>
+  ```
+
+  Notes:
+  - Set the API base URL only
+  - No trailing slash
+  - No `/api/v1` suffix
+  - The frontend appends `/api/v1` itself
+
+- **Railway API CORS env**
+  ```bash
+  CORS_ALLOWED_ORIGINS=["https://<your-pages-domain>"]
+  ```
+
+  This must be a JSON array string, not a bare URL.
+
+### Production guardrails
+
+When `APP_ENV=production`, the checked-in code enforces:
+- `JWT_SECRET_KEY` may not use the development placeholder
+- `CORS_ALLOWED_ORIGINS` may not remain on localhost defaults
+- `LANGGRAPH_CHECKPOINT_URL` must point at reachable Postgres with a psycopg-compatible URL scheme
+- API and worker must be deployed together against the same Postgres + Redis
+
+### Production migrations
+
+Migrations are **not** run automatically on app startup.
+Run Alembic before promoting the new API/worker revision:
+
+```bash
+alembic upgrade head
+```
+
+Keep deploy-only environment variables in Railway / Cloudflare, not in local `.env` files.
+
+Deployment references:
+- quick contract: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
+- full walkthrough: `docs/RAILWAY_CLOUDFLARE_DEPLOY_GUIDE.md`
+
+## Developer setup
+
+The rest of this README is for contributors working on GRASP locally.
 
 ## Prerequisites
 
 - **Python 3.12**
 - **Node.js 20+**
-- **Docker** (for Postgres and Redis)
+- **Docker** (for Postgres and Redis in local development)
 
 ## Local environment contract
 
@@ -21,22 +117,21 @@ GRASP uses Claude for recipe generation, OpenAI embeddings + Pinecone for cookbo
 
 Development startup should not require shell overrides for `APP_ENV`, JWT, or CORS. Production-only values belong in deploy environments, not in your local `.env`.
 
-If your existing `.env` still contains `APP_ENV=production` from prior deploy testing, the repo-root API command will now fail fast with the production CORS/JWT guards. Reset local startup to the documented development contract by re-copying `.env.example` or changing `.env` back to `APP_ENV=development` before running host-run startup commands.
+If your existing `.env` still contains `APP_ENV=production` from prior deploy testing, the repo-root API command will fail fast with production CORS/JWT guards. Reset local startup to the documented development contract by re-copying `.env.example` or setting `.env` back to `APP_ENV=development`.
 
 The meal-planning and cookbook ingestion flows still require real provider keys:
-
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `PINECONE_API_KEY`
 
 The API can boot without those keys, but LLM / RAG workflows will fail until they are set.
 
-## Quick Start
+## Local development quick start
 
 GRASP supports two local workflows:
 
 - **Host-run app**: run FastAPI, Celery, and the Vite frontend on your machine; use Docker only for Postgres/Redis
-- **Docker-run backend**: run API, worker, Postgres, and Redis in Docker Compose; run the Vite frontend separately if you want the current web UI
+- **Docker-run backend**: run API, worker, Postgres, and Redis in Docker Compose; run the Vite frontend separately
 
 ### Option A — Host-run app from the repo root
 
@@ -60,7 +155,7 @@ docker compose up -d postgres redis
 # 6. Start the API
 .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 7. In another shell, start the worker if you need background pipeline execution
+# 7. In another shell, start the worker
 .venv/bin/celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
 
 # 8. In another shell, start the frontend
@@ -85,7 +180,7 @@ cp .env.example .env
 # 3. Build and run the backend stack
 docker compose up --build
 
-# 4. In another shell, start the frontend if you want the current web UI
+# 4. In another shell, start the frontend
 npm --prefix frontend install
 npm --prefix frontend run dev
 ```
@@ -96,9 +191,9 @@ This starts:
 - `postgres` → local dev database on `localhost:5432`
 - `redis` → local Redis on `localhost:6379`
 
-## API Keys
+## API keys
 
-GRASP requires three API keys for the full pipeline. Add them to your `.env` file when you want LLM / RAG-backed features to work:
+GRASP requires three API keys for the full LLM / RAG pipeline:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -109,19 +204,19 @@ PINECONE_API_KEY=pcsk_...
 | Key | What it does | Where to get it |
 |-----|-------------|-----------------|
 | `ANTHROPIC_API_KEY` | Powers Claude for recipe generation, step enrichment, and schedule summaries | [console.anthropic.com](https://console.anthropic.com/) |
-| `OPENAI_API_KEY` | Generates text embeddings for cookbook content (used by the RAG pipeline) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| `PINECONE_API_KEY` | Vector database that stores and retrieves cookbook embeddings | [app.pinecone.io](https://app.pinecone.io/) |
+| `OPENAI_API_KEY` | Generates text embeddings for cookbook content | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| `PINECONE_API_KEY` | Vector database for cookbook embeddings | [app.pinecone.io](https://app.pinecone.io/) |
 
-You'll also want to configure your Pinecone index:
+You’ll also want to configure your Pinecone index:
 
 ```env
 PINECONE_INDEX_NAME=grasp-cookbooks
 PINECONE_ENVIRONMENT=us-east-1-aws
 ```
 
-The remaining `.env` values (database URLs, Redis, Celery) can be left at their defaults for local development.
+The remaining `.env` values can stay at their development defaults for local work.
 
-## Infrastructure
+## Local infrastructure
 
 ### Local host-run infrastructure
 
@@ -145,60 +240,21 @@ This launches:
 - **Postgres** on port 5432 — stores users, sessions, and ingestion records
 - **Redis** on port 6379 — Celery broker/result backend and rate-limit storage
 
-Database migrations run automatically on app startup via Alembic. You can also run them manually in a host-run environment:
+For local/manual database upgrades:
 
 ```bash
 .venv/bin/alembic upgrade head
 ```
 
-### Deployment notes
+## Cookbook ingestion
 
-GRASP's production deployment is a **three-surface contract**:
+In production, cookbook ingestion happens through the hosted web UI.
 
-1. **Railway API service** — serves FastAPI at `/api/v1`
-2. **Railway worker service** — runs Celery background jobs against the same Postgres + Redis
-3. **Cloudflare Pages frontend** — serves the built Vite app and talks to the Railway API over HTTPS
+For local development, you can still exercise ingestion through the app UI or through the bulk-ingestion helper.
 
-Required runtime/build surfaces:
-
-- **Railway API start command**: `uvicorn app.main:app --host 0.0.0.0 --port ${PORT}`
-- **Railway worker start command**: `celery -A app.workers.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
-  - The checked-in Celery app now sets `broker_connection_retry_on_startup=True` explicitly so Celery 5.4 startup logs do not emit the pending-deprecation warning for implicit broker retry behavior.
-  - This only clarifies broker-connect startup semantics. It does **not** enable task auto-retries; failed jobs still require operator inspection and an explicit re-run.
-- **Cloudflare Pages build env**: `VITE_API_URL=https://<railway-api-host>`
-  - Set the API base URL only — no trailing slash and no `/api/v1`
-  - The frontend appends `/api/v1` itself
-- **Railway API CORS env**: `CORS_ALLOWED_ORIGINS=["https://<your-pages-domain>"]`
-  - This must be a JSON array string, not a bare URL
-
-Production guardrails enforced by the checked-in code:
-
-- `APP_ENV=production` enables startup validation for JWT + CORS
-- `JWT_SECRET_KEY` may not use the default placeholder in production
-- `CORS_ALLOWED_ORIGINS` may not remain at the localhost dev default in production
-- `LANGGRAPH_CHECKPOINT_URL` must point at reachable Postgres with a psycopg-compatible URL scheme
-- The worker must stay on `--pool=solo --concurrency=1` for current Railway memory assumptions
-
-Migrations are **not** run by app startup anymore. Run Alembic in a deploy/pre-deploy step before promoting the API service:
+### Bulk ingestion helper (development/admin use)
 
 ```bash
-alembic upgrade head
-```
-
-Keep deploy-only environment variables in Railway / Cloudflare, not in your local `.env`.
-
-Deployment references:
-- quick contract: `docs/RAILWAY_DEPLOY_CHECKLIST.md`
-- full walkthrough: `docs/RAILWAY_CLOUDFLARE_DEPLOY_GUIDE.md`
-
-## Ingest Your Cookbooks
-
-Before generating meals, ingest your cookbook PDFs so the RAG pipeline can draw from your personal recipe collection. The ingestion pipeline OCRs each PDF, classifies the document type, chunks the content, and embeds it into Pinecone.
-
-### Option A: Command Line (bulk ingestion)
-
-```bash
-# Ingest all PDFs in a folder
 .venv/bin/python scripts/ingest_folder.py ~/path/to/your/cookbooks/
 ```
 
@@ -207,9 +263,11 @@ This will:
 2. Process each PDF: OCR, classify, chunk, embed
 3. Print a summary with page/chunk counts and your user ID
 
-## Generate Meal Schedules
+## Generating meal schedules
 
-Run the API, worker, and frontend as described above, then open the Vite app in your browser:
+In production, users create and run sessions through the hosted frontend.
+
+In local development, run the API, worker, and frontend as described above, then open:
 
 ```text
 http://localhost:5173
@@ -221,7 +279,7 @@ From there you can:
 3. Run the planning pipeline
 4. Review schedule and results views
 
-## Running Tests
+## Running tests
 
 ```bash
 # Unit tests (no API keys needed)
@@ -235,7 +293,7 @@ npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
 
-## Project Structure
+## Project structure
 
 ```
 grasp/

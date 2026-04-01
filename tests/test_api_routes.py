@@ -593,6 +593,37 @@ async def test_cancel_ingestion_409_terminal_job(app_with_overrides, mock_db, te
 
 
 @pytest.mark.asyncio
+async def test_list_cookbooks_hides_incomplete_books(app_with_overrides, mock_db, test_user):
+    complete_book = BookRecord(
+        book_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        title="Complete Book",
+        author="Chef A",
+        total_pages=200,
+        total_chunks=18,
+    )
+    incomplete_book = BookRecord(
+        book_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        title="Still Processing",
+        author="Chef B",
+        total_pages=0,
+        total_chunks=0,
+    )
+    mock_result = MagicMock()
+    mock_result.all.return_value = [complete_book]
+    mock_db.exec_result = mock_result
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/ingest/cookbooks")
+
+    assert resp.status_code == 200
+    assert [book["title"] for book in resp.json()] == ["Complete Book"]
+    assert all(book["total_chunks"] > 0 for book in resp.json())
+
+
+@pytest.mark.asyncio
 async def test_list_detected_recipes_returns_recipe_chunks_with_book_metadata(app_with_overrides, mock_db, test_user):
     book_id = uuid.uuid4()
     recipe_chunk_id = uuid.uuid4()

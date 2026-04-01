@@ -411,9 +411,12 @@ async def upload_pdf(
 
 @router.get("/cookbooks")
 async def list_cookbooks(db: DBSession, current_user: CurrentUser):
-    """Returns all ingested cookbooks for the current user, newest first."""
+    """Returns completed/usable cookbooks for the current user, newest first."""
     statement = (
-        select(BookRecord).where(BookRecord.user_id == current_user.user_id).order_by(BookRecord.created_at.desc())
+        select(BookRecord)
+        .where(BookRecord.user_id == current_user.user_id)
+        .where(BookRecord.total_chunks > 0)
+        .order_by(BookRecord.created_at.desc())
     )
     results = await db.exec(statement)
     books = results.all()

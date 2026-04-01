@@ -193,6 +193,8 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
             await db.commit()
 
         async def _ocr_progress(page_done: int, pages_total: int):
+            if page_done == 1 or page_done == pages_total or page_done % 25 == 0:
+                print(f"[ingest:{job_id}] OCR progress {page_done}/{pages_total} pages for {filename}")
             await _commit_job_phase(
                 "ocr",
                 book_id=str(book.book_id) if "book" in locals() else None,

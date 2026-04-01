@@ -157,12 +157,16 @@ export function IngestPage() {
               )}
             </div>
           </div>
-          <div className={styles.bookList}>
+              <div className={styles.bookList}>
             {job.book_statuses.map((b, i) => (
               <div key={i} className={styles.bookItem}>
                 <span>{b.title}</span>
                 <span>{b.phase ? `${b.status} · ${b.phase}` : b.status}</span>
-                {typeof b.pages_total === 'number' && <span>{b.pages_total} pages</span>}
+                {typeof b.pages_done === 'number' && typeof b.pages_total === 'number' ? (
+                  <span>{b.pages_done} / {b.pages_total} pages</span>
+                ) : typeof b.pages_total === 'number' ? (
+                  <span>{b.pages_total} pages</span>
+                ) : null}
                 {typeof b.chunks_total === 'number' && <span>{b.chunks_total} chunks</span>}
                 {typeof b.embedded_chunks === 'number' && <span>{b.embedded_chunks} embedded</span>}
                 {b.error && <span className={styles.bookError}>{b.error}</span>}
