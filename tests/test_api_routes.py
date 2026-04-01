@@ -5,7 +5,8 @@ HTTP-level tests for FastAPI routes using httpx AsyncClient.
 Tests cover:
   - Auth: malformed JWT → 401, valid JWT unknown user → 404
   - Sessions: create, run (409 guard, 403 ownership), get status (Fix #7)
-  - Authored recipes: create, list, read, cross-user denial, and route-family separation
+  - Authored recipes: create, list, read, cookbook assignment, cross-user denial,
+    cookbook ownership, and route-family separation
   - Ingest: PDF-only validation (400), ownership on status poll (Fix #7)
 
 Uses dependency overrides with mock DB session to avoid needing a real
@@ -20,7 +21,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.models.authored_recipe import AuthoredRecipeRecord
+from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
@@ -36,6 +37,7 @@ def _create_test_app() -> FastAPI:
     from app.api.routes.authored_recipes import router as authored_recipes_router
     from app.api.routes.health import router as health_router
     from app.api.routes.ingest import router as ingest_router
+    from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
     from app.api.routes.sessions import router as sessions_router
     from app.api.routes.users import router as users_router
 
@@ -45,6 +47,7 @@ def _create_test_app() -> FastAPI:
     app.include_router(sessions_router, prefix="/api/v1")
     app.include_router(ingest_router, prefix="/api/v1")
     app.include_router(authored_recipes_router, prefix="/api/v1")
+    app.include_router(recipe_cookbooks_router, prefix="/api/v1")
     return app
 
 
@@ -72,7 +75,7 @@ class MockDBSession:
 
     def add(self, obj):
         model_class = obj.__class__
-        for pk_name in ("session_id", "job_id", "recipe_id", "user_id"):
+        for pk_name in ("session_id", "job_id", "recipe_id", "cookbook_id", "user_id"):
             if hasattr(obj, pk_name):
                 pk = getattr(obj, pk_name)
                 if pk is not None:
@@ -93,6 +96,8 @@ class MockDBSession:
             obj.job_id = uuid.uuid4()
         if hasattr(obj, "recipe_id") and obj.recipe_id is None:
             obj.recipe_id = uuid.uuid4()
+        if isinstance(obj, RecipeCookbookRecord) and obj.cookbook_id is None:
+            obj.cookbook_id = uuid.uuid4()
         if hasattr(obj, "updated_at"):
             obj.updated_at = getattr(obj, "updated_at") or datetime.now(timezone.utc).replace(tzinfo=None)
         self.add(obj)
@@ -123,6 +128,24 @@ class MockDBSession:
                 if model_class is AuthoredRecipeRecord and (user_id is None or obj.user_id == user_id)
             ]
             rows.sort(key=lambda record: record.updated_at, reverse=True)
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "FROM recipe_cookbooks" in statement_text:
+            user_id = None
+            for criterion in getattr(stmt, "_where_criteria", ()):
+                right = getattr(criterion, "right", None)
+                value = getattr(right, "value", None)
+                if isinstance(value, uuid.UUID):
+                    user_id = value
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is RecipeCookbookRecord and (user_id is None or obj.user_id == user_id)
+            ]
+            rows.sort(key=lambda record: (record.updated_at, record.name), reverse=True)
             mock_result = MagicMock()
             mock_result.first.return_value = rows[0] if rows else None
             mock_result.all.return_value = rows
@@ -335,6 +358,55 @@ async def test_get_session_status_requires_ownership(app_with_overrides, mock_db
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Cookbook routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_create_recipe_cookbook_201(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/recipe-cookbooks",
+            json={"name": "Desserts", "description": "Late-course authored recipes."},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["user_id"] == str(test_user.user_id)
+    assert data["name"] == "Desserts"
+    assert data["description"] == "Late-course authored recipes."
+
+
+async def test_list_recipe_cookbooks_returns_only_current_user_records(app_with_overrides, mock_db, test_user):
+    owned = RecipeCookbookRecord(user_id=test_user.user_id, name="Desserts", description="Sweets")
+    other = RecipeCookbookRecord(user_id=uuid.uuid4(), name="Hidden", description="Should not leak")
+    mock_db.seed(RecipeCookbookRecord, owned.cookbook_id, owned)
+    mock_db.seed(RecipeCookbookRecord, other.cookbook_id, other)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/recipe-cookbooks")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Desserts"
+    assert data[0]["user_id"] == str(test_user.user_id)
+
+
+async def test_get_recipe_cookbook_requires_ownership(app_with_overrides, mock_db):
+    record = RecipeCookbookRecord(user_id=uuid.uuid4(), name="Private", description="Owned by someone else.")
+    mock_db.seed(RecipeCookbookRecord, record.cookbook_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/recipe-cookbooks/{record.cookbook_id}")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Authored recipe routes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -350,13 +422,61 @@ async def test_create_authored_recipe_201(app_with_overrides, authored_recipe_pa
     assert data["title"] == authored_recipe_payload["title"]
     assert data["yield_info"]["quantity"] == authored_recipe_payload["yield_info"]["quantity"]
     assert data["steps"][1]["dependencies"][0]["step_id"] == "roasted_carrots_with_labneh_step_1"
+    assert data["cookbook_id"] is None
+    assert data["cookbook"] is None
     assert "status" not in data
     assert "concept_json" not in data
 
 
+async def test_create_authored_recipe_with_cookbook_metadata(app_with_overrides, mock_db, test_user, authored_recipe_payload):
+    cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Desserts", description="Sweet course ideas")
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+    payload = dict(authored_recipe_payload)
+    payload["cookbook_id"] = str(cookbook.cookbook_id)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["cookbook_id"] == str(cookbook.cookbook_id)
+    assert data["cookbook"]["name"] == "Desserts"
+
+
+async def test_create_authored_recipe_rejects_missing_cookbook(app_with_overrides, authored_recipe_payload):
+    payload = dict(authored_recipe_payload)
+    payload["cookbook_id"] = str(uuid.uuid4())
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=payload)
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Cookbook not found"
+
+
+async def test_create_authored_recipe_rejects_other_users_cookbook(app_with_overrides, mock_db, authored_recipe_payload):
+    cookbook = RecipeCookbookRecord(user_id=uuid.uuid4(), name="Hidden", description="Not yours")
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+    payload = dict(authored_recipe_payload)
+    payload["cookbook_id"] = str(cookbook.cookbook_id)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=payload)
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
 async def test_list_authored_recipes_returns_only_current_user_records(app_with_overrides, mock_db, test_user):
+    cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Vegetables", description="Produce-forward")
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+
     owned = AuthoredRecipeRecord(
         user_id=test_user.user_id,
+        cookbook_id=cookbook.cookbook_id,
         title="Warm Chicories",
         description="Bitter greens course.",
         cuisine="French",
@@ -441,6 +561,8 @@ async def test_list_authored_recipes_returns_only_current_user_records(app_with_
     assert len(data) == 1
     assert data[0]["title"] == "Warm Chicories"
     assert data[0]["user_id"] == str(test_user.user_id)
+    assert data[0]["cookbook_id"] == str(cookbook.cookbook_id)
+    assert data[0]["cookbook"]["name"] == "Vegetables"
 
 
 async def test_get_authored_recipe_requires_ownership(app_with_overrides, mock_db):
@@ -492,10 +614,14 @@ async def test_get_authored_recipe_requires_ownership(app_with_overrides, mock_d
 
 
 async def test_get_authored_recipe_returns_full_contract_shape(app_with_overrides, mock_db, test_user, authored_recipe_payload):
+    cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Desserts", description="Sweet endings")
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+
     payload = dict(authored_recipe_payload)
     payload.pop("user_id")
     record = AuthoredRecipeRecord(
         user_id=test_user.user_id,
+        cookbook_id=cookbook.cookbook_id,
         title=payload["title"],
         description=payload["description"],
         cuisine=payload["cuisine"],
@@ -513,7 +639,124 @@ async def test_get_authored_recipe_returns_full_contract_shape(app_with_override
     assert data["user_id"] == str(test_user.user_id)
     assert data["storage"]["method"] == "refrigerated"
     assert data["steps"][0]["resource"] == "oven"
+    assert data["cookbook_id"] == str(cookbook.cookbook_id)
+    assert data["cookbook"]["name"] == "Desserts"
     assert "status" not in data
+
+
+async def test_update_authored_recipe_cookbook_allows_assign_and_unassign(app_with_overrides, mock_db, test_user):
+    cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Mexican", description="Regional drafts")
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+    record = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Mole Negro",
+        description="Sauce draft.",
+        cuisine="Mexican",
+        authored_payload={
+            "title": "Mole Negro",
+            "description": "Sauce draft.",
+            "cuisine": "Mexican",
+            "yield_info": {"quantity": 4, "unit": "portions"},
+            "ingredients": [{"name": "chilies", "quantity": "12"}],
+            "steps": [
+                {
+                    "title": "Toast",
+                    "instruction": "Toast aromatics.",
+                    "duration_minutes": 10,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, record.recipe_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        assign_resp = await ac.patch(
+            f"/api/v1/authored-recipes/{record.recipe_id}/cookbook",
+            json={"cookbook_id": str(cookbook.cookbook_id)},
+        )
+        unassign_resp = await ac.patch(
+            f"/api/v1/authored-recipes/{record.recipe_id}/cookbook",
+            json={"cookbook_id": None},
+        )
+
+    assert assign_resp.status_code == 200
+    assign_data = assign_resp.json()
+    assert assign_data["cookbook_id"] == str(cookbook.cookbook_id)
+    assert assign_data["cookbook"]["name"] == "Mexican"
+
+    assert unassign_resp.status_code == 200
+    unassign_data = unassign_resp.json()
+    assert unassign_data["cookbook_id"] is None
+    assert unassign_data["cookbook"] is None
+
+
+async def test_update_authored_recipe_cookbook_rejects_missing_cookbook(app_with_overrides, mock_db, test_user):
+    record = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Mole Negro",
+        description="Sauce draft.",
+        cuisine="Mexican",
+        authored_payload={
+            "title": "Mole Negro",
+            "description": "Sauce draft.",
+            "cuisine": "Mexican",
+            "yield_info": {"quantity": 4, "unit": "portions"},
+            "ingredients": [{"name": "chilies", "quantity": "12"}],
+            "steps": [
+                {
+                    "title": "Toast",
+                    "instruction": "Toast aromatics.",
+                    "duration_minutes": 10,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, record.recipe_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.patch(
+            f"/api/v1/authored-recipes/{record.recipe_id}/cookbook",
+            json={"cookbook_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Cookbook not found"
 
 
 async def test_create_authored_recipe_rejects_cross_user_body(app_with_overrides, authored_recipe_payload):
@@ -580,5 +823,3 @@ async def test_get_ingestion_status_requires_ownership(app_with_overrides, mock_
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Access denied"
-
-

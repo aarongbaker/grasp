@@ -17,7 +17,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 from sqlalchemy import JSON
-from sqlmodel import SQLModel, Column, Field
+from sqlmodel import Column, Field, Relationship, SQLModel
 
 from app.models.enums import Resource
 from app.models.recipe import Ingredient, RawRecipe, RecipeStep
@@ -180,15 +180,86 @@ class AuthoredRecipeBase(BaseModel):
         return compiled_steps
 
 
+class RecipeCookbookBase(BaseModel):
+    name: str = PydanticField(min_length=1, max_length=120)
+    description: Optional[str] = PydanticField(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("name must not be blank")
+        return normalized
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class RecipeCookbookCreate(RecipeCookbookBase):
+    pass
+
+
+class RecipeCookbookRead(RecipeCookbookBase):
+    cookbook_id: uuid.UUID
+    user_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuthoredRecipeCookbookSummary(BaseModel):
+    cookbook_id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+
+
 class AuthoredRecipeCreate(AuthoredRecipeBase):
     user_id: uuid.UUID
+    cookbook_id: Optional[uuid.UUID] = None
+
+
+class AuthoredRecipeUpdateCookbook(BaseModel):
+    cookbook_id: Optional[uuid.UUID] = None
 
 
 class AuthoredRecipeRead(AuthoredRecipeBase):
     recipe_id: uuid.UUID
     user_id: uuid.UUID
+    cookbook_id: Optional[uuid.UUID] = None
+    cookbook: Optional[AuthoredRecipeCookbookSummary] = None
     created_at: datetime
     updated_at: datetime
+
+
+class AuthoredRecipeListItem(BaseModel):
+    recipe_id: uuid.UUID
+    user_id: uuid.UUID
+    title: str
+    cuisine: str
+    cookbook_id: Optional[uuid.UUID] = None
+    cookbook: Optional[AuthoredRecipeCookbookSummary] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RecipeCookbookRecord(SQLModel, table=True):
+    """Persisted user-owned cookbook container for authored recipes."""
+
+    __tablename__ = "recipe_cookbooks"
+
+    cookbook_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    name: str = Field(index=True)
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    recipes: list["AuthoredRecipeRecord"] = Relationship(back_populates="cookbook")
 
 
 class AuthoredRecipeRecord(SQLModel, table=True):
@@ -198,12 +269,15 @@ class AuthoredRecipeRecord(SQLModel, table=True):
 
     recipe_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    cookbook_id: Optional[uuid.UUID] = Field(default=None, foreign_key="recipe_cookbooks.cookbook_id", index=True)
     title: str = Field(index=True)
     description: str
     cuisine: str
     authored_payload: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    cookbook: Optional[RecipeCookbookRecord] = Relationship(back_populates="recipes")
 
 
 def build_authored_recipe_slug(title: str) -> str:
