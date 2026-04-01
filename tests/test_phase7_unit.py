@@ -8,6 +8,10 @@ no database, no LLM. They verify:
   - Fallback summary generation (no LLM)
   - Full node function with mocked LLM
   - Error handling: missing merged_dag, LLM failure (recoverable)
+
+This module also carries generator-node unit coverage for deterministic
+cookbook/authored seeding branches because they share the same Phase 7
+pipeline verification lane in this repo.
 """
 
 import uuid
@@ -15,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.graph.nodes.generator import build_cookbook_raw_recipes, recipe_generator_node
+from app.graph.nodes.generator import build_authored_raw_recipes, build_cookbook_raw_recipes, recipe_generator_node
 from app.graph.nodes.renderer import (
     ScheduleSummaryOutput,
     _build_summary_prompt,
@@ -25,14 +29,16 @@ from app.graph.nodes.renderer import (
     _fallback_summary,
     schedule_renderer_node,
 )
+from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
 from app.models.enums import ErrorType, MealType, Occasion, Resource
-from app.models.pipeline import DinnerConcept, SelectedCookbookRecipe
+from app.models.pipeline import DinnerConcept, SelectedAuthoredRecipe, SelectedCookbookRecipe
 from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
     ScheduledStep,
     TimelineEntry,
 )
+from tests.fixtures.recipes import AUTHORED_BRAISED_CHICKEN
 from tests.fixtures.schedules import (
     MERGED_DAG_FULL,
     MERGED_DAG_TWO_RECIPE,
@@ -79,6 +85,21 @@ Method:
     ],
 ).model_dump()
 
+_AUTHORED_RECIPE_ID = uuid.uuid4()
+_AUTHORED_CONCEPT = DinnerConcept(
+    free_text="Schedule my saved braised chicken for Saturday service.",
+    guest_count=4,
+    meal_type=MealType.DINNER,
+    occasion=Occasion.CASUAL,
+    dietary_restrictions=[],
+    concept_source="authored",
+    selected_authored_recipe=SelectedAuthoredRecipe(
+        recipe_id=_AUTHORED_RECIPE_ID,
+        title=AUTHORED_BRAISED_CHICKEN.title,
+    ),
+)
+AUTHORED_CONCEPT_DICT = _AUTHORED_CONCEPT.model_dump(mode="json")
+
 KITCHEN_CONFIG = {
     "max_burners": 4,
     "max_oven_racks": 2,
@@ -94,6 +115,20 @@ def _make_state(merged_dag=None, errors=None, concept=None):
         "merged_dag": merged_dag,
         "errors": errors or [],
     }
+
+
+def _authored_record(payload: dict | None = None) -> AuthoredRecipeRecord:
+    payload = payload or AUTHORED_BRAISED_CHICKEN.model_dump(mode="python")
+    base = AuthoredRecipeCreate.model_validate(AUTHORED_BRAISED_CHICKEN.model_dump(mode="python"))
+    return AuthoredRecipeRecord(
+        recipe_id=_AUTHORED_RECIPE_ID,
+        user_id=payload.get("user_id", base.user_id),
+        cookbook_id=payload.get("cookbook_id", base.cookbook_id),
+        title=payload.get("title", base.title),
+        description=payload.get("description", base.description),
+        cuisine=payload.get("cuisine", base.cuisine),
+        authored_payload=payload,
+    )
 
 
 class TestCookbookGeneratorSeeding:
@@ -179,6 +214,80 @@ class TestCookbookGeneratorSeeding:
 
         with pytest.raises(ValueError, match="did not contain at least 3 method steps"):
             build_cookbook_raw_recipes(concept)
+
+
+class TestAuthoredGeneratorSeeding:
+    @pytest.mark.asyncio
+    async def test_authored_recipe_generator_skips_llm_and_builds_raw_recipe(self):
+        state = {
+            "concept": AUTHORED_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch("app.graph.nodes.generator._load_authored_recipe_record", new=AsyncMock(return_value=_authored_record())),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert "errors" not in result
+        assert len(result["raw_recipes"]) == 1
+
+        raw_recipe = result["raw_recipes"][0]
+        assert raw_recipe["name"] == AUTHORED_BRAISED_CHICKEN.title
+        assert raw_recipe["servings"] == 4
+        assert raw_recipe["cuisine"] == AUTHORED_BRAISED_CHICKEN.cuisine
+        assert raw_recipe["estimated_total_minutes"] == 72
+        assert raw_recipe["ingredients"][0]["name"] == "chicken leg quarters"
+        assert raw_recipe["steps"][0].startswith("Brown the chicken. Sear skin-side down")
+        assert "Target temp: 155F" in raw_recipe["steps"][0]
+        assert "Yield: Forms the braising liquor and onion garnish." in raw_recipe["steps"][1]
+        assert "Until: The leg joint yields easily when nudged." in raw_recipe["steps"][2]
+
+    @pytest.mark.asyncio
+    async def test_authored_recipe_generator_returns_structured_validation_error_for_malformed_payload(self):
+        broken_payload = AUTHORED_BRAISED_CHICKEN.model_dump(mode="python")
+        broken_payload["ingredients"] = []
+        state = {
+            "concept": AUTHORED_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch(
+                "app.graph.nodes.generator._load_authored_recipe_record",
+                new=AsyncMock(return_value=_authored_record(broken_payload)),
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert result["raw_recipes"] == []
+        assert len(result["errors"]) == 1
+        error = result["errors"][0]
+        assert error["node_name"] == "recipe_generator"
+        assert error["error_type"] == ErrorType.VALIDATION_FAILURE.value
+        assert error["recoverable"] is False
+        assert str(_AUTHORED_RECIPE_ID) in error["message"]
+        assert "could not compile into a scheduling input" in error["message"]
+        assert "ingredients must contain at least one item" in error["message"]
+
+    @pytest.mark.asyncio
+    async def test_build_authored_raw_recipes_returns_single_compiled_recipe(self):
+        concept = DinnerConcept.model_validate(AUTHORED_CONCEPT_DICT)
+
+        with patch("app.graph.nodes.generator._load_authored_recipe_record", new=AsyncMock(return_value=_authored_record())):
+            recipes = await build_authored_raw_recipes(concept)
+
+        assert len(recipes) == 1
+        assert recipes[0].name == AUTHORED_BRAISED_CHICKEN.title
+        assert recipes[0].estimated_total_minutes == 72
 
 
 # ── Timeline Entry Construction ──────────────────────────────────────────────

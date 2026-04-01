@@ -9,6 +9,11 @@ Cookbook-mode sessions are deterministic: persisted selected cookbook chunks
 are converted into downstream-compatible RawRecipe objects and skip the LLM
 free-text generation path entirely.
 
+Authored-mode sessions are also deterministic: the persisted authored selection
+is resolved against the user's saved recipe library, compiled through the
+native authored-recipe model seam, and returned as one RawRecipe without
+calling the LLM.
+
 Error handling: generator failure is always fatal (recoverable=False).
 Nothing can be enriched or scheduled without recipes.
 
@@ -22,17 +27,20 @@ the real Claude API while still exercising all node logic.
 
 import logging
 import re
+import uuid
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.llm import extract_token_usage, is_timeout_error, llm_retry
 from app.core.settings import get_settings
+from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
 from app.models.enums import ErrorType, MealType, Occasion
 from app.models.errors import NodeError
-from app.models.errors import NodeError
-from app.models.pipeline import DinnerConcept, GRASPState, SelectedCookbookRecipe
+from app.models.pipeline import DinnerConcept, GRASPState, SelectedAuthoredRecipe, SelectedCookbookRecipe
 from app.models.recipe import Ingredient, RawRecipe
 
 logger = logging.getLogger(__name__)
@@ -132,11 +140,11 @@ def _build_system_prompt(
     max_oven_racks = kitchen_config.get("max_oven_racks", 2)
     has_second_oven = kitchen_config.get("has_second_oven", False)
 
-    return f"""You are GRASP, an expert chef assistant that designs cohesive multi-course meal plans.
+    return f'''You are GRASP, an expert chef assistant that designs cohesive multi-course meal plans.
 Your recipes are written for experienced home cooks who value precision, technique, and timing.
 
 ## DINNER CONCEPT
-\"{concept.free_text}\"
+"{concept.free_text}"
 
 ## MENU PARAMETERS
 - Meal type: {concept.meal_type.value}
@@ -165,7 +173,7 @@ Your recipes are written for experienced home cooks who value precision, techniq
 7. Include cuisine attribution for each recipe.
 8. Provide realistic estimated_total_minutes for each recipe (prep through plating).
 9. Use the available equipment to unlock advanced techniques where appropriate.
-10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook."""
+10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.'''
 
 
 # ── Cookbook-mode deterministic parsing ─────────────────────────────────────
@@ -283,6 +291,64 @@ def build_cookbook_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
     return [_build_cookbook_raw_recipe(selection, concept.guest_count) for selection in concept.selected_recipes]
 
 
+# ── Authored-mode deterministic compilation ─────────────────────────────────
+
+
+def _format_authored_selection(selection: SelectedAuthoredRecipe) -> str:
+    return f"{selection.title!r} ({selection.recipe_id})"
+
+
+async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe) -> AuthoredRecipeRecord:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, echo=False)
+    session_local = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    try:
+        async with session_local() as db:
+            record = await db.get(AuthoredRecipeRecord, selection.recipe_id)
+            if record is None:
+                raise ValueError(f"Selected authored recipe {_format_authored_selection(selection)} was not found")
+            return record
+    finally:
+        await engine.dispose()
+
+
+async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
+    if concept.selected_authored_recipe is None:
+        raise ValueError("selected_authored_recipe is required when concept_source is 'authored'")
+
+    selection = concept.selected_authored_recipe
+    record = await _load_authored_recipe_record(selection)
+    payload = dict(record.authored_payload or {})
+    payload.setdefault("user_id", record.user_id)
+    payload.setdefault("cookbook_id", record.cookbook_id)
+
+    try:
+        authored = AuthoredRecipeCreate.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Selected authored recipe {_format_authored_selection(selection)} could not compile into a scheduling input: {exc}"
+        ) from exc
+
+    raw_recipe = authored.compile_raw_recipe()
+    if raw_recipe.name != selection.title:
+        logger.warning(
+            "Authored selection title drift detected for recipe %s: session title=%r db title=%r compiled title=%r",
+            selection.recipe_id,
+            selection.title,
+            record.title,
+            raw_recipe.name,
+        )
+
+    return raw_recipe
+
+
+async def build_authored_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
+    if concept.concept_source != "authored":
+        return []
+    return [await _build_authored_raw_recipe(concept)]
+
+
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
 
 
@@ -322,6 +388,18 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in cookbook_recipes],
             }
 
+        if concept.concept_source == "authored":
+            authored_recipes = await build_authored_raw_recipes(concept)
+            selected = concept.selected_authored_recipe
+            logger.info(
+                "Seeded %d authored recipe from persisted selection %s",
+                len(authored_recipes),
+                selected.recipe_id if selected else "unknown",
+            )
+            return {
+                "raw_recipes": [recipe.model_dump(mode="json") for recipe in authored_recipes],
+            }
+
         # Derive recipe count from concept
         recipe_count = _derive_recipe_count(concept.meal_type, concept.occasion)
 
@@ -355,7 +433,7 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         }
 
     except Exception as exc:
-        # Preserve cookbook parse failures as explicit validation failures.
+        # Preserve deterministic parse failures as explicit validation failures.
         exc_type = type(exc).__name__
         if is_timeout_error(exc):
             error_type = ErrorType.LLM_TIMEOUT
