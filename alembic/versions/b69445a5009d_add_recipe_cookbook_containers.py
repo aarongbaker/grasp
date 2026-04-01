@@ -1,20 +1,20 @@
 """add recipe cookbook containers and authored recipe assignment
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: b69445a5009d
 Revises: f7a8b9c0d1e2
-Create Date: 2026-04-01 14:45:00.000000
+Create Date: 2026-04-01 19:28:26.120277
 
 """
-
 from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
-down_revision: Union[str, Sequence[str], None] = "f7a8b9c0d1e2"
+revision: str = 'b69445a5009d'
+down_revision: Union[str, Sequence[str], None] = 'f7a8b9c0d1e2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
