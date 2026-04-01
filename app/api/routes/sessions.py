@@ -21,9 +21,13 @@ from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.models.authored_recipe import AuthoredRecipeRecord
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
+    CreateSessionAuthoredRequest,
+    CreateSessionCookbookRequest,
     CreateSessionLegacyRequest,
+    CreateSessionRequest,
     DinnerConcept,
 )
 from app.models.session import Session
@@ -36,7 +40,26 @@ def _session_status(value: SessionStatus | str) -> SessionStatus:
     return value if isinstance(value, SessionStatus) else SessionStatus(value)
 
 
-CreateSessionRequest = CreateSessionLegacyRequest
+async def _resolve_authored_selection(
+    *,
+    body: CreateSessionAuthoredRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    authored_recipe = await db.get(AuthoredRecipeRecord, body.selected_authored_recipe.recipe_id)
+    if authored_recipe is None:
+        raise HTTPException(status_code=404, detail="Authored recipe not found")
+    if authored_recipe.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "concept_source": "authored",
+        "free_text": body.free_text,
+        "selected_authored_recipe": {
+            "recipe_id": authored_recipe.recipe_id,
+            "title": authored_recipe.title,
+        },
+    }
 
 
 @router.post("", status_code=201)
@@ -45,14 +68,32 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     # Merge chef's dietary_defaults into every session automatically
     merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
 
-    concept = DinnerConcept(
-        free_text=body.free_text,
-        guest_count=body.guest_count,
-        meal_type=body.meal_type,
-        occasion=body.occasion,
-        dietary_restrictions=merged_restrictions,
-        serving_time=body.serving_time,
-    )
+    concept_fields: dict = {
+        "guest_count": body.guest_count,
+        "meal_type": body.meal_type,
+        "occasion": body.occasion,
+        "dietary_restrictions": merged_restrictions,
+        "serving_time": body.serving_time,
+    }
+
+    if isinstance(body, CreateSessionAuthoredRequest):
+        concept_fields.update(await _resolve_authored_selection(body=body, db=db, current_user=current_user))
+    elif isinstance(body, CreateSessionCookbookRequest):
+        concept_fields.update(
+            {
+                "concept_source": body.concept_source,
+                "free_text": body.free_text,
+            }
+        )
+    else:
+        concept_fields.update(
+            {
+                "concept_source": "free_text",
+                "free_text": body.free_text,
+            }
+        )
+
+    concept = DinnerConcept.model_validate(concept_fields)
 
     session = Session(
         user_id=current_user.user_id,

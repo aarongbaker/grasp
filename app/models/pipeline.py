@@ -23,7 +23,7 @@ import re
 import uuid
 from typing import Annotated, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from app.models.enums import MealType, Occasion
 
@@ -39,6 +39,13 @@ class SelectedCookbookRecipe(BaseModel):
     page_number: int = Field(ge=0, default=0)
 
 
+class SelectedAuthoredRecipe(BaseModel):
+    """Minimal authored recipe selection persisted into the session concept."""
+
+    recipe_id: uuid.UUID
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
 class DinnerConcept(BaseModel):
     """
     Hybrid input: free_text preserves nuance; typed fields ensure
@@ -52,8 +59,9 @@ class DinnerConcept(BaseModel):
     occasion: Occasion
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
-    concept_source: Literal["free_text", "cookbook"] = "free_text"
+    concept_source: Literal["free_text", "cookbook", "authored"] = "free_text"
     selected_recipes: list[SelectedCookbookRecipe] = []
+    selected_authored_recipe: Optional[SelectedAuthoredRecipe] = None
 
     @field_validator("serving_time")
     @classmethod
@@ -65,23 +73,48 @@ class DinnerConcept(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_cookbook_source_contract(self) -> "DinnerConcept":
-        if self.concept_source == "cookbook" and not self.selected_recipes:
-            raise ValueError("selected_recipes is required when concept_source is 'cookbook'")
-        if self.concept_source == "free_text" and self.selected_recipes:
-            raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+    def validate_source_contract(self) -> "DinnerConcept":
+        if self.concept_source == "cookbook":
+            if not self.selected_recipes:
+                raise ValueError("selected_recipes is required when concept_source is 'cookbook'")
+            if self.selected_authored_recipe is not None:
+                raise ValueError(
+                    "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
+        elif self.concept_source == "authored":
+            if self.selected_recipes:
+                raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+            if self.selected_authored_recipe is None:
+                raise ValueError(
+                    "selected_authored_recipe is required when concept_source is 'authored'"
+                )
+        else:
+            if self.selected_recipes:
+                raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+            if self.selected_authored_recipe is not None:
+                raise ValueError(
+                    "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
         return self
 
 
 class CreateSessionLegacyRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
+    concept_source: Literal["free_text"] = "free_text"
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None
+
+
+class CreateSessionAuthoredSelection(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    recipe_id: uuid.UUID
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class CreateSessionCookbookSelection(BaseModel):
@@ -101,8 +134,21 @@ class CreateSessionCookbookRequest(BaseModel):
     serving_time: Optional[str] = None
 
 
+class CreateSessionAuthoredRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    concept_source: Literal["authored"] = "authored"
+    free_text: str = Field(max_length=2000)
+    selected_authored_recipe: CreateSessionAuthoredSelection
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
 CreateSessionRequest = Annotated[
-    CreateSessionLegacyRequest | CreateSessionCookbookRequest,
+    CreateSessionLegacyRequest | CreateSessionCookbookRequest | CreateSessionAuthoredRequest,
     Field(discriminator=None),
 ]
 

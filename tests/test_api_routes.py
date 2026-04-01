@@ -317,8 +317,234 @@ async def test_create_session_201(app_with_overrides, test_user):
     assert data["status"] == "pending"
     # dietary_defaults merged: gluten-free from user + nut-free from request
     concept = data["concept_json"]
+    assert concept["concept_source"] == "free_text"
+    assert concept["selected_authored_recipe"] is None
     assert "gluten-free" in concept["dietary_restrictions"]
     assert "nut-free" in concept["dietary_restrictions"]
+
+
+async def test_create_session_with_authored_recipe_201(app_with_overrides, mock_db, test_user):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Braised Fennel with Saffron",
+        description="Private library draft.",
+        cuisine="Mediterranean",
+        authored_payload={
+            "title": "Braised Fennel with Saffron",
+            "description": "Private library draft.",
+            "cuisine": "Mediterranean",
+            "yield_info": {"quantity": 4, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "4 bulbs"}],
+            "steps": [
+                {
+                    "title": "Braise",
+                    "instruction": "Cook gently until tender.",
+                    "duration_minutes": 30,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "authored",
+                "free_text": "Service tonight from my library.",
+                "selected_authored_recipe": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": "Client supplied title should be ignored",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": ["nut-free"],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["status"] == "pending"
+    concept = data["concept_json"]
+    assert concept["concept_source"] == "authored"
+    assert concept["selected_recipes"] == []
+    assert concept["selected_authored_recipe"] == {
+        "recipe_id": str(authored_recipe.recipe_id),
+        "title": authored_recipe.title,
+    }
+    assert "gluten-free" in concept["dietary_restrictions"]
+    assert "nut-free" in concept["dietary_restrictions"]
+
+
+async def test_create_session_with_authored_recipe_requires_ownership(app_with_overrides, mock_db):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=uuid.uuid4(),
+        title="Private Braise",
+        description="Owned by someone else.",
+        cuisine="French",
+        authored_payload={
+            "title": "Private Braise",
+            "description": "Owned by someone else.",
+            "cuisine": "French",
+            "yield_info": {"quantity": 2, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "2 bulbs"}],
+            "steps": [
+                {
+                    "title": "Cook",
+                    "instruction": "Keep private.",
+                    "duration_minutes": 20,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "authored",
+                "free_text": "Schedule my private-library recipe.",
+                "selected_authored_recipe": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": authored_recipe.title,
+                },
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+async def test_create_session_with_authored_recipe_rejects_missing_recipe(app_with_overrides):
+    missing_recipe_id = uuid.uuid4()
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "authored",
+                "free_text": "Schedule my private-library recipe.",
+                "selected_authored_recipe": {
+                    "recipe_id": str(missing_recipe_id),
+                    "title": "Missing Recipe",
+                },
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Authored recipe not found"
+
+
+async def test_create_session_rejects_mixed_authored_shape(app_with_overrides, mock_db, test_user):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Braised Fennel with Saffron",
+        description="Private library draft.",
+        cuisine="Mediterranean",
+        authored_payload={
+            "title": "Braised Fennel with Saffron",
+            "description": "Private library draft.",
+            "cuisine": "Mediterranean",
+            "yield_info": {"quantity": 4, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "4 bulbs"}],
+            "steps": [
+                {
+                    "title": "Braise",
+                    "instruction": "Cook gently until tender.",
+                    "duration_minutes": 30,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "authored",
+                "free_text": "Schedule my private-library recipe.",
+                "selected_authored_recipe": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": authored_recipe.title,
+                },
+                "selected_recipes": [{"chunk_id": str(uuid.uuid4())}],
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 422
+    data = resp.json()
+    assert isinstance(data["detail"], list)
+    assert any("selected_recipes" in issue["loc"] for issue in data["detail"])
 
 
 async def test_run_pipeline_requires_ownership(app_with_overrides, mock_db):
