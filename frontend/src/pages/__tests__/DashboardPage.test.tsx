@@ -17,6 +17,7 @@ const authValue = {
     user_id: 'user-1',
     email: 'chef@example.com',
     name: 'Chef Mira',
+    kitchen_config_id: null,
     kitchen_config: null,
     dietary_defaults: [],
     equipment: [],
