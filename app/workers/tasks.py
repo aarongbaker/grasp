@@ -209,6 +209,7 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
                 title=filename,
             )
             db.add(book)
+            await db.flush()
             await db.commit()
             await db.refresh(book)
 
@@ -271,8 +272,13 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
             ]
 
         except Exception as e:
+            await db.rollback()
+            job = await db.get(IngestionJob, uuid_lib.UUID(job_id))
+            if not job:
+                return
             job.status = IngestionStatus.FAILED
             job.failed = 1
+            job.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             job.book_statuses = [{"title": filename, "status": "failed", "phase": "failed", "error": str(e)}]
 
         db.add(job)
