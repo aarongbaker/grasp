@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { createRecipeCookbook, listRecipeCookbooks } from '../api/recipeCookbooks';
+import { Link, useNavigate } from 'react-router-dom';
 import { listAuthoredRecipes, updateAuthoredRecipeCookbook } from '../api/authoredRecipes';
+import { createRecipeCookbook, listRecipeCookbooks } from '../api/recipeCookbooks';
+import { createSession, runPipeline } from '../api/sessions';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
-import type { AuthoredRecipeListItem, RecipeCookbookDetail } from '../types/api';
+import {
+  MEAL_TYPE_LABELS,
+  OCCASION_LABELS,
+  type AuthoredRecipeListItem,
+  type CreateAuthoredSessionRequest,
+  type MealType,
+  type Occasion,
+  type RecipeCookbookDetail,
+} from '../types/api';
+import { getErrorMessage } from '../utils/errors';
 import styles from './RecipeLibraryPage.module.css';
 
 type LibraryStatus = 'loading' | 'ready' | 'error';
 type MoveState = Record<string, string>;
+type ScheduleState = Record<string, 'starting'>;
+
+const defaultMealType: MealType = 'dinner';
+const defaultOccasion: Occasion = 'dinner_party';
 
 function formatRecipeTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
@@ -28,15 +42,18 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function RecipeLibraryPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<LibraryStatus>('loading');
   const [recipes, setRecipes] = useState<AuthoredRecipeListItem[]>([]);
   const [cookbooks, setCookbooks] = useState<RecipeCookbookDetail[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [newCookbookName, setNewCookbookName] = useState('');
   const [newCookbookDescription, setNewCookbookDescription] = useState('');
   const [creatingCookbook, setCreatingCookbook] = useState(false);
   const [moveState, setMoveState] = useState<MoveState>({});
+  const [scheduleState, setScheduleState] = useState<ScheduleState>({});
 
   const fetchLibrary = useCallback(async () => {
     setStatus('loading');
@@ -136,6 +153,60 @@ export function RecipeLibraryPage() {
     }
   }, []);
 
+  const handleScheduleRecipe = useCallback(
+    async (recipe: AuthoredRecipeListItem) => {
+      const recipeId = recipe.recipe_id?.trim();
+      const title = recipe.title?.trim();
+
+      if (!recipeId || !title) {
+        setScheduleError('This saved draft is missing its scheduling details. Reopen it in the authoring workspace before trying again.');
+        return;
+      }
+
+      if (scheduleState[recipeId]) {
+        return;
+      }
+
+      setScheduleState((current) => ({ ...current, [recipeId]: 'starting' }));
+      setScheduleError(null);
+
+      const request: CreateAuthoredSessionRequest = {
+        concept_source: 'authored',
+        free_text: `Schedule authored recipe: ${title}`,
+        selected_authored_recipe: {
+          recipe_id: recipeId,
+          title,
+        },
+        guest_count: 4,
+        meal_type: defaultMealType,
+        occasion: defaultOccasion,
+      };
+
+      try {
+        const session = await createSession(request);
+        if (!session?.session_id) {
+          throw new Error('Could not start scheduling from this recipe.');
+        }
+
+        const runResult = await runPipeline(session.session_id);
+        if (!runResult?.session_id) {
+          throw new Error('Could not start scheduling from this recipe.');
+        }
+
+        navigate(`/sessions/${session.session_id}`);
+      } catch (error) {
+        setScheduleError(getErrorMessage(error, 'Could not start scheduling from this recipe.'));
+      } finally {
+        setScheduleState((current) => {
+          const next = { ...current };
+          delete next[recipeId];
+          return next;
+        });
+      }
+    },
+    [navigate, scheduleState],
+  );
+
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
@@ -224,6 +295,12 @@ export function RecipeLibraryPage() {
         </div>
       ) : null}
 
+      {scheduleError ? (
+        <div className={styles.inlineError} role="alert">
+          {scheduleError}
+        </div>
+      ) : null}
+
       {status === 'loading' ? (
         <section className={styles.loadingState} aria-label="Loading recipe library">
           <div className={styles.loadingCard} />
@@ -285,26 +362,37 @@ export function RecipeLibraryPage() {
                       <Link to={`/recipes/new?recipeId=${recipe.recipe_id}`} className={styles.recipeLink}>
                         Reopen in workspace
                       </Link>
-                      <label className={styles.selectField}>
-                        <span className={styles.selectLabel}>Move to cookbook</span>
-                        <select
-                          value={moveState[recipe.recipe_id] ?? '__none__'}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            if (value !== '__none__') {
-                              void handleMoveRecipe(recipe.recipe_id, value);
-                            }
-                          }}
-                          disabled={cookbooks.length === 0 || recipe.recipe_id in moveState}
+                      <div className={styles.recipeActionCluster}>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handleScheduleRecipe(recipe)}
+                          disabled={Boolean(scheduleState[recipe.recipe_id])}
                         >
-                          <option value="__none__">Choose a cookbook</option>
-                          {cookbooks.map((cookbook) => (
-                            <option key={cookbook.cookbook_id} value={cookbook.cookbook_id}>
-                              {cookbook.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                          {scheduleState[recipe.recipe_id] ? 'Starting schedule…' : 'Schedule from shelf'}
+                        </Button>
+                        <label className={styles.selectField}>
+                          <span className={styles.selectLabel}>Move to cookbook</span>
+                          <select
+                            value={moveState[recipe.recipe_id] ?? '__none__'}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (value !== '__none__') {
+                                void handleMoveRecipe(recipe.recipe_id, value);
+                              }
+                            }}
+                            disabled={cookbooks.length === 0 || recipe.recipe_id in moveState}
+                          >
+                            <option value="__none__">Choose a cookbook</option>
+                            {cookbooks.map((cookbook) => (
+                              <option key={cookbook.cookbook_id} value={cookbook.cookbook_id}>
+                                {cookbook.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                     </div>
                   </article>
                 ))}
@@ -359,15 +447,26 @@ export function RecipeLibraryPage() {
                                 <Link to={`/recipes/new?recipeId=${recipe.recipe_id}`} className={styles.recipeLink}>
                                   Reopen in workspace
                                 </Link>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => void handleMoveRecipe(recipe.recipe_id, null)}
-                                  disabled={recipe.recipe_id in moveState}
-                                >
-                                  Remove from cookbook
-                                </Button>
+                                <div className={styles.recipeActionCluster}>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => void handleScheduleRecipe(recipe)}
+                                    disabled={Boolean(scheduleState[recipe.recipe_id])}
+                                  >
+                                    {scheduleState[recipe.recipe_id] ? 'Starting schedule…' : 'Schedule service'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => void handleMoveRecipe(recipe.recipe_id, null)}
+                                    disabled={recipe.recipe_id in moveState}
+                                  >
+                                    Remove from cookbook
+                                  </Button>
+                                </div>
                               </div>
                             </article>
                           ))}

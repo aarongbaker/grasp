@@ -4,12 +4,22 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as authoredRecipesApi from '../../api/authoredRecipes';
 import * as recipeCookbooksApi from '../../api/recipeCookbooks';
+import * as sessionsApi from '../../api/sessions';
 import { AuthContext } from '../../context/auth-context';
 import { RecipeLibraryPage } from '../RecipeLibraryPage';
 import type { UserProfile } from '../../types/api';
 
 const mockLogout = vi.fn();
 const mockSetUser = vi.fn();
+const mockNavigate = vi.fn();
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 const authValue = {
   token: 'token',
@@ -45,6 +55,7 @@ describe('RecipeLibraryPage', () => {
     vi.restoreAllMocks();
     mockLogout.mockReset();
     mockSetUser.mockReset();
+    mockNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -113,6 +124,8 @@ describe('RecipeLibraryPage', () => {
       'href',
       '/recipes/new?recipeId=recipe-2',
     );
+    expect(screen.getByRole('button', { name: 'Schedule from shelf' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Schedule service' })).toBeInTheDocument();
   });
 
   it('creates cookbooks and moves recipes into them with inline recovery on failure', async () => {
@@ -190,5 +203,279 @@ describe('RecipeLibraryPage', () => {
     await waitFor(() => expect(moveSpy).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Every saved draft is currently tucked into a cookbook folder.')).toBeInTheDocument();
     expect(screen.getByText('Marinated peppers')).toBeInTheDocument();
+  });
+
+  it('creates and runs an authored session before navigating to the session detail', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: 'recipe-2',
+        user_id: 'user-1',
+        title: 'Marinated peppers',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue({
+      session_id: 'session-123',
+      user_id: 'user-1',
+      status: 'pending',
+      concept_json: {
+        free_text: 'Schedule authored recipe: Marinated peppers',
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: null,
+      },
+      schedule_summary: null,
+      total_duration_minutes: null,
+      error_summary: null,
+      result_recipes: null,
+      result_schedule: null,
+      token_usage: null,
+      created_at: '2026-04-01T00:00:00Z',
+      started_at: null,
+      completed_at: null,
+    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderWithAuth();
+
+    await user.click(await screen.findByRole('button', { name: 'Schedule from shelf' }));
+
+    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledWith({
+      concept_source: 'authored',
+      free_text: 'Schedule authored recipe: Marinated peppers',
+      selected_authored_recipe: {
+        recipe_id: 'recipe-2',
+        title: 'Marinated peppers',
+      },
+      guest_count: 4,
+      meal_type: 'dinner',
+      occasion: 'dinner_party',
+    }));
+    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+    expect(mockNavigate).toHaveBeenCalledWith('/sessions/session-123');
+  });
+
+  it('prevents duplicate schedule clicks while a request is already in flight', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: 'recipe-2',
+        user_id: 'user-1',
+        title: 'Marinated peppers',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+
+    let resolveCreate: ((value: Awaited<ReturnType<typeof sessionsApi.createSession>>) => void) | null = null;
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderWithAuth();
+
+    const button = await screen.findByRole('button', { name: 'Schedule from shelf' });
+    await user.click(button);
+    expect(await screen.findByRole('button', { name: 'Starting schedule…' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Starting schedule…' }));
+
+    expect(createSessionSpy).toHaveBeenCalledTimes(1);
+    expect(runPipelineSpy).not.toHaveBeenCalled();
+
+    resolveCreate?.({
+      session_id: 'session-123',
+      user_id: 'user-1',
+      status: 'pending',
+      concept_json: {
+        free_text: 'Schedule authored recipe: Marinated peppers',
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: null,
+      },
+      schedule_summary: null,
+      total_duration_minutes: null,
+      error_summary: null,
+      result_recipes: null,
+      result_schedule: null,
+      token_usage: null,
+      created_at: '2026-04-01T00:00:00Z',
+      started_at: null,
+      completed_at: null,
+    });
+
+    await waitFor(() => expect(runPipelineSpy).toHaveBeenCalledWith('session-123'));
+  });
+
+  it('shows inline recovery when session creation fails', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: 'recipe-2',
+        user_id: 'user-1',
+        title: 'Marinated peppers',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockRejectedValue(new Error('Session create failed.'));
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderWithAuth();
+
+    await user.click(await screen.findByRole('button', { name: 'Schedule from shelf' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Session create failed.');
+    expect(runPipelineSpy).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(createSessionSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Schedule from shelf' })).toBeEnabled();
+  });
+
+  it('shows inline recovery when the run kickoff fails after session creation', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: 'recipe-2',
+        user_id: 'user-1',
+        title: 'Marinated peppers',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+    vi.spyOn(sessionsApi, 'createSession').mockResolvedValue({
+      session_id: 'session-123',
+      user_id: 'user-1',
+      status: 'pending',
+      concept_json: {
+        free_text: 'Schedule authored recipe: Marinated peppers',
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: null,
+      },
+      schedule_summary: null,
+      total_duration_minutes: null,
+      error_summary: null,
+      result_recipes: null,
+      result_schedule: null,
+      token_usage: null,
+      created_at: '2026-04-01T00:00:00Z',
+      started_at: null,
+      completed_at: null,
+    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockRejectedValue(new Error('Run kickoff failed.'));
+
+    renderWithAuth();
+
+    await user.click(await screen.findByRole('button', { name: 'Schedule from shelf' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Run kickoff failed.');
+    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Schedule from shelf' })).toBeEnabled();
+  });
+
+  it('does not send a schedule request when the selected row is missing recipe details', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: '',
+        user_id: 'user-1',
+        title: '',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue({
+      session_id: 'session-123',
+      user_id: 'user-1',
+      status: 'pending',
+      concept_json: {
+        free_text: 'ignored',
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: null,
+      },
+      schedule_summary: null,
+      total_duration_minutes: null,
+      error_summary: null,
+      result_recipes: null,
+      result_schedule: null,
+      token_usage: null,
+      created_at: '2026-04-01T00:00:00Z',
+      started_at: null,
+      completed_at: null,
+    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderWithAuth();
+
+    await user.click(await screen.findByRole('button', { name: 'Schedule from shelf' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This saved draft is missing its scheduling details. Reopen it in the authoring workspace before trying again.',
+    );
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(runPipelineSpy).not.toHaveBeenCalled();
+  });
+
+  it('preserves the initial library fetch failure surface', async () => {
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockRejectedValue(new Error('Could not load your recipe library.'));
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+
+    renderWithAuth();
+
+    expect(await screen.findByRole('heading', { name: 'The shelf did not load.' })).toBeInTheDocument();
+    expect(screen.getByText('Could not load your recipe library.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Schedule from shelf' })).not.toBeInTheDocument();
   });
 });

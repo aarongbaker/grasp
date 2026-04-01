@@ -288,6 +288,14 @@
   gap: var(--space-md);
 }
 
+.recipeActionCluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .recipeLink {
   color: var(--accent-primary);
   font-size: var(--text-sm);
@@ -369,6 +377,7 @@
 
   .heroActions,
   .recipeActions,
+  .recipeActionCluster,
   .sectionHeader,
   .cookbookHeader,
   .recipeCardHeader {

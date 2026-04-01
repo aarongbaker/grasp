@@ -106,7 +106,23 @@ export interface CreateFreeTextSessionRequest {
   serving_time?: string;
 }
 
-export type CreateSessionRequest = CreateFreeTextSessionRequest;
+export interface CreateSessionAuthoredSelection {
+  recipe_id: string;
+  title: string;
+}
+
+export interface CreateAuthoredSessionRequest {
+  concept_source: 'authored';
+  free_text: string;
+  selected_authored_recipe: CreateSessionAuthoredSelection;
+  guest_count: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+}
+
+export type CreateSessionRequest = CreateFreeTextSessionRequest | CreateAuthoredSessionRequest;
 
 export interface Session {
   session_id: string;
