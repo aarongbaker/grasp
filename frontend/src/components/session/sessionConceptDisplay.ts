@@ -10,9 +10,13 @@ function cleanText(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function getAuthoredTitle(concept: DinnerConcept): string | null {
+  return cleanText(concept.selected_authored_recipe?.title);
+}
+
 export function getSessionConceptDisplay(concept: DinnerConcept): SessionConceptDisplayModel {
-  const title = cleanText(concept.free_text) ?? 'Dinner session';
-  
+  const title = getAuthoredTitle(concept) ?? cleanText(concept.free_text) ?? 'Dinner session';
+
   return {
     title,
   };

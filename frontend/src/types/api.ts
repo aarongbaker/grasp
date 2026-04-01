@@ -88,6 +88,16 @@ export interface UserProfile {
 }
 
 // Session
+export interface SelectedCookbookRecipe {
+  page_number: number;
+  recipe_name: string;
+}
+
+export interface SelectedAuthoredRecipe {
+  recipe_id: string;
+  title: string;
+}
+
 export interface DinnerConcept {
   free_text: string;
   guest_count: number;
@@ -95,6 +105,9 @@ export interface DinnerConcept {
   occasion: Occasion;
   dietary_restrictions: string[];
   serving_time: string | null;
+  concept_source?: 'free_text' | 'cookbook' | 'authored';
+  selected_recipes?: SelectedCookbookRecipe[];
+  selected_authored_recipe?: SelectedAuthoredRecipe | null;
 }
 
 export interface CreateFreeTextSessionRequest {
