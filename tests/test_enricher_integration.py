@@ -21,6 +21,7 @@ from app.graph.nodes.enricher import (
     _build_enrichment_prompt,
     _format_rag_context,
     _generate_recipe_slug,
+    _retrieve_rag_context,
     rag_enricher_node,
 )
 from app.models.enums import ErrorType, MealType, Occasion, Resource
@@ -131,6 +132,126 @@ def test_build_enrichment_prompt_resource_types(sample_raw_recipe):
     assert "hands" in prompt.lower()
 
 
+def test_build_enrichment_prompt_advisory_contract(sample_raw_recipe):
+    """Prompt should explicitly state RAG context is advisory, not canonical."""
+    chunks = [
+        {"text": "Sear at 200°C for best crust.", "chunk_type": "technique", "chunk_id": "c1"},
+    ]
+    prompt = _build_enrichment_prompt(sample_raw_recipe, "pan_seared_salmon", chunks)
+    
+    # Verify advisory-only language is present
+    assert "ADVISORY ONLY" in prompt or "advisory" in prompt.lower()
+    assert "NOT canonical" in prompt or "not canonical" in prompt.lower()
+    
+    # Verify it instructs to preserve raw recipe structure
+    assert "raw recipe" in prompt.lower() or "RAW RECIPE" in prompt
+    
+    # Verify it warns against replacing raw recipe with cookbook content
+    assert "NEVER replace" in prompt or "never replace" in prompt.lower() or "prioritize the raw recipe" in prompt.lower()
+
+
+def test_retrieve_rag_context_filters_empty_text():
+    """RAG chunks without valid text should be filtered out (advisory contract enforcement)."""
+    with (
+        patch("openai.OpenAI") as mock_openai,
+        patch("pinecone.Pinecone") as mock_pinecone,
+        patch("app.graph.nodes.enricher.get_settings") as mock_settings,
+    ):
+        # Mock settings
+        mock_settings.return_value.pinecone_api_key = "test-key"
+        mock_settings.return_value.openai_api_key = "test-key"
+        mock_settings.return_value.pinecone_index_name = "test-index"
+        mock_settings.return_value.rag_retrieval_top_k = 5
+        
+        # Mock OpenAI embedding response
+        mock_openai_instance = MagicMock()
+        mock_openai.return_value = mock_openai_instance
+        mock_openai_instance.embeddings.create.return_value.data = [
+            MagicMock(embedding=[0.1] * 1536)
+        ]
+        
+        # Mock Pinecone query — return chunks with and without valid text
+        mock_pc_instance = MagicMock()
+        mock_pinecone.return_value = mock_pc_instance
+        mock_index = MagicMock()
+        mock_pc_instance.Index.return_value = mock_index
+        mock_index.query.return_value = {
+            "matches": [
+                {
+                    "id": "chunk1",
+                    "metadata": {
+                        "text": "Valid cookbook text",
+                        "chunk_type": "technique",
+                        "chunk_id": "c1",
+                    },
+                    "score": 0.9,
+                },
+                {
+                    "id": "chunk2",
+                    "metadata": {
+                        "text": "",  # EMPTY TEXT — should be filtered
+                        "chunk_type": "recipe",
+                        "chunk_id": "c2",
+                    },
+                    "score": 0.8,
+                },
+                {
+                    "id": "chunk3",
+                    "metadata": {
+                        "chunk_type": "narrative",
+                        "chunk_id": "c3",
+                        # NO TEXT FIELD — should be filtered
+                    },
+                    "score": 0.7,
+                },
+                {
+                    "id": "chunk4",
+                    "metadata": {
+                        "text": 12345,  # INVALID TYPE — should be filtered
+                        "chunk_type": "tip",
+                        "chunk_id": "c4",
+                    },
+                    "score": 0.6,
+                },
+                {
+                    "id": "chunk5",
+                    "metadata": {
+                        "text": "Table of contents: soups, salads, desserts",
+                        "chunk_type": "index",  # NON-ADVISORY — should be filtered
+                        "chunk_id": "c5",
+                    },
+                    "score": 0.5,
+                },
+                {
+                    "id": "chunk6",
+                    "metadata": {
+                        "text": "Browse all poultry recipes on pages 10-40",
+                        "chunk_type": "catalog",  # NON-ADVISORY — should be filtered
+                        "chunk_id": "c6",
+                    },
+                    "score": 0.4,
+                },
+            ]
+        }
+        
+        chunks = _retrieve_rag_context("test query", "user123")
+        
+        # Only chunk1 should survive
+        assert len(chunks) == 1
+        assert chunks[0]["text"] == "Valid cookbook text"
+        assert chunks[0]["chunk_id"] == "c1"
+
+
+def test_retrieve_rag_context_graceful_degradation_on_missing_api_keys():
+    """If API keys are missing, RAG retrieval should return [] without crashing."""
+    with patch("app.graph.nodes.enricher.get_settings") as mock_settings:
+        mock_settings.return_value.pinecone_api_key = None
+        mock_settings.return_value.openai_api_key = "test-key"
+        
+        chunks = _retrieve_rag_context("test query", "user123")
+        assert chunks == []
+
+
 # ── Unit tests for node error handling (mocked LLM) ─────────────────────────
 
 
@@ -214,6 +335,68 @@ async def test_enricher_empty_raw_recipes():
     assert result["enriched_recipes"] == []
     assert len(result["errors"]) == 1
     assert result["errors"][0]["recoverable"] is False
+
+
+@pytest.mark.asyncio
+async def test_enricher_preserves_raw_recipe_structure_not_rag():
+    """
+    Verify enricher uses raw_recipe steps as authoritative structure, not RAG chunks.
+    Even if RAG chunks contain recipe-like text, enricher should generate steps from
+    raw_recipe and use RAG only as advisory context.
+    """
+    from tests.fixtures.recipes import ENRICHED_SHORT_RIBS, RAW_SHORT_RIBS
+
+    # Mock RAG to return recipe-like text that SHOULD NOT be used as structure
+    fake_rag_chunks = [
+        {
+            "text": "1. Brown the meat. 2. Add wine. 3. Braise for 3 hours.",
+            "chunk_type": "recipe",
+            "chunk_id": "fake1",
+        }
+    ]
+
+    async def mock_llm_response(messages):
+        # LLM should see RAG context but generate steps from raw_recipe
+        return StepEnrichmentOutput(
+            steps=ENRICHED_SHORT_RIBS.steps,
+            chef_notes="Used cookbook advice for timing.",
+            techniques_used=["searing", "braising"],
+        )
+
+    mock_chain = AsyncMock()
+    mock_chain.ainvoke = AsyncMock(side_effect=mock_llm_response)
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_chain
+
+    state = {
+        "raw_recipes": [RAW_SHORT_RIBS.model_dump()],
+        "user_id": "test-user",
+        "errors": [],
+    }
+
+    with (
+        patch("app.graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=fake_rag_chunks),
+    ):
+        result = await rag_enricher_node(state)
+
+    # Should have one enriched recipe
+    assert len(result["enriched_recipes"]) == 1
+    enriched = result["enriched_recipes"][0]
+    
+    # Recipe name should come from raw_recipe, not RAG
+    assert enriched["source"]["name"] == RAW_SHORT_RIBS.name
+    
+    # Number of steps should match raw_recipe, not RAG text
+    assert len(enriched["steps"]) == len(RAW_SHORT_RIBS.steps)
+    
+    # RAG sources should be recorded but not used as recipe structure
+    assert len(enriched["rag_sources"]) == 1
+    assert enriched["rag_sources"][0] == "fake1"
+
+    # Menu-intent source remains authoritative; advisory cookbook text does not rewrite it
+    assert enriched["source"]["description"] == RAW_SHORT_RIBS.description
+    assert enriched["source"]["steps"] == RAW_SHORT_RIBS.steps
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────

@@ -1,6 +1,10 @@
 """
 ingestion/rasteriser.py
-Phase 2a: PDF → 300 DPI images → OCR → PageCache.
+
+INTERNAL INFRASTRUCTURE ONLY — Phase 2a: PDF → 300 DPI images → OCR → PageCache.
+
+After M015 pivot (cookbook de-scope), this module is used only for team/admin
+curated cookbook uploads, not user-facing upload flows.
 
 OCR backend selection (priority order):
   macOS: Apple Vision (PyObjC) -> Tesseract -> pymupdf text extraction
@@ -16,6 +20,8 @@ dense ingredient lists. No quality branching — always rasterise at 300 DPI.
 PageCache is written BEFORE any further processing. If the classifier or
 state machine crashes, the OCR output is safe in Postgres. Reprocessing
 is free — re-running OCR is not.
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import asyncio

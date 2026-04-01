@@ -1,9 +1,15 @@
 """
 ingestion/classifier.py
-Phase 2b: Two-tier document classification.
-  Tier 1: regex heuristics on first 3 pages (always runs, free)
-  Tier 2: LLM classification only when heuristic confidence < threshold
-Chef can always override via UI.
+
+INTERNAL INFRASTRUCTURE ONLY — Phase 2b: Two-tier document classification.
+
+After M015 pivot (cookbook de-scope), this module is used only for team/admin
+curated cookbook uploads, not user-facing upload flows.
+
+Tier 1: regex heuristics on first 3 pages (always runs, free)
+Tier 2: LLM classification only when heuristic confidence < threshold
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import re

@@ -1,6 +1,10 @@
 """
 models/ingestion.py
-Ingestion domain — SQLModel → Postgres + Pinecone.
+
+INTERNAL INFRASTRUCTURE — Ingestion domain — SQLModel → Postgres + Pinecone.
+
+After M015 pivot (cookbook de-scope), these models support team/admin curated
+cookbook uploads only, not user-facing cookbook upload flows.
 
 BookRecord, PageCache, CookbookChunk, IngestionJob.
 
@@ -9,11 +13,13 @@ output per page is persisted to Postgres BEFORE any processing. This enables:
   1. Pipeline reprocessing without re-running OCR as state machine improves
   2. Page-by-page retry on partial failures
   3. Provenance auditability — any RAG result traceable to exact source page
-  4. Future admin tooling for chef review/correction
+  4. Future admin tooling for review/correction
 
 CookbookChunk.user_id is denormalised (it's also reachable via book_id → user_id)
 specifically for Pinecone metadata. Pinecone filters can't do joins — the user_id
-must be in the chunk metadata envelope for per-chef RAG isolation to work.
+must be in the chunk metadata envelope for per-user RAG isolation to work.
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import uuid

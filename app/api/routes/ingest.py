@@ -1,4 +1,19 @@
-"""api/routes/ingest.py — PDF upload and ingestion job polling."""
+"""api/routes/ingest.py — Internal/admin-only PDF upload and ingestion job polling.
+
+INTERNAL INFRASTRUCTURE ONLY — These routes are not exposed in the active product UI.
+After the M015 pivot (cookbook de-scope), GRASP focuses on menu-intent session creation
+and uses curated cookbook text only as internal enrichment input.
+
+These routes remain in the codebase to support:
+- Team/admin curated cookbook uploads for RAG enrichment
+- Future admin UI for library management
+- Internal testing and development workflows
+
+User-facing cookbook upload, browsing, and selection were removed in M015/S02.
+Session creation uses only free-text menu intent (`POST /api/v1/sessions`).
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for the full enrichment contract.
+"""
 
 import base64
 import re
@@ -375,7 +390,13 @@ async def upload_pdf(
     db: DBSession = ...,
     current_user: CurrentUser = ...,
 ):
-    """Upload a PDF. Returns job_id immediately. Background processing via Celery."""
+    """
+    INTERNAL/ADMIN: Upload a PDF for curated cookbook ingestion.
+    
+    Returns job_id immediately. Background processing via Celery.
+    This endpoint is not exposed in the active product UI (M015 pivot).
+    Future use: admin-only curated library management.
+    """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
@@ -414,6 +435,12 @@ async def upload_pdf(
 
 @router.get("/{job_id}")
 async def get_ingestion_status(job_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    """
+    INTERNAL/ADMIN: Poll ingestion job status.
+    
+    This endpoint is not exposed in the active product UI (M015 pivot).
+    Future use: admin monitoring of curated cookbook uploads.
+    """
     job = await db.get(IngestionJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Ingestion job not found")
@@ -424,6 +451,12 @@ async def get_ingestion_status(job_id: uuid.UUID, db: DBSession, current_user: C
 
 @router.post("/{job_id}/cancel", status_code=200)
 async def cancel_ingestion(job_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    """
+    INTERNAL/ADMIN: Cancel an in-progress ingestion job.
+    
+    This endpoint is not exposed in the active product UI (M015 pivot).
+    Future use: admin control over curated cookbook uploads.
+    """
     job = await db.get(IngestionJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Ingestion job not found")

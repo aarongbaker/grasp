@@ -1,7 +1,15 @@
 """
 ingestion/embedder.py
-Phase 2e: OpenAI text-embedding-3-small (1536 dims) + Pinecone upsert.
-user_id in every chunk metadata for per-chef RAG isolation.
+
+INTERNAL INFRASTRUCTURE ONLY — Phase 2e: OpenAI text-embedding-3-small (1536 dims) + Pinecone upsert.
+
+After M015 pivot (cookbook de-scope), this module is used only for team/admin
+curated cookbook uploads, not user-facing upload flows.
+
+user_id in every chunk metadata enables per-user RAG isolation.
+Future: rag_owner_key for stable cross-user shared curated libraries.
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import hashlib

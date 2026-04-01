@@ -1,6 +1,11 @@
 """
 ingestion/state_machine.py
-Phase 2c: Cookbook state machine — 6 states.
+
+INTERNAL INFRASTRUCTURE ONLY — Phase 2c: Cookbook state machine — 6 states.
+
+After M015 pivot (cookbook de-scope), this module is used only for team/admin
+curated cookbook uploads, not user-facing upload flows.
+
 Two-tier transition detection: regex tripwire (every sentence, free) →
 LLM detector only on candidates (~5-10% of sentences).
 
@@ -13,6 +18,8 @@ Chunking philosophy:
     is more useful as one chunk than two halves. The embedder has a
     safety-net split for the rare recipe that exceeds the embedding
     model's token limit.
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import re

@@ -1,11 +1,18 @@
 """
 graph/nodes/enricher.py
+
 Real RAG enricher — Phase 5. Second LLM call in the system.
 
+CURATED TEXT ENRICHMENT (M015 pivot):
+After the cookbook de-scope, enrichment uses only team/admin-curated cookbook
+text from Pinecone. Users cannot upload cookbooks; they submit free-text menu
+intent, and enrichment optionally grounds LLM-generated recipes with relevant
+curated culinary knowledge.
+
 Reads raw_recipes from GRASPState, queries Pinecone for relevant cookbook
-chunks (per-chef isolation via user_id), then calls Claude to convert flat
-step strings into structured RecipeStep objects with timing, resource tags,
-and dependency edges.
+chunks (per-user isolation via rag_owner_key), then calls Claude to convert
+flat step strings into structured RecipeStep objects with timing, resource
+tags, and dependency edges.
 
 Error handling: per-recipe recoverable. If one recipe fails enrichment,
 it is dropped and the pipeline continues with survivors. If ALL recipes
@@ -22,7 +29,10 @@ Replace semantics — same contract as generator (§2.10).
 Mockable seams:
   _create_llm()            — returns ChatAnthropic instance
   _retrieve_rag_context()  — embeds query + queries Pinecone
+
 Tests patch these two functions to bypass external APIs.
+
+See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
 
 import asyncio
@@ -42,6 +52,13 @@ from app.models.recipe import EnrichedRecipe, RawRecipe, RecipeStep
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_RAG_CHUNK_TYPES = {
+    "recipe",
+    "ingredient_list",
+    "narrative",
+    "technique",
+    "tip",
+}
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
@@ -71,9 +88,18 @@ def _generate_recipe_slug(name: str) -> str:
 def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> list[dict]:
     """
     Embed query with OpenAI and search Pinecone for relevant cookbook chunks.
-    Returns list of chunk dicts with 'text', 'chunk_type', 'chunk_id' keys.
+    Returns list of advisory chunk dicts with 'text', 'chunk_type', 'chunk_id' keys.
 
     Graceful degradation: returns [] on any failure (network, auth, empty index).
+
+    CONTRACT ENFORCEMENT:
+    - Retrieved data is advisory text grounding only, never canonical recipe input.
+    - Chunks must contain plain text in metadata['text'].
+    - Only cookbook/reference narrative chunk types are accepted; index/catalog/
+      unknown metadata is filtered to keep enrichment grounded in culinary advice
+      rather than browse/list artifacts.
+    - rag_owner_key is the authoritative isolation filter when present; user_id is
+      only a legacy fallback.
     """
     try:
         from openai import OpenAI
@@ -112,10 +138,33 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
         chunks = []
         for match in results.get("matches", []):
             metadata = match.get("metadata", {})
+            chunk_id = metadata.get("chunk_id", match.get("id", "unknown"))
+            raw_text = metadata.get("text", "")
+
+            # DEFENSIVE VALIDATION: Enforce advisory text-only contract.
+            # Chunks without valid text are silently filtered (not errors).
+            if not isinstance(raw_text, str):
+                logger.warning("RAG chunk text is not a string (filtered): chunk_id=%s", chunk_id)
+                continue
+
+            text = raw_text.strip()
+            if not text:
+                logger.warning("RAG chunk missing text field (filtered): chunk_id=%s", chunk_id)
+                continue
+
+            chunk_type = str(metadata.get("chunk_type", "")).strip().lower()
+            if chunk_type not in ALLOWED_RAG_CHUNK_TYPES:
+                logger.info(
+                    "RAG chunk filtered by advisory boundary: chunk_id=%s chunk_type=%s",
+                    chunk_id,
+                    chunk_type or "<missing>",
+                )
+                continue
+
             chunks.append(
                 {
-                    "text": metadata.get("text", ""),
-                    "chunk_type": metadata.get("chunk_type", ""),
+                    "text": text,
+                    "chunk_type": chunk_type,
                     "chunk_id": metadata.get("chunk_id", match.get("id", "")),
                     "score": match.get("score", 0.0),
                 }
@@ -132,7 +181,17 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
 
 
 def _format_rag_context(chunks: list[dict]) -> str:
-    """Format retrieved RAG chunks for inclusion in the enrichment prompt."""
+    """
+    Format retrieved RAG chunks for inclusion in the enrichment prompt.
+    
+    CONTRACT ENFORCEMENT: RAG chunks are ADVISORY CONTEXT ONLY.
+    They provide culinary knowledge (techniques, timing guidance, flavor notes)
+    to inform LLM-generated step enrichment. They are NEVER parsed as structured
+    recipe inputs or used to replace/override the raw_recipe steps.
+    
+    If chunks contain structured recipe data, they are treated as plain text
+    examples, not canonical inputs.
+    """
     if not chunks:
         return "No cookbook-specific context available. Use your general culinary knowledge."
 
@@ -218,7 +277,19 @@ Assign exactly one resource per step:
 - `prep_ahead_window`: e.g. "up to 24 hours", "up to 3 days". Only set if can_be_done_ahead is true. Must express hours or days, never minutes.
 - `prep_ahead_notes`: brief storage/reheating instructions. Only set if can_be_done_ahead is true.
 
-## CHEF'S COOKBOOK CONTEXT
+## ADVISORY COOKBOOK CONTEXT (RAG GROUNDING)
+The following cookbook excerpts are ADVISORY ONLY. They provide culinary knowledge
+to inform your timing, technique, and flavor decisions. They are NOT canonical
+recipe structures to be copied or parsed.
+
+Your output MUST be derived from the RAW RECIPE steps above, enriched with timing,
+resources, and dependencies. Use cookbook context to refine technique details,
+validate timing assumptions, or suggest improvements — but NEVER replace the
+raw recipe structure with cookbook content.
+
+If cookbook context contradicts the raw recipe, prioritize the raw recipe and
+note the discrepancy in chef_notes.
+
 {rag_text}
 
 ## OUTPUT REQUIREMENTS
