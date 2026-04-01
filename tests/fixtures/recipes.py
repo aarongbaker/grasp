@@ -15,6 +15,18 @@ Three dishes chosen to demonstrate PASSIVE parallelism:
 This menu is the Phase 6 known-correct answer validation baseline.
 """
 
+import uuid
+
+from app.models.authored_recipe import (
+    AuthoredRecipeCreate,
+    AuthoredRecipeDependency,
+    AuthoredRecipeHoldGuidance,
+    AuthoredRecipeReheatGuidance,
+    AuthoredRecipeStep,
+    AuthoredRecipeStorageGuidance,
+    AuthoredRecipeYield,
+    build_authored_step_id,
+)
 from app.models.enums import Resource
 from app.models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
 
@@ -419,4 +431,82 @@ ENRICHED_FT_RECIPE_C = EnrichedRecipe(
             resource=Resource.OVEN,
         ),
     ],
+)
+
+
+# ── Authored recipe fixtures ─────────────────────────────────────────────────
+
+AUTHORED_BRAISED_CHICKEN = AuthoredRecipeCreate(
+    user_id=uuid.UUID("00000000-0000-0000-0000-000000000111"),
+    title="Braised Chicken with Saffron Onions",
+    description="A chef-authored braise with make-ahead holding and precise reheating guidance.",
+    cuisine="Modern French",
+    yield_info=AuthoredRecipeYield(quantity=4, unit="plates", notes="One leg quarter plus sauce per plate"),
+    ingredients=[
+        Ingredient(name="chicken leg quarters", quantity="4", preparation="patted dry"),
+        Ingredient(name="yellow onions", quantity="3 large", preparation="thinly sliced"),
+        Ingredient(name="chicken stock", quantity="750ml"),
+        Ingredient(name="saffron", quantity="1 pinch", preparation="bloomed in warm stock"),
+    ],
+    steps=[
+        AuthoredRecipeStep(
+            title="Brown the chicken",
+            instruction="Sear skin-side down until mahogany, then flip briefly to kiss the flesh side.",
+            duration_minutes=12,
+            duration_max=15,
+            resource=Resource.STOVETOP,
+            required_equipment=["braiser"],
+            target_internal_temperature_f=155,
+            chef_notes="Do not move the chicken early or the skin will tear.",
+        ),
+        AuthoredRecipeStep(
+            title="Build the onion base",
+            instruction="Sweat the onions with salt until collapsed, then add saffron stock and reduce slightly.",
+            duration_minutes=15,
+            resource=Resource.HANDS,
+            required_equipment=["braiser"],
+            dependencies=[
+                AuthoredRecipeDependency(
+                    step_id=build_authored_step_id("Braised Chicken with Saffron Onions", 1)
+                )
+            ],
+            yield_contribution="Forms the braising liquor and onion garnish.",
+        ),
+        AuthoredRecipeStep(
+            title="Braise until tender",
+            instruction="Return chicken to the pan, cover, and cook gently until the joints loosen.",
+            duration_minutes=45,
+            duration_max=60,
+            resource=Resource.OVEN,
+            required_equipment=["braiser", "oven"],
+            dependencies=[
+                AuthoredRecipeDependency(
+                    step_id=build_authored_step_id("Braised Chicken with Saffron Onions", 2)
+                )
+            ],
+            can_be_done_ahead=True,
+            prep_ahead_window="up to 2 days ahead",
+            prep_ahead_notes="Cool in the liquid, then refrigerate covered.",
+            until_condition="The leg joint yields easily when nudged.",
+        ),
+    ],
+    equipment_notes=["Heavy braiser required for even heat retention", "Warm plates before saucing"],
+    storage=AuthoredRecipeStorageGuidance(
+        method="Refrigerated in braising liquid",
+        duration="up to 2 days",
+        notes="Keep onions submerged to prevent drying.",
+    ),
+    hold=AuthoredRecipeHoldGuidance(
+        method="Warm hold at 140F",
+        max_duration="20 minutes",
+        notes="Vent lid slightly so the skin does not soften completely.",
+    ),
+    reheat=AuthoredRecipeReheatGuidance(
+        method="Covered oven reheat",
+        target="165F in the thickest part",
+        notes="Baste once halfway through reheating.",
+    ),
+    make_ahead_guidance="Complete the braise the day before, chill overnight, and reheat in the liquid.",
+    plating_notes="Spoon onions first, then set the glazed chicken on top.",
+    chef_notes="The sauce should coat the back of a spoon without looking syrupy.",
 )
