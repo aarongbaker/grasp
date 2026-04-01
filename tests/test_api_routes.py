@@ -5,6 +5,7 @@ HTTP-level tests for FastAPI routes using httpx AsyncClient.
 Tests cover:
   - Auth: malformed JWT → 401, valid JWT unknown user → 404
   - Sessions: create, run (409 guard, 403 ownership), get status (Fix #7)
+  - Authored recipes: create, list, read, cross-user denial, and route-family separation
   - Ingest: PDF-only validation (400), ownership on status poll (Fix #7)
 
 Uses dependency overrides with mock DB session to avoid needing a real
@@ -19,6 +20,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.models.authored_recipe import AuthoredRecipeRecord
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
@@ -31,6 +33,7 @@ from app.models.user import KitchenConfig, UserProfile
 
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
+    from app.api.routes.authored_recipes import router as authored_recipes_router
     from app.api.routes.health import router as health_router
     from app.api.routes.ingest import router as ingest_router
     from app.api.routes.sessions import router as sessions_router
@@ -41,6 +44,7 @@ def _create_test_app() -> FastAPI:
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
     app.include_router(ingest_router, prefix="/api/v1")
+    app.include_router(authored_recipes_router, prefix="/api/v1")
     return app
 
 
@@ -67,9 +71,18 @@ class MockDBSession:
         self.exec_result = None
 
     def add(self, obj):
-        pass
+        model_class = obj.__class__
+        for pk_name in ("session_id", "job_id", "recipe_id", "user_id"):
+            if hasattr(obj, pk_name):
+                pk = getattr(obj, pk_name)
+                if pk is not None:
+                    self._store[(model_class, pk)] = obj
+                break
 
     async def commit(self):
+        pass
+
+    async def flush(self):
         pass
 
     async def refresh(self, obj):
@@ -78,6 +91,11 @@ class MockDBSession:
             obj.session_id = uuid.uuid4()
         if hasattr(obj, "job_id") and obj.job_id is None:
             obj.job_id = uuid.uuid4()
+        if hasattr(obj, "recipe_id") and obj.recipe_id is None:
+            obj.recipe_id = uuid.uuid4()
+        if hasattr(obj, "updated_at"):
+            obj.updated_at = getattr(obj, "updated_at") or datetime.now(timezone.utc).replace(tzinfo=None)
+        self.add(obj)
 
     async def get(self, model_class, pk):
         return self._store.get((model_class, pk))
@@ -90,6 +108,26 @@ class MockDBSession:
         """Stub for select queries."""
         if self.exec_result is not None:
             return self.exec_result
+
+        statement_text = str(stmt)
+        if "FROM authored_recipes" in statement_text:
+            user_id = None
+            for criterion in getattr(stmt, "_where_criteria", ()):
+                right = getattr(criterion, "right", None)
+                value = getattr(right, "value", None)
+                if isinstance(value, uuid.UUID):
+                    user_id = value
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is AuthoredRecipeRecord and (user_id is None or obj.user_id == user_id)
+            ]
+            rows.sort(key=lambda record: record.updated_at, reverse=True)
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
         mock_result = MagicMock()
         mock_result.first.return_value = None
         mock_result.all.return_value = []
@@ -123,6 +161,50 @@ def app_with_overrides(mock_db, test_user):
     app.dependency_overrides[get_session] = _override_session
     app.dependency_overrides[get_current_user] = _override_user
     return app
+
+
+@pytest.fixture
+def authored_recipe_payload(test_user):
+    return {
+        "user_id": str(test_user.user_id),
+        "title": "Roasted Carrots with Labneh",
+        "description": "A plated vegetable course with warm spices.",
+        "cuisine": "Levantine",
+        "yield_info": {"quantity": 4, "unit": "plates", "notes": "starter portions"},
+        "ingredients": [
+            {"name": "carrots", "quantity": "2 lb"},
+            {"name": "labneh", "quantity": "1 cup"},
+        ],
+        "steps": [
+            {
+                "title": "Roast carrots",
+                "instruction": "Roast until caramelized.",
+                "duration_minutes": 35,
+                "resource": "oven",
+                "required_equipment": ["sheet tray"],
+            },
+            {
+                "title": "Plate",
+                "instruction": "Spread labneh and arrange carrots.",
+                "duration_minutes": 10,
+                "resource": "hands",
+                "dependencies": [
+                    {
+                        "step_id": "roasted_carrots_with_labneh_step_1",
+                        "kind": "finish_to_start",
+                        "lag_minutes": 0,
+                    }
+                ],
+            },
+        ],
+        "equipment_notes": ["Needs one full sheet tray."],
+        "storage": {"method": "refrigerated", "duration": "2 days", "notes": "store components separately"},
+        "hold": {"method": "warming drawer", "max_duration": "15 minutes", "notes": "avoid overdrying"},
+        "reheat": {"method": "oven", "target": "hot through", "notes": "refresh with olive oil"},
+        "make_ahead_guidance": "Roast carrots in the afternoon, then rewarm before service.",
+        "plating_notes": "Finish with pistachio dukkah.",
+        "chef_notes": "Keep the labneh cold for contrast.",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,5 +296,264 @@ async def test_create_session_201(app_with_overrides, test_user):
     concept = data["concept_json"]
     assert "gluten-free" in concept["dietary_restrictions"]
     assert "nut-free" in concept["dietary_restrictions"]
+
+
+async def test_run_pipeline_requires_ownership(app_with_overrides, mock_db):
+    session = Session(user_id=uuid.uuid4(), status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+async def test_run_pipeline_rejects_non_pending_session(app_with_overrides, mock_db, test_user):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.GENERATING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 409
+    assert "already" in resp.json()["detail"]
+
+
+async def test_get_session_status_requires_ownership(app_with_overrides, mock_db):
+    session = Session(user_id=uuid.uuid4(), status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/sessions/{session.session_id}")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Authored recipe routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_create_authored_recipe_201(app_with_overrides, authored_recipe_payload):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=authored_recipe_payload)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["user_id"] == authored_recipe_payload["user_id"]
+    assert data["title"] == authored_recipe_payload["title"]
+    assert data["yield_info"]["quantity"] == authored_recipe_payload["yield_info"]["quantity"]
+    assert data["steps"][1]["dependencies"][0]["step_id"] == "roasted_carrots_with_labneh_step_1"
+    assert "status" not in data
+    assert "concept_json" not in data
+
+
+async def test_list_authored_recipes_returns_only_current_user_records(app_with_overrides, mock_db, test_user):
+    owned = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Warm Chicories",
+        description="Bitter greens course.",
+        cuisine="French",
+        authored_payload={
+            "title": "Warm Chicories",
+            "description": "Bitter greens course.",
+            "cuisine": "French",
+            "yield_info": {"quantity": 2, "unit": "plates"},
+            "ingredients": [{"name": "chicories", "quantity": "2 heads"}],
+            "steps": [
+                {
+                    "title": "Dress",
+                    "instruction": "Dress and serve.",
+                    "duration_minutes": 5,
+                    "resource": "hands",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    other = AuthoredRecipeRecord(
+        user_id=uuid.uuid4(),
+        title="Hidden Recipe",
+        description="Should not leak.",
+        cuisine="Secret",
+        authored_payload={
+            "title": "Hidden Recipe",
+            "description": "Should not leak.",
+            "cuisine": "Secret",
+            "yield_info": {"quantity": 1, "unit": "plate"},
+            "ingredients": [{"name": "something", "quantity": "1"}],
+            "steps": [
+                {
+                    "title": "Hide",
+                    "instruction": "Keep hidden.",
+                    "duration_minutes": 1,
+                    "resource": "hands",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, owned.recipe_id, owned)
+    mock_db.seed(AuthoredRecipeRecord, other.recipe_id, other)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/authored-recipes")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "Warm Chicories"
+    assert data[0]["user_id"] == str(test_user.user_id)
+
+
+async def test_get_authored_recipe_requires_ownership(app_with_overrides, mock_db):
+    record = AuthoredRecipeRecord(
+        user_id=uuid.uuid4(),
+        title="Private Recipe",
+        description="Owned by someone else.",
+        cuisine="Private",
+        authored_payload={
+            "title": "Private Recipe",
+            "description": "Owned by someone else.",
+            "cuisine": "Private",
+            "yield_info": {"quantity": 1, "unit": "plate"},
+            "ingredients": [{"name": "secret", "quantity": "1"}],
+            "steps": [
+                {
+                    "title": "Keep private",
+                    "instruction": "Do not expose.",
+                    "duration_minutes": 1,
+                    "resource": "hands",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, record.recipe_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/authored-recipes/{record.recipe_id}")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+async def test_get_authored_recipe_returns_full_contract_shape(app_with_overrides, mock_db, test_user, authored_recipe_payload):
+    payload = dict(authored_recipe_payload)
+    payload.pop("user_id")
+    record = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title=payload["title"],
+        description=payload["description"],
+        cuisine=payload["cuisine"],
+        authored_payload=payload,
+    )
+    mock_db.seed(AuthoredRecipeRecord, record.recipe_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/authored-recipes/{record.recipe_id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["recipe_id"] == str(record.recipe_id)
+    assert data["user_id"] == str(test_user.user_id)
+    assert data["storage"]["method"] == "refrigerated"
+    assert data["steps"][0]["resource"] == "oven"
+    assert "status" not in data
+
+
+async def test_create_authored_recipe_rejects_cross_user_body(app_with_overrides, authored_recipe_payload):
+    payload = dict(authored_recipe_payload)
+    payload["user_id"] = str(uuid.uuid4())
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=payload)
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingest routes (Fix #7)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_upload_pdf_rejects_non_pdf(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/ingest",
+            files={"file": ("notes.txt", b"not a pdf", "text/plain")},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Only PDF files accepted"
+
+
+async def test_get_ingestion_status_requires_ownership(app_with_overrides, mock_db):
+    job = IngestionJob(user_id=uuid.uuid4(), status=IngestionStatus.PENDING)
+    mock_db.seed(IngestionJob, job.job_id, job)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/ingest/{job.job_id}")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
 
 

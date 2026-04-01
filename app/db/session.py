@@ -30,6 +30,7 @@ SessionLocal = sessionmaker(
 async def create_db_and_tables():
     """Create all SQLModel tables. Called once at startup."""
     # Import all table models to register them with SQLModel metadata
+    import app.models.authored_recipe  # noqa: F401
     import app.models.ingestion  # noqa: F401
     import app.models.session  # noqa: F401
     import app.models.user  # noqa: F401

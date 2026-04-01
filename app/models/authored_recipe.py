@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
-from sqlmodel import Field, SQLModel
+from sqlalchemy import JSON
+from sqlmodel import SQLModel, Column, Field
 
 from app.models.enums import Resource
 from app.models.recipe import Ingredient, RawRecipe, RecipeStep
@@ -64,9 +65,7 @@ class AuthoredRecipeStep(BaseModel):
         if value is not None:
             duration_minutes = info.data.get("duration_minutes")
             if duration_minutes is not None and value < duration_minutes:
-                raise ValueError(
-                    f"duration_max ({value}) must be >= duration_minutes ({duration_minutes})"
-                )
+                raise ValueError(f"duration_max ({value}) must be >= duration_minutes ({duration_minutes})")
         return value
 
     @field_validator("required_equipment")
@@ -82,9 +81,7 @@ class AuthoredRecipeStep(BaseModel):
         if self.can_be_done_ahead and not self.prep_ahead_window:
             raise ValueError("prep_ahead_window is required when can_be_done_ahead is true")
         if not self.can_be_done_ahead and (self.prep_ahead_window or self.prep_ahead_notes):
-            raise ValueError(
-                "prep_ahead_window/prep_ahead_notes require can_be_done_ahead=true"
-            )
+            raise ValueError("prep_ahead_window/prep_ahead_notes require can_be_done_ahead=true")
         return self
 
 
@@ -147,9 +144,7 @@ class AuthoredRecipeBase(BaseModel):
                 if dependency.step_id == own_step_id:
                     raise ValueError(f"Step '{own_step_id}' cannot depend on itself")
                 if dependency.lag_minutes < 0:
-                    raise ValueError(
-                        f"Step '{own_step_id}' dependency '{dependency.step_id}' has negative lag_minutes"
-                    )
+                    raise ValueError(f"Step '{own_step_id}' dependency '{dependency.step_id}' has negative lag_minutes")
 
         return self
 
@@ -196,15 +191,17 @@ class AuthoredRecipeRead(AuthoredRecipeBase):
     updated_at: datetime
 
 
-class AuthoredRecipeRecord(SQLModel, table=False):
-    """SQLModel-facing shape for later persistence slices."""
+class AuthoredRecipeRecord(SQLModel, table=True):
+    """Persisted user-owned authored recipe record."""
+
+    __tablename__ = "authored_recipes"
 
     recipe_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: uuid.UUID = Field(index=True)
-    title: str
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    title: str = Field(index=True)
     description: str
     cuisine: str
-    authored_payload: dict = Field(default_factory=dict)
+    authored_payload: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
