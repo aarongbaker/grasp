@@ -28,11 +28,7 @@ Production GRASP runs as a three-surface system:
 2. **Railway worker service** - Celery worker for ingestion and planning jobs
 3. **Cloudflare Pages frontend** - the public web UI
 
-Background work such as meal-planning execution happens asynchronously in the worker. The frontend polls the API for status and surfaces:
-- ingestion phase
-- OCR page progress
-- stale-progress warnings
-- upload cancellation for new jobs
+Background work such as meal-planning execution happens asynchronously in the worker. The frontend polls the API for pipeline status, terminal results, and recoverable failure details while the backend handles generation, enrichment, validation, and scheduling off the request path.
 
 ## Production deployment contract
 
@@ -281,7 +277,7 @@ grasp/
 │   ├── core/           # Settings, auth, dependency injection, status helpers
 │   ├── db/             # SQLAlchemy / SQLModel session setup
 │   ├── graph/          # LangGraph state machine & pipeline nodes
-│   ├── ingestion/      # Cookbook ingestion pipeline (OCR, classify, chunk, embed)
+│   ├── ingestion/      # Internal curated-text ingestion pipeline (OCR, classify, chunk, embed)
 │   ├── models/         # Pydantic/SQLModel data models
 │   └── workers/        # Celery task workers
 ├── scripts/            # Archived utilities and bulk-ingestion helpers

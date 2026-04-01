@@ -36,12 +36,6 @@ export function usePolling<T>({
   }, [enabled]);
 
   useEffect(() => {
-    if (enabled) return;
-    setData(null);
-    setError(null);
-  }, [enabled]);
-
-  useEffect(() => {
     if (!enabled) return;
 
     let cancelled = false;
@@ -76,5 +70,10 @@ export function usePolling<T>({
     };
   }, [enabled, fetcher, interval, shouldStop, tick]);
 
-  return { data, error, isPolling, refresh };
+  return {
+    data: enabled ? data : null,
+    error: enabled ? error : null,
+    isPolling,
+    refresh,
+  };
 }

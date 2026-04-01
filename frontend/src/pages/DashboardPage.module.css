@@ -1,14 +1,115 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: var(--space-xl);
+  gap: var(--space-lg);
+}
+
+.kicker {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-warm);
 }
 
 .title {
   font-family: var(--font-display);
   font-size: var(--text-3xl);
   font-weight: 400;
+  margin: 0;
+}
+
+.creationRail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-xl);
+  background:
+    radial-gradient(circle at top right, rgba(201, 129, 58, 0.12), transparent 34%),
+    var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.14);
+}
+
+.creationRailHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.creationRailTitle {
+  margin: 0;
+  font-size: var(--text-2xl);
+  color: var(--text-primary);
+}
+
+.creationRailText {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+.creationGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+.creationCard {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  min-height: 220px;
+  padding: var(--space-lg);
+  background: rgba(46, 40, 34, 0.78);
+  border: 1px solid rgba(212, 149, 106, 0.12);
+  border-radius: var(--radius-lg);
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.creationCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(201, 129, 58, 0.32);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.16);
+}
+
+.creationCardTitle {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-xl);
+  color: var(--text-primary);
+}
+
+.creationCardDescription {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+.creationCardLink {
+  align-self: flex-start;
+  color: var(--accent-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition: color var(--transition-fast);
+}
+
+.creationCardLink:hover {
+  color: var(--accent-warm);
 }
 
 .sessionList {
@@ -64,4 +165,24 @@
 .errorText {
   font-size: var(--text-sm);
   color: var(--cost-negative);
+}
+
+@media (max-width: 920px) {
+  .creationGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .creationCard,
+  .creationCardLink {
+    transition: none;
+  }
 }

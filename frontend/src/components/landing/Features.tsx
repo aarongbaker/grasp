@@ -3,9 +3,9 @@ import styles from './Features.module.css';
 
 const features = [
   {
-    title: 'Cookbook RAG',
+    title: 'Menu-Intent Planning',
     description:
-      'Your personal cookbook library becomes a searchable knowledge base. GRASP retrieves relevant techniques and flavor profiles from YOUR books.',
+      'Start with the dinner you want to cook, not a rigid form. GRASP turns that intent into a workable menu and cooking plan.',
   },
   {
     title: 'Multi-Course Coordination',
@@ -18,14 +18,14 @@ const features = [
       'GRASP understands that stock must simmer before the risotto starts, and that dessert can chill while mains cook.',
   },
   {
-    title: 'Parallel Scheduling',
+    title: 'Equipment-Aware Scheduling',
     description:
       "Maximize your kitchen's throughput. Two burners, one oven, and a sous vide? GRASP schedules around your actual equipment.",
   },
   {
-    title: 'Adaptive Timing',
+    title: 'Curated Culinary Grounding',
     description:
-      'Running behind? GRASP recalculates. Swapped the lamb for chicken? New timeline in seconds.',
+      'Behind the scenes, curated culinary references can sharpen timing, technique, and service decisions without taking over the workflow.',
   },
   {
     title: 'Step-by-Step Timeline',

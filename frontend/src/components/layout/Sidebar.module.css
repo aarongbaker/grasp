@@ -40,11 +40,13 @@
 }
 
 .navLink {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
+  border-left: 2px solid transparent;
   font-size: var(--text-sm);
   color: var(--text-secondary);
   transition: all var(--transition-fast);
@@ -53,12 +55,13 @@
 .navLink:hover {
   color: var(--text-primary);
   background: var(--bg-raised);
+  border-left-color: rgba(201, 129, 58, 0.42);
 }
 
 .navLinkActive {
   color: var(--accent-primary);
   background: var(--bg-raised);
-  border-left: 2px solid var(--accent-primary);
+  border-left-color: var(--accent-primary);
 }
 
 .navIcon {

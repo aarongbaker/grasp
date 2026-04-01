@@ -17,15 +17,14 @@ export function Hero() {
         </span>
 
         <h1 className={styles.heading}>
-          Your cookbooks,
+          Your dinner service,
           <br />
           <span className={styles.headingAccent}>orchestrated.</span>
         </h1>
 
         <p className={styles.description}>
-          GRASP turns your cookbook collection into AI-generated,
-          time-coordinated cooking schedules. Multi-course meals, perfectly
-          synchronized.
+          GRASP turns a meal idea into a generated menu and a time-coordinated
+          cooking schedule. Multi-course service, timed to land together.
         </p>
 
         <div className={styles.ctas}>

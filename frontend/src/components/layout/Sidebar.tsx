@@ -4,7 +4,8 @@ import styles from './Sidebar.module.css';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '\u25A3' },
-  { to: '/sessions/new', label: 'New Session', icon: '+' },
+  { to: '/sessions/new', label: 'Plan a Dinner', icon: '+' },
+  { to: '/recipes/new', label: 'Recipe Drafts', icon: '\u270E' },
   { to: '/profile', label: 'Kitchen', icon: '\u2318' },
 ];
 
@@ -16,7 +17,7 @@ export function Sidebar() {
     <aside className={styles.sidebar}>
       <div className={styles.logo}>
         <div className={styles.logoText}>GRASP</div>
-        <div className={styles.logoSub}>meal scheduling engine</div>
+        <div className={styles.logoSub}>chef planning workspace</div>
       </div>
 
       <nav className={styles.nav}>

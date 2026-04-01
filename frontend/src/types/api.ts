@@ -4,7 +4,6 @@ export type MealType = 'breakfast' | 'brunch' | 'lunch' | 'dinner' | 'appetizers
 export type Occasion = 'casual' | 'dinner_party' | 'tasting_menu' | 'meal_prep';
 export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating' | 'scheduling' | 'complete' | 'partial' | 'failed' | 'cancelled';
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
-export type IngestionStatus = 'pending' | 'processing' | 'complete' | 'failed';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
@@ -212,32 +211,4 @@ export interface SessionResults {
   schedule: NaturalLanguageSchedule;
   recipes: ValidatedRecipe[];
   errors: NodeError[];
-}
-
-// Ingestion
-export interface BookStatus {
-  title: string;
-  status: string;
-  phase?: string;
-  error?: string;
-  book_id?: string;
-  pages_done?: number;
-  pages_total?: number;
-  chunks_total?: number;
-  embedded_chunks?: number;
-  started_at?: string;
-  updated_at?: string;
-  completed_at?: string;
-}
-
-export interface IngestionJob {
-  job_id: string;
-  user_id: string;
-  status: IngestionStatus;
-  book_count: number;
-  completed: number;
-  failed: number;
-  book_statuses: BookStatus[];
-  created_at: string;
-  completed_at: string | null;
 }

@@ -4,7 +4,7 @@ import styles from './TechStack.module.css';
 const stack = [
   { name: 'Claude', role: 'Recipe generation & reasoning', brand: 'Anthropic' },
   { name: 'OpenAI', role: 'Text embeddings for semantic search', brand: 'Embeddings' },
-  { name: 'Pinecone', role: 'Vector database for cookbook RAG', brand: 'Vector DB' },
+  { name: 'Pinecone', role: 'Curated enrichment retrieval', brand: 'Vector DB' },
   { name: 'LangGraph', role: 'State machine orchestration', brand: 'Orchestration' },
 ];
 
@@ -15,8 +15,8 @@ export function TechStack() {
         <div className={styles.header}>
           <h2 className={styles.title}>The stack behind the schedule</h2>
           <p className={styles.subtitle}>
-            GRASP orchestrates multiple AI systems through a LangGraph state
-            machine.
+            GRASP orchestrates recipe generation, curated enrichment, and
+            scheduling through a LangGraph state machine.
           </p>
         </div>
 
@@ -49,7 +49,7 @@ export function TechStack() {
           <div className={styles.diagramArrow} />
           <div className={styles.diagramCenter}>
             LangGraph
-            <div className={styles.diagramCenterSub}>Claude + Pinecone</div>
+            <div className={styles.diagramCenterSub}>Claude + curated retrieval</div>
           </div>
           <div className={styles.diagramArrow} />
           <div className={styles.diagramOutput}>Schedule Output</div>

@@ -1,8 +1,8 @@
 import { motion } from 'framer-motion';
 import {
-  BookOpen,
-  Database,
+  ClipboardPenLine,
   Sparkles,
+  BookOpenText,
   GitBranch,
   Clock,
   ChefHat,
@@ -12,21 +12,21 @@ import styles from './Pipeline.module.css';
 
 const stages: { title: string; description: string; icon: LucideIcon }[] = [
   {
-    title: 'Ingest',
-    description: 'Your cookbook PDFs and recipe URLs are parsed and chunked.',
-    icon: BookOpen,
-  },
-  {
-    title: 'Embed',
-    description:
-      'OpenAI embeddings index your recipes into Pinecone vector store.',
-    icon: Database,
+    title: 'Describe',
+    description: 'You describe the meal, guest count, occasion, and service time.',
+    icon: ClipboardPenLine,
   },
   {
     title: 'Generate',
     description:
-      'Claude creates new recipes informed by your collection via RAG.',
+      'Claude proposes dishes and core recipe structure from your menu intent.',
     icon: Sparkles,
+  },
+  {
+    title: 'Ground',
+    description:
+      'Curated culinary knowledge can refine timing and technique behind the scenes.',
+    icon: BookOpenText,
   },
   {
     title: 'Graph',
@@ -37,13 +37,13 @@ const stages: { title: string; description: string; icon: LucideIcon }[] = [
   {
     title: 'Schedule',
     description:
-      'Constraint solver merges all dishes into an optimal timeline.',
+      'Constraint-aware scheduling merges every dish into one service timeline.',
     icon: Clock,
   },
   {
     title: 'Render',
     description:
-      'Step-by-step instructions with precise timing for every burner.',
+      'You get step-by-step guidance with timing, equipment flow, and sequencing.',
     icon: ChefHat,
   },
 ];
@@ -71,11 +71,11 @@ export function Pipeline() {
       <div className={styles.container}>
         <div className={styles.header}>
           <h2 className={styles.title}>
-            From cookbooks to coordinated cooking
+            From menu intent to coordinated cooking
           </h2>
           <p className={styles.subtitle}>
-            A six-stage AI pipeline that understands your recipes, builds
-            dependency graphs, and merges everything into a parallel schedule.
+            A six-stage AI pipeline that turns a dinner idea into a structured,
+            synchronized schedule.
           </p>
         </div>
 
