@@ -116,6 +116,7 @@ async def rasterise_and_ocr_pdf(
     book_id: str,
     user_id: str,
     db,  # AsyncSession
+    progress_callback=None,
 ) -> list[dict]:
     """
     Rasterises every page at 300 DPI, runs OCR, writes PageCache rows.
@@ -183,6 +184,9 @@ async def rasterise_and_ocr_pdf(
                 "page_hash": page_hash,
             }
         )
+
+        if progress_callback is not None:
+            await progress_callback(page_num + 1, len(doc))
 
         # Batch-commit to avoid holding all PageCache objects in session
         if (page_num + 1) % _COMMIT_BATCH == 0:

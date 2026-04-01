@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { uploadPdf, getIngestionStatus, listCookbooks, deleteCookbook } from '../api/ingest';
+import { uploadPdf, cancelIngestion, getIngestionStatus, listCookbooks, deleteCookbook } from '../api/ingest';
 import { FileUpload } from '../components/shared/FileUpload';
 import { Button } from '../components/shared/Button';
 import { usePolling } from '../hooks/usePolling';
@@ -28,6 +28,7 @@ export function IngestPage() {
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(() => readStoredIngestJobId());
   const [uploading, setUploading] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState('');
   const [cookbooks, setCookbooks] = useState<BookRecord[]>([]);
 
@@ -76,6 +77,11 @@ export function IngestPage() {
     enabled: !!jobId,
   });
 
+  const firstBookStatus = job?.book_statuses[0];
+  const updatedAtMs = firstBookStatus?.updated_at ? Date.parse(firstBookStatus.updated_at) : Number.NaN;
+  const isStaleProcessing =
+    job?.status === 'processing' && Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > 2 * 60 * 1000;
+
   async function handleUpload() {
     if (!file) return;
     setError('');
@@ -97,6 +103,21 @@ export function IngestPage() {
       setCookbooks((prev) => prev.filter((book) => book.book_id !== bookId));
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Could not delete cookbook'));
+    }
+  }
+
+  async function handleCancelUpload() {
+    if (!jobId) return;
+    setError('');
+    setCancelling(true);
+    try {
+      await cancelIngestion(jobId);
+      setJobId(null);
+      setFile(null);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Could not cancel upload'));
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -127,17 +148,44 @@ export function IngestPage() {
         <div className={styles.jobStatus}>
           <div className={styles.jobHeader}>
             <span className={styles.jobTitle}>Ingestion Job</span>
-            <span className={`${styles.jobBadge} ${styles[job.status]}`}>{job.status}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <span className={`${styles.jobBadge} ${styles[job.status]}`}>{job.status}</span>
+              {job.status === 'processing' && (
+                <Button variant="ghost" size="sm" onClick={handleCancelUpload} disabled={cancelling}>
+                  {cancelling ? 'Cancelling…' : 'Cancel upload'}
+                </Button>
+              )}
+            </div>
           </div>
           <div className={styles.bookList}>
             {job.book_statuses.map((b, i) => (
               <div key={i} className={styles.bookItem}>
                 <span>{b.title}</span>
-                <span>{b.status}</span>
+                <span>{b.phase ? `${b.status} · ${b.phase}` : b.status}</span>
+                {typeof b.pages_total === 'number' && <span>{b.pages_total} pages</span>}
+                {typeof b.chunks_total === 'number' && <span>{b.chunks_total} chunks</span>}
+                {typeof b.embedded_chunks === 'number' && <span>{b.embedded_chunks} embedded</span>}
                 {b.error && <span className={styles.bookError}>{b.error}</span>}
               </div>
             ))}
           </div>
+          {job.status === 'processing' && (
+            <>
+              <p style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--space-md)' }}>
+                {job.book_statuses[0]?.phase === 'ocr'
+                  ? 'Scanning pages now. Large cookbooks can take several minutes.'
+                  : job.book_statuses[0]?.phase === 'embed'
+                    ? 'Building search vectors now. External API latency can slow this stage.'
+                    : 'Processing your cookbook.'}
+              </p>
+              {isStaleProcessing && (
+                <p style={{ color: 'var(--cost-warning)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-sm)' }}>
+                  Progress has not updated for a couple of minutes. The upload may be stalled.
+                  You can keep this page open to see whether it resumes or fails.
+                </p>
+              )}
+            </>
+          )}
           {job.status === 'complete' && (
             <p style={{ color: 'var(--cost-positive)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-md)' }}>
               Done! {job.completed} book(s) processed successfully.

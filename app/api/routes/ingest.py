@@ -3,6 +3,7 @@
 import base64
 import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from sqlalchemy import delete
@@ -400,7 +401,10 @@ async def upload_pdf(
     from app.workers.tasks import ingest_cookbook
 
     content_b64 = base64.b64encode(content).decode("ascii")
-    ingest_cookbook.delay(str(job.job_id), str(current_user.user_id), content_b64, file.filename)
+    result = ingest_cookbook.delay(str(job.job_id), str(current_user.user_id), content_b64, file.filename)
+    job.celery_task_id = result.id
+    db.add(job)
+    await db.commit()
 
     return {"job_id": str(job.job_id)}
 
@@ -505,3 +509,38 @@ async def get_ingestion_status(job_id: uuid.UUID, db: DBSession, current_user: C
     if job.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     return job
+
+
+@router.post("/{job_id}/cancel", status_code=200)
+async def cancel_ingestion(job_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    job = await db.get(IngestionJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Ingestion job not found")
+    if job.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if job.status in {IngestionStatus.COMPLETE, IngestionStatus.FAILED}:
+        raise HTTPException(status_code=409, detail=f"Ingestion job is already {job.status}")
+
+    if job.celery_task_id:
+        try:
+            from app.workers.celery_app import celery_app
+
+            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+        except Exception:
+            pass
+
+    job.status = IngestionStatus.FAILED
+    job.failed = max(job.failed, 1)
+    job.completed_at = job.completed_at or datetime.now(timezone.utc).replace(tzinfo=None)
+    existing = job.book_statuses[0] if job.book_statuses else {"title": "Cookbook upload"}
+    job.book_statuses = [
+        {
+            **existing,
+            "status": "failed",
+            "phase": "failed",
+            "error": "Upload cancelled by user.",
+        }
+    ]
+    db.add(job)
+    await db.commit()
+    return {"job_id": str(job.job_id), "status": "failed", "message": "Ingestion cancelled"}

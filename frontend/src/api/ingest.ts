@@ -10,6 +10,12 @@ export function uploadPdf(file: File): Promise<{ job_id: string }> {
   });
 }
 
+export function cancelIngestion(jobId: string): Promise<{ job_id: string; status: string; message: string }> {
+  return apiFetch<{ job_id: string; status: string; message: string }>(`/ingest/${jobId}/cancel`, {
+    method: 'POST',
+  });
+}
+
 export function getIngestionStatus(jobId: string): Promise<IngestionJob> {
   return apiFetch<IngestionJob>(`/ingest/${jobId}`);
 }

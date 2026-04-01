@@ -101,6 +101,7 @@ class IngestionJob(SQLModel, table=True):
     book_count: int = 0
     completed: int = 0
     failed: int = 0
+    celery_task_id: Optional[str] = None
     book_statuses: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     completed_at: Optional[datetime] = None

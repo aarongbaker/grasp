@@ -51,6 +51,8 @@ async def embed_and_upsert_chunks(
     """
     Embed chunks and upsert to Pinecone. Returns count of upserted chunks.
     """
+    import asyncio
+
     from openai import AsyncOpenAI
     from pinecone import Pinecone
     from sqlmodel import select
@@ -59,7 +61,7 @@ async def embed_and_upsert_chunks(
     from app.models.ingestion import CookbookChunk
     from app.models.user import UserProfile
 
-    openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+    openai_client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0)
     pc = Pinecone(api_key=settings.pinecone_api_key)
     index = pc.Index(settings.pinecone_index_name)
 
@@ -135,7 +137,10 @@ async def embed_and_upsert_chunks(
         if vectors:
             pinecone_batch = 100
             for i in range(0, len(vectors), pinecone_batch):
-                index.upsert(vectors=vectors[i : i + pinecone_batch])
+                await asyncio.wait_for(
+                    asyncio.to_thread(index.upsert, vectors=vectors[i : i + pinecone_batch]),
+                    timeout=60,
+                )
             await db.commit()
             total_upserted += len(vectors)
 

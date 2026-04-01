@@ -457,13 +457,13 @@ async def test_upload_non_pdf_returns_400(app_with_overrides):
 
 
 @pytest.mark.asyncio
-async def test_upload_pdf_returns_202(app_with_overrides):
+async def test_upload_pdf_returns_202(app_with_overrides, mock_db):
     """Valid PDF upload returns 202 with job_id."""
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Patch at workers.tasks — the route imports from there at call time
         with patch("app.workers.tasks.ingest_cookbook") as mock_task:
-            mock_task.delay = MagicMock()
+            mock_task.delay = MagicMock(return_value=MagicMock(id="celery-xyz"))
             resp = await ac.post(
                 "/api/v1/ingest",
                 files={"file": ("cookbook.pdf", b"%PDF-1.4 fake content", "application/pdf")},
@@ -497,6 +497,99 @@ async def test_get_ingestion_status_403_wrong_user(app_with_overrides, mock_db, 
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get(f"/api/v1/ingest/{job_id}")
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_ingestion_status_returns_phase_metadata(app_with_overrides, mock_db, test_user):
+    job_id = uuid.uuid4()
+    job = IngestionJob(
+        job_id=job_id,
+        user_id=test_user.user_id,
+        status=IngestionStatus.PROCESSING,
+        book_statuses=[
+            {
+                "title": "cookbook.pdf",
+                "status": "processing",
+                "phase": "ocr",
+                "pages_done": 7,
+                "pages_total": 42,
+                "updated_at": "2026-04-01T14:00:00+00:00",
+            }
+        ],
+    )
+    mock_db.seed(IngestionJob, job_id, job)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/ingest/{job_id}")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "processing"
+    assert payload["book_statuses"][0]["phase"] == "ocr"
+    assert payload["book_statuses"][0]["pages_done"] == 7
+    assert payload["book_statuses"][0]["pages_total"] == 42
+
+
+@pytest.mark.asyncio
+async def test_cancel_ingestion_200_revokes_and_marks_failed(app_with_overrides, mock_db, test_user):
+    job_id = uuid.uuid4()
+    job = IngestionJob(
+        job_id=job_id,
+        user_id=test_user.user_id,
+        status=IngestionStatus.PROCESSING,
+        celery_task_id="celery-123",
+        book_statuses=[{"title": "cookbook.pdf", "status": "processing", "phase": "embed"}],
+    )
+    mock_db.seed(IngestionJob, job_id, job)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("app.workers.celery_app.celery_app") as mock_celery:
+            resp = await ac.post(f"/api/v1/ingest/{job_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"
+    mock_celery.control.revoke.assert_called_once_with("celery-123", terminate=True, signal="SIGTERM")
+    assert job.status == IngestionStatus.FAILED
+    assert job.failed == 1
+    assert job.book_statuses[0]["phase"] == "failed"
+    assert job.book_statuses[0]["error"] == "Upload cancelled by user."
+
+
+@pytest.mark.asyncio
+async def test_cancel_ingestion_403_wrong_user(app_with_overrides, mock_db):
+    job_id = uuid.uuid4()
+    job = IngestionJob(
+        job_id=job_id,
+        user_id=uuid.uuid4(),
+        status=IngestionStatus.PROCESSING,
+        celery_task_id="celery-123",
+    )
+    mock_db.seed(IngestionJob, job_id, job)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/ingest/{job_id}/cancel")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cancel_ingestion_409_terminal_job(app_with_overrides, mock_db, test_user):
+    job_id = uuid.uuid4()
+    job = IngestionJob(
+        job_id=job_id,
+        user_id=test_user.user_id,
+        status=IngestionStatus.COMPLETE,
+    )
+    mock_db.seed(IngestionJob, job_id, job)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/ingest/{job_id}/cancel")
+
+    assert resp.status_code == 409
 
 
 @pytest.mark.asyncio

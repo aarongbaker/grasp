@@ -245,7 +245,15 @@ export interface SessionResults {
 export interface BookStatus {
   title: string;
   status: string;
+  phase?: string;
   error?: string;
+  book_id?: string;
+  pages_total?: number;
+  chunks_total?: number;
+  embedded_chunks?: number;
+  started_at?: string;
+  updated_at?: string;
+  completed_at?: string;
 }
 
 export interface BookRecord {

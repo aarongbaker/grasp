@@ -178,9 +178,30 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
         if not job:
             return
 
+        def _phase_status(phase: str, **extra):
+            return {
+                "title": filename,
+                "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+                "phase": phase,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                **extra,
+            }
+
+        async def _commit_job_phase(phase: str, **extra):
+            job.book_statuses = [_phase_status(phase, **extra)]
+            db.add(job)
+            await db.commit()
+
+        async def _ocr_progress(page_done: int, pages_total: int):
+            await _commit_job_phase(
+                "ocr",
+                book_id=str(book.book_id) if "book" in locals() else None,
+                pages_done=page_done,
+                pages_total=pages_total,
+            )
+
         job.status = IngestionStatus.PROCESSING
-        db.add(job)
-        await db.commit()
+        await _commit_job_phase("queued")
 
         try:
             book = BookRecord(
@@ -191,8 +212,17 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
             await db.commit()
             await db.refresh(book)
 
+            await _commit_job_phase("ocr", book_id=str(book.book_id), started_at=datetime.now(timezone.utc).isoformat())
+
             # Phase 2a: OCR
-            pages = await rasterise_and_ocr_pdf(pdf_bytes, str(book.book_id), user_id, db)
+            pages = await rasterise_and_ocr_pdf(
+                pdf_bytes,
+                str(book.book_id),
+                user_id,
+                db,
+                progress_callback=_ocr_progress,
+            )
+            await _commit_job_phase("classify", book_id=str(book.book_id), pages_total=len(pages))
 
             # Phase 2b: classify
             first_pages_text = " ".join(p["text"] for p in pages[:3])
@@ -202,8 +232,22 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
             db.add(book)
             await db.commit()
 
+            await _commit_job_phase(
+                "chunk",
+                book_id=str(book.book_id),
+                pages_total=len(pages),
+                document_type=getattr(doc_type, "value", doc_type),
+            )
+
             # Phase 2c/2d: chunk
             chunks = run_state_machine(pages)
+
+            await _commit_job_phase(
+                "embed",
+                book_id=str(book.book_id),
+                pages_total=len(pages),
+                chunks_total=len(chunks),
+            )
 
             # Phase 2e: embed + upsert
             count = await embed_and_upsert_chunks(chunks, str(book.book_id), user_id, db)
@@ -213,11 +257,23 @@ async def _ingest_async(job_id: str, user_id: str, pdf_bytes: bytes, filename: s
             job.status = IngestionStatus.COMPLETE
             job.completed = 1
             job.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            job.book_statuses = [
+                {
+                    "title": filename,
+                    "status": "complete",
+                    "phase": "complete",
+                    "book_id": str(book.book_id),
+                    "pages_total": len(pages),
+                    "chunks_total": len(chunks),
+                    "embedded_chunks": count,
+                    "completed_at": job.completed_at.isoformat(),
+                }
+            ]
 
         except Exception as e:
             job.status = IngestionStatus.FAILED
             job.failed = 1
-            job.book_statuses = [{"title": filename, "status": "failed", "error": str(e)}]
+            job.book_statuses = [{"title": filename, "status": "failed", "phase": "failed", "error": str(e)}]
 
         db.add(job)
         await db.commit()
