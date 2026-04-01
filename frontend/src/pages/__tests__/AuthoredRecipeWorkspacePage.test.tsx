@@ -6,7 +6,10 @@ import * as authoredRecipesApi from '../../api/authoredRecipes';
 import * as sessionsApi from '../../api/sessions';
 import { ApiError } from '../../api/client';
 import { AuthProvider } from '../../context/AuthContext';
-import { getAuthoredRecipeValidationDetail } from '../../utils/errors';
+import {
+  getAuthoredRecipeValidationDetail,
+  translateAuthoredRecipeValidationDetail,
+} from '../../utils/errors';
 import { AuthoredRecipeWorkspacePage } from '../AuthoredRecipeWorkspacePage';
 
 const testUserId = '00000000-0000-0000-0000-000000000111';
@@ -132,11 +135,14 @@ describe('AuthoredRecipeWorkspacePage', () => {
     await user.type(screen.getByLabelText('Step title'), 'Roast carrots');
     await user.selectOptions(screen.getByLabelText('Where does the work happen?'), 'oven');
     await user.type(screen.getByLabelText('What happens in this beat?'), 'Roast until deeply caramelized.');
-    await user.clear(screen.getByLabelText('Expected minutes'));
-    await user.type(screen.getByLabelText('Expected minutes'), '35');
+    const expectedMinutesInput = screen.getByLabelText('Expected minutes');
+    await user.click(expectedMinutesInput);
+    await user.keyboard('{Meta>}a{/Meta}{Backspace}');
+    await user.type(expectedMinutesInput, '10');
     const outerEdgeInput = screen.getByLabelText('Outer edge if service drifts');
-    await user.clear(outerEdgeInput);
-    await user.type(outerEdgeInput, '45');
+    await user.click(outerEdgeInput);
+    await user.keyboard('{Meta>}a{/Meta}{Backspace}');
+    await user.type(outerEdgeInput, '15');
     const equipmentInput = screen.getByLabelText('Equipment needed');
     await user.clear(equipmentInput);
     await user.type(equipmentInput, 'sheet tray');
@@ -144,10 +150,11 @@ describe('AuthoredRecipeWorkspacePage', () => {
     await user.type(screen.getByLabelText('Yield contribution'), 'Main roasted component');
     await user.type(screen.getByLabelText('Chef note for this beat'), 'Do not crowd the tray.');
     await user.click(screen.getByLabelText('This beat can be handled ahead of service.'));
+    await screen.findByLabelText('How far ahead?');
     await user.type(screen.getByLabelText('How far ahead?'), 'Up to 6 hours ahead');
     await user.type(screen.getByLabelText('Recovery note'), 'Refresh with olive oil before plating');
-
     await user.type(screen.getByLabelText('Make-ahead guidance'), 'Roast early, then warm hard before pickup.');
+
     await user.click(screen.getByLabelText('Open hold, storage, and recovery details.'));
     await user.type(screen.getByLabelText('Storage note'), 'Store yogurt separately.');
     const methodInputs = screen.getAllByLabelText('Method', { selector: 'input' });
@@ -258,6 +265,76 @@ describe('AuthoredRecipeWorkspacePage', () => {
     );
   });
 
+  it('shows chef-readable preflight guidance before save and highlights the right sections', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText('This beat can be handled ahead of service.'));
+    const saveButton = screen.getByRole('button', { name: 'Save private recipe draft' });
+
+    await user.clear(screen.getByLabelText('Yield'));
+    await user.type(screen.getByLabelText('Yield'), '4');
+
+    const form = saveButton.closest('form');
+    form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+    expect(await screen.findByText(/parts of the draft still need kitchen detail/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Give the dish a title the kitchen will recognize immediately/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Step 1 needs a beat name/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Step 1 is marked make-ahead, but it still needs a window/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Add whole-dish make-ahead guidance/i).length).toBeGreaterThan(0);
+  });
+
+  it('translates backend dependency guidance into visible beat language instead of raw step ids', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(authoredRecipesApi, 'createAuthoredRecipe').mockRejectedValue(
+      new ApiError(
+        422,
+        'The recipe draft needs more detail before it can be saved.',
+        'authored-validation',
+        {
+          detail: [
+            {
+              type: 'value_error',
+              loc: ['body', 'steps', 1, 'dependencies', 0, 'step_id'],
+              msg: "Value error, Step 'braise_greens_step_2' depends on 'missing_step' which does not exist.",
+              input: 'missing_step',
+            },
+          ],
+        },
+      ),
+    );
+
+    renderPage();
+
+    await user.type(screen.getByLabelText('Dish title'), 'Braised greens toast');
+    await user.type(screen.getByLabelText('How would you describe the dish at the pass?'), 'Late-night greens on toast.');
+    await user.type(screen.getByLabelText('Cuisine or lens'), 'Southern');
+    await user.clear(screen.getByLabelText('Yield'));
+    await user.type(screen.getByLabelText('Yield'), '4');
+    await user.clear(screen.getByLabelText('Yield unit'));
+    await user.type(screen.getByLabelText('Yield unit'), 'plates');
+
+    await user.type(screen.getByLabelText('Ingredient 1'), 'Greens');
+    await user.type(screen.getByLabelText('Quantity'), '3 bunches');
+    await user.type(screen.getByLabelText('Step title'), 'Braise greens');
+    await user.type(screen.getByLabelText('What happens in this beat?'), 'Cook until silky and glossy.');
+
+    await user.click(screen.getByRole('button', { name: 'Add step' }));
+    await user.type(screen.getByLabelText('Step title'), 'Toast bread');
+    await user.type(screen.getByLabelText('What happens in this beat?'), 'Toast just before pickup.');
+    await user.selectOptions(screen.getByLabelText('Add a dependency'), '0');
+
+    const workspaceForm = screen.getByRole('button', { name: 'Save private recipe draft' }).closest('form');
+    workspaceForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+    expect(await screen.findByText(/One part of the draft still needs kitchen detail/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Step 2 points dependency 1 at a beat this draft cannot see yet/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1. Braise greens').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/braise_greens_step_2/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/missing_step/i)).not.toBeInTheDocument();
+  });
+
   it('avoids cookbook and raw-schema wording while exposing chef-readable controls', () => {
     renderPage();
 
@@ -299,5 +376,38 @@ describe('AuthoredRecipeWorkspacePage', () => {
       ],
     });
     expect(getAuthoredRecipeValidationDetail(new ApiError(500, 'boom'))).toBeNull();
+  });
+
+  it('translates structured validation issues into kitchen-language guidance', () => {
+    expect(
+      translateAuthoredRecipeValidationDetail({
+        detail: [
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 0, 'duration_max'],
+            msg: 'Value error, duration_max must be greater than or equal to duration_minutes',
+          },
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 1, 'dependencies', 0, 'step_id'],
+            msg: "Value error, Step 'second_step' depends on 'ghost_step' which does not exist.",
+          },
+        ],
+      }),
+    ).toEqual({
+      summary: '2 parts of the draft need another pass before this recipe can save.',
+      fields: [
+        {
+          path: 'steps.0.duration_max',
+          message:
+            'Step 1 has an outer time edge that ends before the expected working time. Make the outer edge the same length or longer.',
+        },
+        {
+          path: 'steps.1.dependencies.0.step_id',
+          message:
+            'Step 2 points dependency 1 at a beat this draft cannot see yet. Re-link it to an earlier visible beat.',
+        },
+      ],
+    });
   });
 });
