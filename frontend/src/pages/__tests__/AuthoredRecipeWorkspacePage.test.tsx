@@ -1,64 +1,271 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as authoredRecipesApi from '../../api/authoredRecipes';
+import * as sessionsApi from '../../api/sessions';
+import { AuthProvider } from '../../context/AuthContext';
 import { AuthoredRecipeWorkspacePage } from '../AuthoredRecipeWorkspacePage';
 
+const testUserId = '00000000-0000-0000-0000-000000000111';
+const storageValues = new Map<string, string>();
+
+function setStorage(key: string, value: string) {
+  storageValues.set(key, value);
+}
+
+function getStorageItem(key: string) {
+  return storageValues.get(key) ?? null;
+}
+
+function clearStorage() {
+  storageValues.clear();
+}
+
 function renderPage() {
+  setStorage('grasp_token', 'token');
+  setStorage('grasp_refresh_token', 'refresh');
+  setStorage('grasp_user_id', testUserId);
+  setStorage(
+    'grasp_user_profile',
+    JSON.stringify({
+      user_id: testUserId,
+      name: 'Test Chef',
+      email: 'chef@example.com',
+    }),
+  );
+
   return render(
     <MemoryRouter>
-      <AuthoredRecipeWorkspacePage />
+      <AuthProvider>
+        <AuthoredRecipeWorkspacePage />
+      </AuthProvider>
     </MemoryRouter>,
   );
 }
 
+beforeEach(() => {
+  clearStorage();
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => getStorageItem(key)),
+    setItem: vi.fn((key: string, value: string) => setStorage(key, value)),
+    removeItem: vi.fn((key: string) => storageValues.delete(key)),
+    clear: vi.fn(() => clearStorage()),
+  });
+  vi.restoreAllMocks();
+});
+
 describe('AuthoredRecipeWorkspacePage', () => {
-  it('renders the chef-first authored workspace shell with progressive sections', () => {
+  it('saves a chef-authored draft through the authored recipe seam', async () => {
+    const user = userEvent.setup();
+    const createSpy = vi.spyOn(authoredRecipesApi, 'createAuthoredRecipe').mockResolvedValue({
+      recipe_id: 'recipe-1234-abcd',
+      user_id: testUserId,
+      title: 'Charred carrots with whipped feta',
+      description: 'A warm vegetable course with smoke, acidity, and a cold dairy contrast.',
+      cuisine: 'Levantine',
+      yield_info: { quantity: 6, unit: 'plates', notes: 'starter course' },
+      ingredients: [
+        { name: 'Carrots', quantity: '2 lb', preparation: 'scrubbed' },
+        { name: 'Feta', quantity: '8 oz', preparation: 'whipped smooth' },
+      ],
+      steps: [
+        {
+          title: 'Roast carrots',
+          instruction: 'Roast until deeply caramelized.',
+          duration_minutes: 35,
+          duration_max: 45,
+          resource: 'oven',
+          required_equipment: ['sheet tray'],
+          dependencies: [],
+          can_be_done_ahead: true,
+          prep_ahead_window: 'Up to 6 hours ahead',
+          prep_ahead_notes: 'Refresh with olive oil before plating',
+          target_internal_temperature_f: null,
+          until_condition: 'Edges blistered, centers tender',
+          yield_contribution: 'Main roasted component',
+          chef_notes: 'Do not crowd the tray.',
+        },
+      ],
+      equipment_notes: ['Needs one full sheet tray.'],
+      storage: { method: 'Refrigerated', duration: '2 days', notes: 'Store yogurt separately.' },
+      hold: { method: 'Warm pass', max_duration: '10 minutes', notes: 'Do not cover tightly.' },
+      reheat: { method: 'Hot oven', target: 'Hot through', notes: 'Brush with olive oil.' },
+      make_ahead_guidance: 'Roast early, then warm hard before pickup.',
+      plating_notes: 'Swipe feta first, then stack the carrots.',
+      chef_notes: 'Keep the feta cold for contrast.',
+      created_at: '2026-04-01T12:00:00Z',
+      updated_at: '2026-04-01T12:05:00Z',
+    });
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+
     renderPage();
 
-    expect(
-      screen.getByRole('heading', {
-        name: 'Open a fresh page for a dish you already know how to talk through.',
+    await user.type(screen.getByLabelText('Dish title'), 'Charred carrots with whipped feta');
+    await user.type(
+      screen.getByLabelText('How would you describe the dish at the pass?'),
+      'A warm vegetable course with smoke, acidity, and a cold dairy contrast.',
+    );
+    await user.type(screen.getByLabelText('Cuisine or lens'), 'Levantine');
+    await user.clear(screen.getByLabelText('Yield'));
+    await user.type(screen.getByLabelText('Yield'), '6');
+    await user.clear(screen.getByLabelText('Yield unit'));
+    await user.type(screen.getByLabelText('Yield unit'), 'plates');
+    await user.type(screen.getByLabelText('Yield note'), 'starter course');
+
+    const ingredientNameInputs = screen.getAllByLabelText(/Ingredient \d+/i);
+    const quantityInputs = screen.getAllByLabelText('Quantity');
+    await user.type(ingredientNameInputs[0], 'Carrots');
+    await user.type(quantityInputs[0], '2 lb');
+    await user.type(screen.getByLabelText('Prep note'), 'scrubbed');
+
+    await user.click(screen.getByRole('button', { name: 'Add ingredient' }));
+    const updatedIngredientNameInputs = screen.getAllByLabelText(/Ingredient \d+/i);
+    const updatedQuantityInputs = screen.getAllByLabelText('Quantity');
+    const prepNoteInputs = screen.getAllByLabelText('Prep note');
+    await user.type(updatedIngredientNameInputs[1], 'Feta');
+    await user.type(updatedQuantityInputs[1], '8 oz');
+    await user.type(prepNoteInputs[1], 'whipped smooth');
+
+    await user.type(screen.getByLabelText('Step title'), 'Roast carrots');
+    await user.selectOptions(screen.getByLabelText('Where does the work happen?'), 'oven');
+    await user.type(screen.getByLabelText('What happens in this beat?'), 'Roast until deeply caramelized.');
+    await user.clear(screen.getByLabelText('Expected minutes'));
+    await user.type(screen.getByLabelText('Expected minutes'), '35');
+    const outerEdgeInput = screen.getByLabelText('Outer edge if service drifts');
+    await user.clear(outerEdgeInput);
+    await user.type(outerEdgeInput, '45');
+    const equipmentInput = screen.getByLabelText('Equipment needed');
+    await user.clear(equipmentInput);
+    await user.type(equipmentInput, 'sheet tray');
+    await user.type(screen.getByLabelText('Until condition'), 'Edges blistered, centers tender');
+    await user.type(screen.getByLabelText('Yield contribution'), 'Main roasted component');
+    await user.type(screen.getByLabelText('Chef note for this beat'), 'Do not crowd the tray.');
+    await user.click(screen.getByLabelText('This beat can be handled ahead of service.'));
+    await user.type(screen.getByLabelText('How far ahead?'), 'Up to 6 hours ahead');
+    await user.type(screen.getByLabelText('Recovery note'), 'Refresh with olive oil before plating');
+
+    await user.type(screen.getByLabelText('Make-ahead guidance'), 'Roast early, then warm hard before pickup.');
+    await user.click(screen.getByLabelText('Open hold, storage, and recovery details.'));
+    await user.type(screen.getByLabelText('Storage note'), 'Store yogurt separately.');
+    const methodInputs = screen.getAllByLabelText('Method', { selector: 'input' });
+    await user.type(methodInputs[0], 'Refrigerated');
+    await user.type(screen.getByLabelText('How long'), '2 days');
+
+    const holdMethod = methodInputs[1];
+    await user.type(holdMethod, 'Warm pass');
+    await user.type(screen.getByLabelText('Longest safe hold'), '10 minutes');
+    await user.type(screen.getByLabelText('Hold note'), 'Do not cover tightly.');
+
+    const reheatMethod = methodInputs[2];
+    await user.type(reheatMethod, 'Hot oven');
+    await user.type(screen.getByLabelText('Target'), 'Hot through');
+    await user.type(screen.getByLabelText('Plating note'), 'Swipe feta first, then stack the carrots.');
+    await user.type(screen.getByLabelText('Whole-dish chef note'), 'Keep the feta cold for contrast.');
+    await user.type(screen.getByLabelText('Equipment note'), 'Needs one full sheet tray.');
+
+    const saveButton = screen.getByRole('button', { name: 'Save private recipe draft' });
+    expect(saveButton).toBeEnabled();
+    const workspaceForm = saveButton.closest('form');
+    expect(workspaceForm).not.toBeNull();
+    workspaceForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: testUserId,
+        title: 'Charred carrots with whipped feta',
+        cuisine: 'Levantine',
+        yield_info: expect.objectContaining({ quantity: 6, unit: 'plates', notes: 'starter course' }),
+        make_ahead_guidance: 'Roast early, then warm hard before pickup.',
+        plating_notes: 'Swipe feta first, then stack the carrots.',
       }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Kitchen notebook')).toBeInTheDocument();
-    expect(screen.getByText('Blank page, clear structure.')).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', {
-        name: 'Build the draft in passes, not all at once.',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', {
-        name: 'Name the dish and the feeling you want on the pass',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', {
-        name: 'Sketch the prep rhythm before you worry about detail',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', {
-        name: 'Mark what can be made ahead without dulling the dish',
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Dish identity')).toBeInTheDocument();
-    expect(screen.getByText('Last-minute finishing work')).toBeInTheDocument();
-    expect(screen.getByText('Recovery notes if service slips')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue this draft shell' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: 'Need to plan a full dinner instead?' }),
-    ).toHaveAttribute('href', '/sessions/new');
+    );
+    expect(createSpy.mock.calls[0][0].ingredients).toEqual([
+      { name: 'Carrots', quantity: '2 lb', preparation: 'scrubbed' },
+      { name: 'Feta', quantity: '8 oz', preparation: 'whipped smooth' },
+    ]);
+    expect(createSpy.mock.calls[0][0].steps[0]).toMatchObject({
+      title: 'Roast carrots',
+      resource: 'oven',
+      can_be_done_ahead: true,
+      prep_ahead_window: 'Up to 6 hours ahead',
+      prep_ahead_notes: 'Refresh with olive oil before plating',
+      until_condition: 'Edges blistered, centers tender',
+      yield_contribution: 'Main roasted component',
+      chef_notes: 'Do not crowd the tray.',
+    });
+    expect(screen.getByText('Saved as a private recipe draft.')).toBeInTheDocument();
   });
 
-  it('avoids cookbook-upload and raw-schema wording in the authored shell', () => {
+  it('reopens a saved draft through the authored recipe loader and keeps dinner planning separate', async () => {
+    const user = userEvent.setup();
+    const getSpy = vi.spyOn(authoredRecipesApi, 'getAuthoredRecipe').mockResolvedValue({
+      recipe_id: 'recipe-9999',
+      user_id: testUserId,
+      title: 'Braised greens toast',
+      description: 'A late-night snack plate with rich braised greens.',
+      cuisine: 'Southern',
+      yield_info: { quantity: 4, unit: 'plates', notes: null },
+      ingredients: [{ name: 'Greens', quantity: '3 bunches', preparation: 'washed' }],
+      steps: [
+        {
+          title: 'Braise greens',
+          instruction: 'Cook until silky and glossy.',
+          duration_minutes: 40,
+          duration_max: null,
+          resource: 'stovetop',
+          required_equipment: ['braiser'],
+          dependencies: [],
+          can_be_done_ahead: false,
+          prep_ahead_window: null,
+          prep_ahead_notes: null,
+          target_internal_temperature_f: null,
+          until_condition: null,
+          yield_contribution: null,
+          chef_notes: null,
+        },
+      ],
+      equipment_notes: [],
+      storage: null,
+      hold: null,
+      reheat: null,
+      make_ahead_guidance: null,
+      plating_notes: null,
+      chef_notes: null,
+      created_at: '2026-04-01T12:00:00Z',
+      updated_at: '2026-04-01T12:05:00Z',
+    });
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+
     renderPage();
 
+    await user.type(screen.getByLabelText('Reopen a saved draft'), 'recipe-9999');
+    await user.click(screen.getByRole('button', { name: 'Open saved draft' }));
+
+    await waitFor(() => expect(getSpy).toHaveBeenCalledWith('recipe-9999'));
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(await screen.findByDisplayValue('Braised greens toast')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Southern')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Cook until silky and glossy.')).toBeInTheDocument();
+    expect(screen.getByText(/saved draft recipe-9/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Need to plan a full dinner instead?' })).toHaveAttribute(
+      'href',
+      '/sessions/new',
+    );
+  });
+
+  it('avoids cookbook and raw-schema wording while exposing chef-readable controls', () => {
+    renderPage();
+
+    expect(screen.getByText('Build the draft in passes, not all at once.')).toBeInTheDocument();
+    expect(screen.getByText('Open hold, storage, and recovery details.')).toBeInTheDocument();
+    expect(screen.getByText('What must finish before this beat starts?')).toBeInTheDocument();
     expect(screen.queryByText(/cookbook/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/upload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/schema/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/json/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/\bAPI\b/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/session lifecycle/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/depends_on/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/duration_max/i)).not.toBeInTheDocument();
   });
 });

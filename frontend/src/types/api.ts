@@ -5,6 +5,7 @@ export type Occasion = 'casual' | 'dinner_party' | 'tasting_menu' | 'meal_prep';
 export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating' | 'scheduling' | 'complete' | 'partial' | 'failed' | 'cancelled';
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
+export type AuthoredDependencyKind = 'finish_to_start';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -211,4 +212,88 @@ export interface SessionResults {
   schedule: NaturalLanguageSchedule;
   recipes: ValidatedRecipe[];
   errors: NodeError[];
+}
+
+// Authored recipes
+export interface AuthoredRecipeYield {
+  quantity: number;
+  unit: string;
+  notes: string | null;
+}
+
+export interface AuthoredRecipeDependency {
+  step_id: string;
+  kind: AuthoredDependencyKind;
+  lag_minutes: number;
+}
+
+export interface AuthoredRecipeStep {
+  title: string;
+  instruction: string;
+  duration_minutes: number;
+  duration_max: number | null;
+  resource: Resource;
+  required_equipment: string[];
+  dependencies: AuthoredRecipeDependency[];
+  can_be_done_ahead: boolean;
+  prep_ahead_window: string | null;
+  prep_ahead_notes: string | null;
+  target_internal_temperature_f: number | null;
+  until_condition: string | null;
+  yield_contribution: string | null;
+  chef_notes: string | null;
+}
+
+export interface AuthoredRecipeStorageGuidance {
+  method: string;
+  duration: string;
+  notes: string | null;
+}
+
+export interface AuthoredRecipeHoldGuidance {
+  method: string;
+  max_duration: string;
+  notes: string | null;
+}
+
+export interface AuthoredRecipeReheatGuidance {
+  method: string;
+  target: string | null;
+  notes: string | null;
+}
+
+export interface AuthoredRecipeBase {
+  title: string;
+  description: string;
+  cuisine: string;
+  yield_info: AuthoredRecipeYield;
+  ingredients: Ingredient[];
+  steps: AuthoredRecipeStep[];
+  equipment_notes: string[];
+  storage: AuthoredRecipeStorageGuidance | null;
+  hold: AuthoredRecipeHoldGuidance | null;
+  reheat: AuthoredRecipeReheatGuidance | null;
+  make_ahead_guidance: string | null;
+  plating_notes: string | null;
+  chef_notes: string | null;
+}
+
+export interface AuthoredRecipeCreateRequest extends AuthoredRecipeBase {
+  user_id: string;
+}
+
+export interface AuthoredRecipeDetail extends AuthoredRecipeBase {
+  recipe_id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthoredRecipeListItem {
+  recipe_id: string;
+  user_id: string;
+  title: string;
+  cuisine: string;
+  created_at: string;
+  updated_at: string;
 }
