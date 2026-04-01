@@ -393,6 +393,26 @@ export function AuthoredRecipeWorkspacePage() {
     setDraft((current) => current ?? createBlankDraft(userId));
   }, [userId]);
 
+  const loadDraftById = useCallback(async (recipeId: string) => {
+    if (!recipeId) return;
+    setError('');
+    setSaveGuidanceSummary(null);
+    setServerGuidance([]);
+    setDraftStatus('loading');
+    setLoadRecipeId(recipeId);
+
+    try {
+      const recipe = await getAuthoredRecipe(recipeId);
+      setDraft(hydrateDraft(recipe));
+      setSavedRecipeId(recipe.recipe_id);
+      setDraftStatus('saved');
+      setActiveStepIndex(0);
+    } catch (err) {
+      setDraftStatus('ready');
+      setError(getErrorMessage(err, 'Could not load that recipe draft.'));
+    }
+  }, []);
+
   useEffect(() => {
     if (!requestedRecipeId || requestedRecipeId === savedRecipeId || draftStatus === 'loading') {
       return;
@@ -430,26 +450,6 @@ export function AuthoredRecipeWorkspacePage() {
     steps: Array.from(new Set(stepMessages)),
     advance: Array.from(new Set(advanceMessages)),
   };
-
-  const loadDraftById = useCallback(async (recipeId: string) => {
-    if (!recipeId) return;
-    setError('');
-    setSaveGuidanceSummary(null);
-    setServerGuidance([]);
-    setDraftStatus('loading');
-    setLoadRecipeId(recipeId);
-
-    try {
-      const recipe = await getAuthoredRecipe(recipeId);
-      setDraft(hydrateDraft(recipe));
-      setSavedRecipeId(recipe.recipe_id);
-      setDraftStatus('saved');
-      setActiveStepIndex(0);
-    } catch (err) {
-      setDraftStatus('ready');
-      setError(getErrorMessage(err, 'Could not load that recipe draft.'));
-    }
-  }, []);
 
   function updateDraft(updater: (current: AuthoredRecipeCreateRequest) => AuthoredRecipeCreateRequest) {
     setDraft((current) => (current ? updater(current) : current));

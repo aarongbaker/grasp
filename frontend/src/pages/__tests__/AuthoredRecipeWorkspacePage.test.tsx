@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ import {
   getAuthoredRecipeValidationDetail,
   translateAuthoredRecipeValidationDetail,
 } from '../../utils/errors';
+import type { AuthoredRecipeDetail } from '../../types/api';
 import { AuthoredRecipeWorkspacePage } from '../AuthoredRecipeWorkspacePage';
 
 const testUserId = '00000000-0000-0000-0000-000000000111';
@@ -27,7 +28,7 @@ function clearStorage() {
   storageValues.clear();
 }
 
-function renderPage() {
+function renderPage(initialEntries: string[] = ['/recipes/new']) {
   setStorage('grasp_token', 'token');
   setStorage('grasp_refresh_token', 'refresh');
   setStorage('grasp_user_id', testUserId);
@@ -41,7 +42,7 @@ function renderPage() {
   );
 
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
         <AuthoredRecipeWorkspacePage />
       </AuthProvider>
@@ -99,6 +100,8 @@ describe('AuthoredRecipeWorkspacePage', () => {
       make_ahead_guidance: 'Roast early, then warm hard before pickup.',
       plating_notes: 'Swipe feta first, then stack the carrots.',
       chef_notes: 'Keep the feta cold for contrast.',
+      cookbook_id: null,
+      cookbook: null,
       created_at: '2026-04-01T12:00:00Z',
       updated_at: '2026-04-01T12:05:00Z',
     });
@@ -208,7 +211,7 @@ describe('AuthoredRecipeWorkspacePage', () => {
 
   it('reopens a saved draft through the authored recipe loader and keeps dinner planning separate', async () => {
     const user = userEvent.setup();
-    const getSpy = vi.spyOn(authoredRecipesApi, 'getAuthoredRecipe').mockResolvedValue({
+    const recipeDetail: AuthoredRecipeDetail = {
       recipe_id: 'recipe-9999',
       user_id: testUserId,
       title: 'Braised greens toast',
@@ -241,9 +244,12 @@ describe('AuthoredRecipeWorkspacePage', () => {
       make_ahead_guidance: null,
       plating_notes: null,
       chef_notes: null,
+      cookbook_id: null,
+      cookbook: null,
       created_at: '2026-04-01T12:00:00Z',
       updated_at: '2026-04-01T12:05:00Z',
-    });
+    };
+    const getSpy = vi.spyOn(authoredRecipesApi, 'getAuthoredRecipe').mockResolvedValue(recipeDetail);
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
 
     renderPage();
@@ -261,6 +267,17 @@ describe('AuthoredRecipeWorkspacePage', () => {
       'href',
       '/sessions/new',
     );
+
+    cleanup();
+    getSpy.mockClear();
+
+    renderPage(['/recipes/new?recipeId=recipe-9999']);
+
+    await waitFor(() => expect(getSpy).toHaveBeenCalledWith('recipe-9999'));
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(await screen.findByDisplayValue(recipeDetail.title)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(recipeDetail.cuisine)).toBeInTheDocument();
+    expect(screen.getByText(/saved draft recipe-9/i)).toBeInTheDocument();
   });
 
   it('shows chef-readable preflight guidance before save and highlights the right sections', async () => {
