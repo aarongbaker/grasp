@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -136,13 +136,11 @@ describe('AuthoredRecipeWorkspacePage', () => {
     await user.selectOptions(screen.getByLabelText('Where does the work happen?'), 'oven');
     await user.type(screen.getByLabelText('What happens in this beat?'), 'Roast until deeply caramelized.');
     const expectedMinutesInput = screen.getByLabelText('Expected minutes');
-    await user.click(expectedMinutesInput);
-    await user.keyboard('{Meta>}a{/Meta}{Backspace}');
-    await user.type(expectedMinutesInput, '10');
+    fireEvent.change(expectedMinutesInput, { target: { value: '10' } });
+    expect(expectedMinutesInput).toHaveValue(10);
     const outerEdgeInput = screen.getByLabelText('Outer edge if service drifts');
-    await user.click(outerEdgeInput);
-    await user.keyboard('{Meta>}a{/Meta}{Backspace}');
-    await user.type(outerEdgeInput, '15');
+    fireEvent.change(outerEdgeInput, { target: { value: '15' } });
+    expect(outerEdgeInput).toHaveValue(15);
     const equipmentInput = screen.getByLabelText('Equipment needed');
     await user.clear(equipmentInput);
     await user.type(equipmentInput, 'sheet tray');
@@ -283,6 +281,62 @@ describe('AuthoredRecipeWorkspacePage', () => {
     expect(screen.getAllByText(/Step 1 needs a beat name/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Step 1 is marked make-ahead, but it still needs a window/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Add whole-dish make-ahead guidance/i).length).toBeGreaterThan(0);
+  });
+
+  it('translates backend contradictory timing guidance into kitchen-language copy', () => {
+    expect(
+      translateAuthoredRecipeValidationDetail({
+        detail: [
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 0, 'duration_max'],
+            msg: 'Value error, duration_max must be greater than or equal to duration_minutes',
+          },
+        ],
+      }),
+    ).toEqual({
+      summary: 'One part of the draft still needs kitchen detail before it can save.',
+      fields: [
+        {
+          path: 'steps.0.duration_max',
+          message:
+            'Step 1 has an outer time edge that ends before the expected working time. Make the outer edge the same length or longer.',
+        },
+      ],
+    });
+  });
+
+  it('translates backend make-ahead misconfiguration into kitchen-language copy', () => {
+    expect(
+      translateAuthoredRecipeValidationDetail({
+        detail: [
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 0, 'prep_ahead_window'],
+            msg: 'Value error, prep_ahead_window is required when can_be_done_ahead is true',
+          },
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 0, 'prep_ahead_notes'],
+            msg: 'Value error, prep_ahead_notes is required when can_be_done_ahead is true',
+          },
+        ],
+      }),
+    ).toEqual({
+      summary: '2 parts of the draft need another pass before this recipe can save.',
+      fields: [
+        {
+          path: 'steps.0.prep_ahead_window',
+          message:
+            'Step 1 is marked as work you can do ahead, but the make-ahead window is missing. Say how far before service this beat can be handled.',
+        },
+        {
+          path: 'steps.0.prep_ahead_notes',
+          message:
+            'Step 1 can be done ahead, but the recovery note is missing. Tell the next cook how to bring it back for service.',
+        },
+      ],
+    });
   });
 
   it('translates backend dependency guidance into visible beat language instead of raw step ids', async () => {

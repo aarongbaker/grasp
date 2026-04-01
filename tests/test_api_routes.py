@@ -545,9 +545,12 @@ async def test_create_authored_recipe_422_preserves_validation_detail(app_with_o
     assert resp.status_code == 422
     data = resp.json()
     assert isinstance(data["detail"], list)
-    assert data["detail"][0]["loc"] == ["body", "steps", 0]
-    assert "prep_ahead_window is required" in data["detail"][0]["msg"]
-    assert data["detail"][0]["type"] == "value_error"
+    assert len(data["detail"]) == 1
+    issue = data["detail"][0]
+    assert issue["type"] == "value_error"
+    assert issue["loc"][:3] == ["body", "steps", 0]
+    assert "prep_ahead_window is required" in issue["msg"]
+    assert "Access denied" not in issue["msg"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
