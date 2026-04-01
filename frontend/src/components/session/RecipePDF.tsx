@@ -444,10 +444,6 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
 
         <Text style={s.conceptText}>{conceptDisplay.title}</Text>
 
-        {conceptDisplay.isCookbook && conceptDisplay.sourceDetail ? (
-          <Text style={s.conceptText}>{conceptDisplay.sourceDetail}</Text>
-        ) : null}
-
         {schedule.summary ? (
           <View style={s.summaryBlock}>
             <Text style={s.summaryText}>{schedule.summary}</Text>

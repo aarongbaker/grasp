@@ -25,36 +25,17 @@ vi.mock('@react-pdf/renderer', async () => {
   };
 });
 
-const cookbookSession: Session = {
-  session_id: 'session-cookbook',
+const menuSession: Session = {
+  session_id: 'session-menu-intent',
   user_id: 'user-1',
   status: 'complete',
   concept_json: {
-    free_text: 'Cookbook-selected recipes: Roast Chicken, Braised Greens',
+    free_text: 'A rustic Italian dinner with handmade pasta and seasonal vegetables',
     guest_count: 4,
     meal_type: 'dinner',
     occasion: 'dinner_party',
     dietary_restrictions: [],
     serving_time: null,
-    concept_source: 'cookbook',
-    selected_recipes: [
-      {
-        chunk_id: 'chunk-1',
-        book_id: 'book-1',
-        book_title: 'Weeknight Classics',
-        chapter: 'Centerpieces',
-        page_number: 42,
-        text: 'Roast Chicken with Herbs\nPat dry and season generously.',
-      },
-      {
-        chunk_id: 'chunk-2',
-        book_id: 'book-1',
-        book_title: 'Weeknight Classics',
-        chapter: 'Sides',
-        page_number: 117,
-        text: 'Braised Greens\nWilt greens with garlic and stock.',
-      },
-    ],
   },
   schedule_summary: 'Dinner lands all at once.',
   total_duration_minutes: 95,
@@ -67,18 +48,8 @@ const cookbookSession: Session = {
   completed_at: '2026-03-27T00:30:00Z',
 };
 
-const legacyCookbookSession: Session = {
-  ...cookbookSession,
-  session_id: 'session-legacy-cookbook',
-  concept_json: {
-    ...cookbookSession.concept_json,
-    free_text: 'A fallback dinner from uploaded books',
-    selected_recipes: [],
-  },
-};
-
 const freeTextSession: Session = {
-  ...cookbookSession,
+  ...menuSession,
   session_id: 'session-free-text',
   concept_json: {
     free_text: 'A bright spring dinner party with fish and citrus',
@@ -87,8 +58,6 @@ const freeTextSession: Session = {
     occasion: 'dinner_party',
     dietary_restrictions: [],
     serving_time: null,
-    concept_source: 'free_text',
-    selected_recipes: [],
   },
 };
 
@@ -107,7 +76,7 @@ const results: SessionResults = {
 
 function renderDetailPage() {
   return render(
-    <MemoryRouter initialEntries={[`/sessions/${cookbookSession.session_id}`]}>
+    <MemoryRouter initialEntries={[`/sessions/${menuSession.session_id}`]}>
       <Routes>
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
       </Routes>
@@ -119,7 +88,7 @@ describe('session presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
-      data: cookbookSession,
+      data: menuSession,
       error: null,
       isPolling: false,
       refresh: vi.fn(),
@@ -131,73 +100,38 @@ describe('session presentation', () => {
     cleanup();
   });
 
-  it('builds cookbook-aware display metadata from selected recipes', () => {
-    expect(getSessionConceptDisplay(cookbookSession.concept_json)).toEqual(
-      expect.objectContaining({
-        isCookbook: true,
-        sourceLabel: 'Cookbook menu',
-        sourceDetail: 'From Weeknight Classics',
-        recipeSummary: 'Roast Chicken with Herbs and Braised Greens',
-        title: 'Cookbook menu: Roast Chicken with Herbs and Braised Greens',
-        recipeCount: 2,
-      }),
-    );
-  });
-
-  it('falls back safely for legacy cookbook sessions without selected recipes', () => {
-    expect(getSessionConceptDisplay(legacyCookbookSession.concept_json)).toEqual(
-      expect.objectContaining({
-        isCookbook: true,
-        title: 'A fallback dinner from uploaded books',
-        recipeSummary: 'A fallback dinner from uploaded books',
-        sourceDetail: 'Cookbook-selected session',
-        recipeCount: 0,
-      }),
-    );
+  it('builds display metadata from menu intent', () => {
+    expect(getSessionConceptDisplay(menuSession.concept_json)).toEqual({
+      title: 'A rustic Italian dinner with handmade pasta and seasonal vegetables',
+    });
   });
 
   it('keeps free-text sessions on the original meal-idea presentation path', () => {
-    expect(getSessionConceptDisplay(freeTextSession.concept_json)).toEqual(
-      expect.objectContaining({
-        isCookbook: false,
-        title: 'A bright spring dinner party with fish and citrus',
-        sourceLabel: 'Meal idea',
-        sourceDetail: null,
-        recipeSummary: null,
-        recipeCount: 0,
-        recipeNames: [],
-        cookbookTitles: [],
-      }),
-    );
+    expect(getSessionConceptDisplay(freeTextSession.concept_json)).toEqual({
+      title: 'A bright spring dinner party with fish and citrus',
+    });
   });
 
-  it('renders cookbook labels and metadata on dashboard cards', () => {
+  it('renders menu intent on dashboard cards', () => {
     render(
       <MemoryRouter>
-        <SessionCard session={cookbookSession} />
+        <SessionCard session={menuSession} />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Cookbook menu')).toBeInTheDocument();
-    expect(screen.getByText('Cookbook menu: Roast Chicken with Herbs and Braised Greens')).toBeInTheDocument();
-    expect(screen.getByText('From Weeknight Classics')).toBeInTheDocument();
-    expect(screen.getAllByText('Roast Chicken with Herbs and Braised Greens')[0]).toBeInTheDocument();
+    expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
   });
 
-  it('renders cookbook context on the session detail page without changing tabs or status flow', async () => {
+  it('renders menu context on the session detail page without changing tabs or status flow', async () => {
     renderDetailPage();
 
-    expect(screen.getByText('Cookbook menu')).toBeInTheDocument();
-    expect(screen.getByText('From Weeknight Classics')).toBeInTheDocument();
-    expect(screen.getByText('Cookbook menu: Roast Chicken with Herbs and Braised Greens')).toBeInTheDocument();
-    expect(screen.getByText('Selected recipes: Roast Chicken with Herbs and Braised Greens')).toBeInTheDocument();
-    await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(cookbookSession.session_id));
+    expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
+    await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(menuSession.session_id));
   });
 
-  it('uses the normalized cookbook title in the PDF surface', () => {
-    render(<RecipePDF session={cookbookSession} results={results} />);
+  it('uses the menu intent in the PDF surface', () => {
+    render(<RecipePDF session={menuSession} results={results} />);
 
-    expect(screen.getByText('Cookbook menu: Roast Chicken with Herbs and Braised Greens')).toBeInTheDocument();
-    expect(screen.getByText('From Weeknight Classics')).toBeInTheDocument();
+    expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
   });
 });

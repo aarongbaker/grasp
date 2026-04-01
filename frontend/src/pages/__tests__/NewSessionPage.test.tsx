@@ -1,26 +1,12 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import fs from 'node:fs';
-import path from 'node:path';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewSessionPage } from '../NewSessionPage';
-import * as ingestApi from '../../api/ingest';
 import * as sessionsApi from '../../api/sessions';
-import { buildCookbookCandidatePreview } from '../../components/session/cookbookCandidatePreview';
-import { getRecipeDisplayTitle } from '../../utils/cookbookTitles';
-import type { DetectedRecipeCandidate, Session } from '../../types/api';
+import type { Session } from '../../types/api';
 
 const navigateMock = vi.fn();
-const REPO_ROOT = path.resolve(__dirname, '../../../..');
-const SOUTHERN_VERIFICATION_ARTIFACT = path.resolve(
-  REPO_ROOT,
-  '.gsd/milestones/M012/slices/S03/southern-cookbook-verification.json',
-);
-const ASSEMBLED_VERIFICATION_ARTIFACT = path.resolve(
-  REPO_ROOT,
-  '.gsd/milestones/M012/slices/S03/southern-cookbook-browser-output.json',
-);
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -38,85 +24,17 @@ function renderPage() {
   );
 }
 
-function readSouthernVerificationArtifact() {
-  const raw = fs.readFileSync(SOUTHERN_VERIFICATION_ARTIFACT, 'utf-8');
-  return JSON.parse(raw) as {
-    book_title: string;
-    used_fallback_chunks: boolean;
-    pdf_path: string | null;
-    preview_titles: Array<{ page: number; title: string }>;
-  };
-}
-
-function writeAssembledVerificationArtifact(payload: Record<string, unknown>) {
-  fs.mkdirSync(path.dirname(ASSEMBLED_VERIFICATION_ARTIFACT), { recursive: true });
-  fs.writeFileSync(ASSEMBLED_VERIFICATION_ARTIFACT, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
-}
-
-function buildSouthernCookbookRecipe(title: string, pageNumber: number, text: string): DetectedRecipeCandidate {
-  return {
-    chunk_id: `southern-${pageNumber}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-    book_id: 'southern-book',
-    book_title: 'The Southern Cook Book',
-    recipe_name: title,
-    chapter: pageNumber <= 22 ? 'Fish and Shell Fish' : 'Southern Cookbook',
-    page_number: pageNumber,
-    text,
-  };
-}
-
-const detectedRecipes: DetectedRecipeCandidate[] = [
-  {
-    chunk_id: 'zzz-chunk',
-    book_id: 'book-b',
-    book_title: 'The Dessert Atlas',
-    recipe_name: 'Burnt Honey Tart',
-    chapter: 'Late Course',
-    page_number: 88,
-    text: 'Blind bake the crust, warm the honey, and finish with flaky salt.',
-  },
-  {
-    chunk_id: 'aaa-chunk',
-    book_id: 'book-a',
-    book_title: 'Weeknight Classics',
-    recipe_name: 'Roast Chicken with Herbs',
-    chapter: 'Centerpieces',
-    page_number: 42,
-    text: 'Dry the bird overnight, roast hot, then rest before carving.',
-  },
-  {
-    chunk_id: 'mmm-chunk',
-    book_id: 'book-a',
-    book_title: 'Weeknight Classics',
-    recipe_name: 'Braised Greens',
-    chapter: 'Sides',
-    page_number: 117,
-    text: 'Wilt the greens, add stock, and simmer until tender.',
-  },
-  {
-    chunk_id: 'bbb-chunk',
-    book_id: 'book-a',
-    book_title: 'Weeknight Classics',
-    recipe_name: 'Slow-Roasted Pork Shoulder',
-    chapter: 'Centerpieces',
-    page_number: 58,
-    text: 'Season generously with salt and pepper the night before. Let the meat come to room temperature before roasting. Start at high heat to develop a crust, then lower to 275°F and roast slowly for 6-8 hours until the internal temperature reaches 195°F and the meat is fall-apart tender. Rest for at least 30 minutes before shredding.',
-  },
-];
-
 const createdSession: Session = {
   session_id: 'session-123',
   user_id: 'user-1',
   status: 'pending',
   concept_json: {
-    free_text: 'Cookbook-selected recipes: Roast Chicken with Herbs, Burnt Honey Tart',
+    free_text: 'A bright spring dinner',
     guest_count: 4,
     meal_type: 'dinner',
     occasion: 'dinner_party',
     dietary_restrictions: [],
     serving_time: null,
-    concept_source: 'cookbook',
-    selected_recipes: [],
   },
   schedule_summary: null,
   total_duration_minutes: null,
@@ -139,63 +57,20 @@ describe('NewSessionPage', () => {
     cleanup();
   });
 
-  it('trusts corrected backend recipe names while keeping preview excerpts focused on body text', () => {
-    const correctedRecipe: DetectedRecipeCandidate = {
-      chunk_id: 'ocr-title-chunk',
-      book_id: 'book-ocr',
-      book_title: 'Southern Cakes',
-      recipe_name: 'Corn Bread Fritters',
-      chapter: 'Unsorted',
-      page_number: 30,
-      text: 'Corn Bread Fritters\n1 cup corn meal\n1 cup flour\n2 teaspoons baking powder\n½ teaspoon salt\n1 egg\nmilk to make a stiff batter',
-    };
-
-    expect(getRecipeDisplayTitle(correctedRecipe)).toBe('Corn Bread Fritters');
-
-    const preview = buildCookbookCandidatePreview(correctedRecipe);
-    expect(preview.title).toBe('Corn Bread Fritters');
-    expect(preview.excerpt).not.toContain('Corn Bread Fritters');
-    expect(preview.excerpt).toContain('1 cup corn meal');
-  });
-
-  it('renders OCR-heavy cookbook rows with the backend title in the recipe column and body text in the preview column', async () => {
-    const ocrHeavyRecipes: DetectedRecipeCandidate[] = [
-      {
-        chunk_id: 'ocr-title-chunk',
-        book_id: 'book-ocr',
-        book_title: 'Southern Cakes',
-        recipe_name: 'Corn Bread Fritters',
-        chapter: 'Unsorted',
-        page_number: 30,
-        text: 'Corn Bread Fritters\n1 cup corn meal\n1 cup flour\n2 teaspoons baking powder\n½ teaspoon salt\n1 egg\nmilk to make a stiff batter',
-      },
-    ];
-
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(ocrHeavyRecipes);
-
+  it('renders the menu intent form with all required fields', () => {
     renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Southern Cakes' }));
 
-    const recipeOption = screen.getByLabelText('Select Corn Bread Fritters').closest('label');
-    expect(recipeOption).not.toBeNull();
-    const recipeRow = within(recipeOption as HTMLLabelElement);
-
-    expect(recipeRow.getByText('Corn Bread Fritters')).toBeInTheDocument();
-    expect(recipeRow.getByText('Unsorted')).toBeInTheDocument();
-    expect(recipeRow.getByText('p. 30')).toBeInTheDocument();
-    expect(recipeRow.getByText(/1 cup corn meal/i)).toBeInTheDocument();
-    expect(recipeRow.queryByRole('heading', { name: 'Ingredients' })).not.toBeInTheDocument();
-
-    await userEvent.click(recipeRow.getByRole('button', { name: 'Show recipe preview' }));
-
-    expect(recipeRow.getByRole('heading', { name: 'Ingredients' })).toBeInTheDocument();
-    const ingredientsList = recipeRow.getByRole('list');
-    expect(within(ingredientsList).getByText('2 teaspoons baking powder')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
+    expect(screen.getByText(/Describe the meal you want to cook/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('What are you cooking?')).toBeInTheDocument();
+    expect(screen.getByLabelText('Guests')).toBeInTheDocument();
+    expect(screen.getByLabelText('Meal type')).toBeInTheDocument();
+    expect(screen.getByLabelText('Occasion')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dietary restrictions')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Planning' })).toBeInTheDocument();
   });
 
-  it('keeps the meal-idea flow isolated and submits the legacy payload', async () => {
+  it('submits the menu intent and navigates to the session detail page', async () => {
     const callOrder: string[] = [];
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
       callOrder.push(`create:${JSON.stringify(payload)}`);
@@ -209,7 +84,6 @@ describe('NewSessionPage', () => {
         message: 'Pipeline enqueued',
       };
     });
-    const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
 
     renderPage();
 
@@ -231,428 +105,84 @@ describe('NewSessionPage', () => {
       'run:session-123',
     ]);
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
-    expect(detectedSpy).not.toHaveBeenCalled();
   });
 
-  it('lands cookbook mode on a chooser first, then submits stable chunk order after entering a book', async () => {
-    const callOrder: string[] = [];
-    const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
-      callOrder.push(`create:${JSON.stringify(payload)}`);
-      return createdSession;
-    });
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockImplementation(async (sessionId) => {
-      callOrder.push(`run:${sessionId}`);
-      return {
-        session_id: 'session-123',
-        status: 'generating',
-        message: 'Pipeline enqueued',
-      };
-    });
-
+  it('adds and removes dietary restrictions', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
+    const restrictionInput = screen.getByLabelText('Dietary restrictions');
+    await userEvent.type(restrictionInput, 'gluten-free{Enter}');
+    
+    expect(screen.getByText('gluten-free')).toBeInTheDocument();
+    expect(restrictionInput).toHaveValue('');
 
-    await waitFor(() => expect(detectedSpy).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
+    await userEvent.type(restrictionInput, 'dairy-free{Enter}');
+    expect(screen.getByText('dairy-free')).toBeInTheDocument();
 
-    expect(screen.getByRole('heading', { name: 'Choose a cookbook to browse' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Select Burnt Honey Tart')).not.toBeInTheDocument();
-
-    const weeknightCard = screen.getByRole('button', { name: 'Browse Weeknight Classics' });
-    expect(within(weeknightCard).getByText('3 recipes')).toBeInTheDocument();
-    expect(within(weeknightCard).getByText(/Roast Chicken with Herbs, Slow-Roasted Pork Shoulder, Braised Greens/i)).toBeInTheDocument();
-
-    await userEvent.click(weeknightCard);
-
-    expect(screen.getByRole('heading', { level: 2, name: 'Weeknight Classics' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to cookbook chooser' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Browse The Dessert Atlas' })).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
-    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
-    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
-
-    expect(screen.getByText('Your menu')).toBeInTheDocument();
-    expect(screen.getByText('2 recipes')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
-
-    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
-    expect(createSessionSpy).toHaveBeenCalledWith({
-      concept_source: 'cookbook',
-      free_text: 'Cookbook-selected recipes: Roast Chicken with Herbs, Burnt Honey Tart',
-      selected_recipes: [
-        { chunk_id: 'aaa-chunk' },
-        { chunk_id: 'zzz-chunk' },
-      ],
-      guest_count: 4,
-      meal_type: 'dinner',
-      occasion: 'dinner_party',
-      dietary_restrictions: [],
-      serving_time: undefined,
-    });
-    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
-    expect(callOrder).toEqual([
-      'create:{"concept_source":"cookbook","free_text":"Cookbook-selected recipes: Roast Chicken with Herbs, Burnt Honey Tart","selected_recipes":[{"chunk_id":"aaa-chunk"},{"chunk_id":"zzz-chunk"}],"guest_count":4,"meal_type":"dinner","occasion":"dinner_party","dietary_restrictions":[]}',
-      'run:session-123',
-    ]);
-    expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove gluten-free' }));
+    expect(screen.queryByText('gluten-free')).not.toBeInTheDocument();
+    expect(screen.getByText('dairy-free')).toBeInTheDocument();
   });
 
-  it('filters recipes within the active cookbook, keeps selections pinned, and restores the full list after reset', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
+  it('shows validation error when submitting without menu description', async () => {
     renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
 
-    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
-    expect(screen.getByText('Your menu')).toBeInTheDocument();
-    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
+    expect(submitButton).toBeDisabled();
 
-    const searchInput = screen.getByLabelText('Search this cookbook');
-    await userEvent.type(searchInput, 'greens');
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Dinner');
+    expect(submitButton).not.toBeDisabled();
 
-    expect(screen.queryByLabelText('Select Roast Chicken with Herbs')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Select Braised Greens')).toBeInTheDocument();
-    expect(screen.getByText('Showing 1 of 3')).toBeInTheDocument();
-    expect(screen.getByText('1 matching')).toBeInTheDocument();
-    expect(screen.getByText('1 recipe')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Reset search' }));
-
-    expect(searchInput).toHaveValue('');
-    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
-    expect(screen.getByLabelText('Select Braised Greens')).toBeInTheDocument();
-    expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
-    expect(screen.getByText('1 recipe')).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText('What are you cooking?'));
+    expect(submitButton).toBeDisabled();
   });
 
-  it('shows editorial list hierarchy cues for the active cookbook browser', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    expect(screen.getByText('Within this cookbook')).toBeInTheDocument();
-    expect(screen.getByText(/Search titles, chapters, ingredients, or OCR fragments/i)).toBeInTheDocument();
-    expect(screen.getByText('Recipe')).toBeInTheDocument();
-    expect(screen.getByText('Source')).toBeInTheDocument();
-    expect(screen.getByText('Preview')).toBeInTheDocument();
-    expect(screen.getByText('Selections stay pinned while you refine the list.')).toBeInTheDocument();
-  });
-
-  it('shows a no-match state with a clear action and keeps the full selected set for submit', async () => {
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
-      session_id: 'session-123',
-      status: 'generating',
-      message: 'Pipeline enqueued',
-    });
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
-    await userEvent.type(screen.getByLabelText('Search this cookbook'), 'custard');
-
-    expect(screen.getByText('No recipes match “custard”.')).toBeInTheDocument();
-    expect(screen.getByText(/Your selected recipes are still saved in the menu summary/i)).toBeInTheDocument();
-    expect(screen.getByText('1 recipe')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
-
-    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
-    expect(createSessionSpy).toHaveBeenCalledWith({
-      concept_source: 'cookbook',
-      free_text: 'Cookbook-selected recipes: Roast Chicken with Herbs',
-      selected_recipes: [{ chunk_id: 'aaa-chunk' }],
-      guest_count: 4,
-      meal_type: 'dinner',
-      occasion: 'dinner_party',
-      dietary_restrictions: [],
-      serving_time: undefined,
-    });
-    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
-  });
-
-  it('matches against OCR-derived preview text and clears search when leaving the active cookbook', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    const searchInput = screen.getByLabelText('Search this cookbook');
-    await userEvent.type(searchInput, 'tender');
-
-    expect(screen.getByLabelText('Select Slow-Roasted Pork Shoulder')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Select Roast Chicken with Herbs')).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    expect(screen.getByLabelText('Search this cookbook')).toHaveValue('');
-    expect(screen.getByLabelText('Select Roast Chicken with Herbs')).toBeInTheDocument();
-    expect(screen.getByLabelText('Select Slow-Roasted Pork Shoulder')).toBeInTheDocument();
-  });
-
-  it('shows selection summary with removable pills and clear all button across cookbook navigation', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-
-    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
-    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
-    await userEvent.click(screen.getByRole('button', { name: 'Back to cookbook chooser' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-    await userEvent.click(screen.getByLabelText('Select Roast Chicken with Herbs'));
-
-    expect(screen.getByText('Your menu')).toBeInTheDocument();
-    expect(screen.getByText('2 recipes')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Burnt Honey Tart' }));
-    expect(screen.getByText('1 recipe')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Clear all selections' }));
-    expect(screen.queryByText('Your menu')).not.toBeInTheDocument();
-  });
-
-  it('shows a cookbook loading state before chooser cards render', async () => {
-    let resolveRecipes: ((value: DetectedRecipeCandidate[]) => void) | undefined;
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockImplementationOnce(
-      () => new Promise((resolve) => {
-        resolveRecipes = resolve;
-      }),
-    );
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-
-    expect(screen.getByText('Loading cookbook recipes…')).toBeInTheDocument();
-    resolveRecipes?.(detectedRecipes);
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Browse Weeknight Classics' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Browse The Dessert Atlas' })).toBeInTheDocument();
-  });
-
-  it('shows cookbook empty and error states inline without breaking the rest of the page', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValueOnce([]);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    expect(screen.getByText(/No detected cookbook recipes yet/i)).toBeInTheDocument();
-
-    cleanup();
-    navigateMock.mockReset();
-    vi.restoreAllMocks();
-
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockRejectedValueOnce(new Error('Cookbook fetch failed'));
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    expect(await screen.findByText('Cookbook fetch failed')).toBeInTheDocument();
-    expect(screen.getByLabelText('Guests')).toBeInTheDocument();
-  });
-
-  it('surfaces cookbook submit failures in page-level error UI', async () => {
-    const detectedSpy = vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
+  it('displays error message when session creation fails', async () => {
     vi.spyOn(sessionsApi, 'createSession').mockRejectedValue(new Error('Session creation failed'));
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
-      session_id: 'session-123',
-      status: 'generating',
-      message: 'Pipeline enqueued',
-    });
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline');
 
     renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(detectedSpy).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse The Dessert Atlas' }));
-    expect(screen.getByLabelText('Select Burnt Honey Tart')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByLabelText('Select Burnt Honey Tart'));
-    await userEvent.click(screen.getByRole('button', { name: 'Schedule Selected Recipes' }));
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     expect(await screen.findByText('Session creation failed')).toBeInTheDocument();
     expect(runPipelineSpy).not.toHaveBeenCalled();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it('keeps the native checkbox directly clickable and preserves the mobile stacked selection layout', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    const checkbox = screen.getByLabelText('Select Roast Chicken with Herbs');
-    await userEvent.click(checkbox);
-    expect(checkbox).toBeChecked();
-
-    const option = checkbox.closest('label');
-    expect(option).not.toBeNull();
-    expect(option?.className).toContain('recipeOption');
-
-    const selectionControl = option?.querySelector('[class*="recipeSelectionControl"]');
-    const optionBody = option?.querySelector('[class*="recipeOptionBody"]');
-    expect(selectionControl).not.toBeNull();
-    expect(optionBody).not.toBeNull();
-
-    await userEvent.click(checkbox);
-    expect(checkbox).not.toBeChecked();
-  });
-
-  it('provides progressive disclosure for long recipe excerpts inside the active cookbook view', async () => {
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(detectedRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Weeknight Classics' }));
-
-    expect(screen.getByRole('button', { name: 'Show recipe preview' })).toBeInTheDocument();
-
-    const previewButtons = screen.getAllByRole('button', { name: 'Show recipe preview' });
-    expect(previewButtons.length).toBeGreaterThan(0);
-
-    await userEvent.click(previewButtons[0]);
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Show less' }));
-    expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
-  });
-
-  it('records assembled southern-cookbook browser evidence with materially cleaner visible rows from the real seed artifact', async () => {
-    const southernSeed = readSouthernVerificationArtifact();
-    expect(southernSeed.used_fallback_chunks).toBe(false);
-    expect(southernSeed.book_title).toBe('The Southern Cook Book');
-    expect(southernSeed.pdf_path).toContain('southerncookbook00lustrich.pdf');
-
-    const filteredSouthernRecipes: DetectedRecipeCandidate[] = [
-      buildSouthernCookbookRecipe(
-        'Chicken Gumbo',
-        9,
-        'Chicken Gumbo\n1 small stewing chicken\n2 tablespoons flour\n3 tablespoons butter, melted\nCook very slowly until the chicken is tender and the okra well-cooked.',
-      ),
-      buildSouthernCookbookRecipe(
-        'Bean Soup',
-        9,
-        'Bean Soup\n1 cup dried beans\n6 cups ham broth\nMelt the butter, stir in the flour, salt and pepper; slowly stir in the hot bean broth.',
-      ),
-      buildSouthernCookbookRecipe(
-        'Chicken Cream Soup',
-        9,
-        'Chicken Cream Soup\n3 cups chicken broth\n3 tablespoons rice\nCook the rice and celery until soft and add the hot milk.',
-      ),
-      buildSouthernCookbookRecipe(
-        'Okra Soup',
-        9,
-        'Okra Soup\n1 soup bone\n4 cups cold water\nSimmer all together for 2 hours until thick.',
-      ),
-    ];
-
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(filteredSouthernRecipes);
-
-    renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse The Southern Cook Book' }));
-
-    const visibleRecipeRows = screen.getAllByLabelText(/Select (Chicken Gumbo|Bean Soup|Chicken Cream Soup|Okra Soup)/i);
-    expect(visibleRecipeRows).toHaveLength(4);
-    expect(screen.queryByText(/Recipe on page/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/catalog/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/index/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/600 pounds lean soup meat/i)).not.toBeInTheDocument();
-
-    const visibleTitles = filteredSouthernRecipes.map((recipe) => recipe.recipe_name);
-    const rawPreviewTitles = southernSeed.preview_titles.map((entry) => ({ page: entry.page, title: entry.title }));
-    const suppressedPreviewTitles = rawPreviewTitles.filter((entry) => !visibleTitles.includes(entry.title));
-
-    expect(suppressedPreviewTitles.length).toBeGreaterThan(0);
-    expect(suppressedPreviewTitles.some((entry) => /600 pounds lean soup meat/i.test(entry.title))).toBe(true);
-
-    writeAssembledVerificationArtifact({
-      source_pdf: southernSeed.pdf_path,
-      seeded_book_title: southernSeed.book_title,
-      used_fallback_chunks: southernSeed.used_fallback_chunks,
-      artifact_generated_by: 'frontend/src/pages/__tests__/NewSessionPage.test.tsx',
-      cookbook_browser_book_title: 'The Southern Cook Book',
-      visible_titles: visibleTitles,
-      visible_title_count: visibleTitles.length,
-      suppressed_seed_preview_titles: suppressedPreviewTitles,
-      notes: [
-        'The assembled cookbook browser shows human-readable recipe titles for the southern cookbook sample.',
-        'Early seeded front-matter/index preview rows from the raw OCR artifact are absent from the visible browser list in this verification fixture.',
-      ],
+  it('allows customizing guest count, meal type, and serving time', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
     });
-  });
-
-  it('falls back safely when the backend title is empty or missing', async () => {
-    const recipesWithMissingTitles: DetectedRecipeCandidate[] = [
-      {
-        chunk_id: 'clean-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: 'Roast Chicken',
-        chapter: 'Main Courses',
-        page_number: 42,
-        text: 'A delicious roast chicken recipe.',
-      },
-      {
-        chunk_id: 'empty-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: '',
-        chapter: 'Soups',
-        page_number: 55,
-        text: 'Soup recipe.',
-      },
-      {
-        chunk_id: 'blank-chapter-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: '   ',
-        chapter: 'Salads',
-        page_number: 23,
-        text: 'Salad recipe.',
-      },
-      {
-        chunk_id: 'page-only-chunk',
-        book_id: 'book-a',
-        book_title: 'Test Book',
-        recipe_name: '',
-        chapter: '',
-        page_number: 91,
-        text: 'Unknown recipe.',
-      },
-    ];
-
-    vi.spyOn(ingestApi, 'listDetectedRecipes').mockResolvedValue(recipesWithMissingTitles);
 
     renderPage();
-    await userEvent.click(screen.getByRole('button', { name: /Schedule exact uploaded recipes/i }));
-    await waitFor(() => expect(screen.queryByText('Loading cookbook recipes…')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Browse Test Book' }));
 
-    expect(screen.getByText('Roast Chicken')).toBeInTheDocument();
-    expect(screen.getByText('Soups, p. 55')).toBeInTheDocument();
-    expect(screen.getByText('Salads, p. 23')).toBeInTheDocument();
-    expect(screen.getByText('Recipe on page 91')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A festive brunch');
+    await userEvent.clear(screen.getByLabelText('Guests'));
+    await userEvent.type(screen.getByLabelText('Guests'), '8');
+    await userEvent.selectOptions(screen.getByLabelText('Meal type'), 'lunch');
+    await userEvent.type(screen.getByLabelText('Serving time'), '12:30');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledWith({
+      free_text: 'A festive brunch',
+      guest_count: 8,
+      meal_type: 'lunch',
+      occasion: 'dinner_party',
+      dietary_restrictions: [],
+      serving_time: '12:30',
+    }));
+  });
+
+  it('navigates back to dashboard when cancel is clicked', async () => {
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(navigateMock).toHaveBeenCalledWith('/');
   });
 });

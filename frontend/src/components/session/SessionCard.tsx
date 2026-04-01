@@ -53,16 +53,7 @@ export function SessionCard({ session, onDelete }: SessionCardProps) {
     <Link to={`/sessions/${session.session_id}`} className={styles.card}>
       <div className={styles.header}>
         <div className={styles.titleBlock}>
-          {conceptDisplay.isCookbook && (
-            <span className={styles.sourceLabel}>{conceptDisplay.sourceLabel}</span>
-          )}
           <div className={styles.concept}>{conceptDisplay.title}</div>
-          {conceptDisplay.isCookbook && conceptDisplay.sourceDetail && (
-            <div className={styles.sourceDetail}>{conceptDisplay.sourceDetail}</div>
-          )}
-          {conceptDisplay.isCookbook && conceptDisplay.recipeSummary && (
-            <div className={styles.recipeSummary}>{conceptDisplay.recipeSummary}</div>
-          )}
         </div>
         <div className={styles.headerActions}>
           <StatusBadge status={session.status} />

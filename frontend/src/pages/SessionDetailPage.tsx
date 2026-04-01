@@ -98,20 +98,7 @@ export function SessionDetailPage() {
           <h1 className={styles.title}>Session</h1>
           <StatusBadge status={session.status} />
         </div>
-        {conceptDisplay?.isCookbook && (
-          <div className={styles.conceptBadgeRow}>
-            <span className={styles.conceptLabel}>{conceptDisplay.sourceLabel}</span>
-            {conceptDisplay.sourceDetail && (
-              <span className={styles.conceptSourceDetail}>{conceptDisplay.sourceDetail}</span>
-            )}
-          </div>
-        )}
         <p className={styles.conceptText}>{conceptDisplay?.title ?? session.concept_json.free_text}</p>
-        {conceptDisplay?.isCookbook && conceptDisplay.recipeSummary && (
-          <p className={styles.conceptMeta}>
-            Selected recipes: {conceptDisplay.recipeSummary}
-          </p>
-        )}
       </div>
 
       {/* In-progress state */}
