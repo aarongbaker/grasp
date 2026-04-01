@@ -62,7 +62,7 @@ describe('RecipeLibraryPage', () => {
     cleanup();
   });
 
-  it('shows the empty-state library surface with a drafting entry point', async () => {
+  it('shows the empty-state library surface with drafting and planner guidance', async () => {
     vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([]);
     vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
 
@@ -71,9 +71,34 @@ describe('RecipeLibraryPage', () => {
     expect(screen.getByLabelText('Loading recipe library')).toBeInTheDocument();
 
     expect(await screen.findByRole('heading', { name: 'No saved dishes yet.' })).toBeInTheDocument();
-    const draftLinks = screen.getAllByRole('link', { name: 'Start a New Draft' });
+    expect(screen.getByText(/Draft here\. Plan there\./i)).toBeInTheDocument();
+    const draftLinks = screen.getAllByRole('link', { name: /Start a Recipe Draft/i });
     expect(draftLinks.some((link) => link.getAttribute('href') === '/recipes/new')).toBe(true);
+    expect(screen.getByRole('link', { name: 'Planning a whole dinner instead?' })).toHaveAttribute('href', '/sessions/new');
     expect(screen.queryByText(/No data found/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the pathway guidance and authored scheduling CTAs visible on the library surface', async () => {
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
+      {
+        recipe_id: 'recipe-2',
+        user_id: 'user-1',
+        title: 'Marinated peppers',
+        cuisine: 'Spanish',
+        cookbook_id: null,
+        cookbook: null,
+        created_at: '2026-04-01T00:00:00Z',
+        updated_at: '2026-04-03T00:00:00Z',
+      },
+    ]);
+
+    renderWithAuth();
+
+    expect(await screen.findByText(/Use the shelf when a dish already exists/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Need a full service plan instead?' })).toHaveAttribute('href', '/sessions/new');
+    expect(screen.getByRole('button', { name: 'Schedule from shelf' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open recipe workspace/i })).toHaveAttribute('href', '/recipes/new');
   });
 
   it('groups saved recipes into cookbook folders and leaves unassigned drafts visible', async () => {
@@ -283,7 +308,7 @@ describe('RecipeLibraryPage', () => {
       },
     ]);
 
-    let resolveCreate: ((value: Awaited<ReturnType<typeof sessionsApi.createSession>>) => void) | null = null;
+    let resolveCreate!: (value: Awaited<ReturnType<typeof sessionsApi.createSession>>) => void;
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -306,7 +331,7 @@ describe('RecipeLibraryPage', () => {
     expect(createSessionSpy).toHaveBeenCalledTimes(1);
     expect(runPipelineSpy).not.toHaveBeenCalled();
 
-    resolveCreate?.({
+    resolveCreate({
       session_id: 'session-123',
       user_id: 'user-1',
       status: 'pending',

@@ -406,13 +406,16 @@ describe('AuthoredRecipeWorkspacePage', () => {
     expect(screen.queryByText(/missing_step/i)).not.toBeInTheDocument();
   });
 
-  it('avoids cookbook and raw-schema wording while exposing chef-readable controls', () => {
+  it('keeps the route guidance explicit without cookbook or planner language bleeding into the workspace form', () => {
     renderPage();
 
     expect(screen.getByText('Build the draft in passes, not all at once.')).toBeInTheDocument();
     expect(screen.getByText('Open hold, storage, and recovery details.')).toBeInTheDocument();
     expect(screen.getByText('What must finish before this beat starts?')).toBeInTheDocument();
-    expect(screen.queryByText(/cookbook/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Where to go next/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Browse the recipe shelf instead.' })).toHaveAttribute('href', '/recipes');
+    expect(screen.getByRole('link', { name: 'Need to plan a full dinner instead?' })).toHaveAttribute('href', '/sessions/new');
+    expect(screen.getByRole('link', { name: 'Browse saved drafts in the library.' })).toHaveAttribute('href', '/recipes');
     expect(screen.queryByText(/schema/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/json/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/depends_on/i)).not.toBeInTheDocument();

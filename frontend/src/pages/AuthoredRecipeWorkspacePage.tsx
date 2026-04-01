@@ -645,9 +645,20 @@ export function AuthoredRecipeWorkspacePage() {
               {draftStatus === 'loading' ? 'Opening…' : 'Open saved draft'}
             </Button>
           </form>
-          <Link to="/sessions/new" className={styles.secondaryLink}>
-            Need to plan a full dinner instead?
-          </Link>
+          <div className={styles.routeGuide}>
+            <p className={styles.routeGuideLabel}>Where to go next</p>
+            <p className={styles.routeGuideText}>
+              Draft the dish here first, browse <span className={styles.routeGuideEmphasis}>Recipe Library</span> when it belongs on your shelf, and use <span className={styles.routeGuideEmphasis}>Plan a Dinner</span> only when service timing becomes the main job.
+            </p>
+            <div className={styles.routeGuideLinks}>
+              <Link to="/recipes" className={styles.secondaryLink}>
+                Browse the recipe shelf instead.
+              </Link>
+              <Link to="/sessions/new" className={styles.secondaryLink}>
+                Need to plan a full dinner instead?
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1226,12 +1237,15 @@ export function AuthoredRecipeWorkspacePage() {
           </h2>
           <p className={styles.footerText}>
             Use <span className={styles.emphasis}>Plan a Dinner</span> when you are building service around a menu idea.
-            Use this workspace when you already have a dish in mind and want a private structured recipe draft.
+            Use this workspace when you already have a dish in mind and want a private structured recipe draft, then move it to <span className={styles.emphasis}>Recipe Library</span> once it belongs on your shelf.
           </p>
           <div className={styles.footerActions}>
             <Button type="submit" size="lg" disabled={draftStatus === 'saving' || !draftReadyToSave}>
               {draftStatus === 'saving' ? 'Saving draft…' : 'Save private recipe draft'}
             </Button>
+            <Link to="/recipes" className={styles.secondaryLink}>
+              Browse saved drafts in the library.
+            </Link>
             <Link to="/sessions/new" className={styles.secondaryLink}>
               Dinner planning stays in the separate planner.
             </Link>

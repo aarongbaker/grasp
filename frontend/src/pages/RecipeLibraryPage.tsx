@@ -3,11 +3,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { listAuthoredRecipes, updateAuthoredRecipeCookbook } from '../api/authoredRecipes';
 import { createRecipeCookbook, listRecipeCookbooks } from '../api/recipeCookbooks';
 import { createSession, runPipeline } from '../api/sessions';
+import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
 import {
-  MEAL_TYPE_LABELS,
-  OCCASION_LABELS,
   type AuthoredRecipeListItem,
   type CreateAuthoredSessionRequest,
   type MealType,
@@ -37,10 +36,6 @@ function formatRecipeTimestamp(timestamp: string): string {
   }).format(date);
 }
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
 export function RecipeLibraryPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<LibraryStatus>('loading');
@@ -55,16 +50,16 @@ export function RecipeLibraryPage() {
   const [moveState, setMoveState] = useState<MoveState>({});
   const [scheduleState, setScheduleState] = useState<ScheduleState>({});
 
+  const generatedPlanner = pathwayByKey['generated-planner'];
+  const authoredWorkspace = pathwayByKey['authored-workspace'];
+
   const fetchLibrary = useCallback(async () => {
     setStatus('loading');
     setLoadError(null);
     setInlineError(null);
 
     try {
-      const [recipeData, cookbookData] = await Promise.all([
-        listAuthoredRecipes(),
-        listRecipeCookbooks(),
-      ]);
+      const [recipeData, cookbookData] = await Promise.all([listAuthoredRecipes(), listRecipeCookbooks()]);
       setRecipes(recipeData);
       setCookbooks(cookbookData);
       setStatus('ready');
@@ -91,10 +86,7 @@ export function RecipeLibraryPage() {
     return grouped;
   }, [cookbooks, recipes]);
 
-  const unassignedRecipes = useMemo(
-    () => recipes.filter((recipe) => recipe.cookbook_id === null),
-    [recipes],
-  );
+  const unassignedRecipes = useMemo(() => recipes.filter((recipe) => recipe.cookbook_id === null), [recipes]);
 
   const totalCookbookRecipes = useMemo(
     () => Array.from(recipesByCookbook.values()).reduce((count, items) => count + items.length, 0),
@@ -217,10 +209,10 @@ export function RecipeLibraryPage() {
             Browse private drafts, tuck them into cookbook folders, and reopen any dish without crossing into dinner-planning sessions.
           </p>
           <div className={styles.heroActions}>
-            <Link to="/recipes/new">
-              <Button>Start a New Draft</Button>
+            <Link to={authoredWorkspace.to}>
+              <Button>{authoredWorkspace.cta}</Button>
             </Link>
-            <Link to="/sessions/new" className={styles.secondaryLink}>
+            <Link to={generatedPlanner.to} className={styles.secondaryLink}>
               Need a full service plan instead?
             </Link>
           </div>
@@ -238,6 +230,14 @@ export function RecipeLibraryPage() {
                 : status === 'error'
                   ? 'The fetch failed before the library could be composed.'
                   : 'Loading, empty, and move errors stay visible here instead of hiding in devtools.'}
+            </p>
+          </div>
+
+          <div className={styles.metricCard}>
+            <p className={styles.metricLabel}>Pathway relationship</p>
+            <p className={styles.metricValue}>Draft here. Plan there.</p>
+            <p className={styles.metricText}>
+              Use the shelf when a dish already exists. Move to <span className={styles.inlineEmphasis}>{generatedPlanner.title}</span> only when you are ready to schedule service, and return to <span className={styles.inlineEmphasis}>{authoredWorkspace.title}</span> when the recipe itself still needs writing.
             </p>
           </div>
 
@@ -327,9 +327,14 @@ export function RecipeLibraryPage() {
           <p className={styles.emptyText}>
             Start a chef-authored draft, then return here when you want to browse or group it into a cookbook folder.
           </p>
-          <Link to="/recipes/new">
-            <Button>Start a New Draft</Button>
-          </Link>
+          <div className={styles.emptyActions}>
+            <Link to={authoredWorkspace.to}>
+              <Button>{authoredWorkspace.title}</Button>
+            </Link>
+            <Link to={generatedPlanner.to} className={styles.secondaryLink}>
+              Planning a whole dinner instead?
+            </Link>
+          </div>
         </section>
       ) : (
         <div className={styles.libraryGrid}>

@@ -57,13 +57,16 @@ describe('NewSessionPage', () => {
     cleanup();
   });
 
-  it('renders only menu intent form with no cookbook mode switcher', () => {
+  it('renders only menu intent form with route-local guidance and no cookbook mode switcher', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
     expect(screen.getByText(/Describe the meal you want to cook/i)).toBeInTheDocument();
-    
-    // Verify no cookbook mode exists
+    expect(screen.getByRole('heading', { name: 'Start here when service timing leads.' })).toBeInTheDocument();
+    expect(screen.getByText(/Keep this route for menu-intent planning/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Browse Recipe Library/i })).toHaveAttribute('href', '/recipes');
+    expect(screen.getByRole('link', { name: /Start a Recipe Draft/i })).toHaveAttribute('href', '/recipes/new');
+
     expect(screen.queryByText(/Select from cookbook/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cookbook mode/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/free-text mode/i)).not.toBeInTheDocument();
@@ -137,7 +140,7 @@ describe('NewSessionPage', () => {
     expect(screen.getByText('dairy-free')).toBeInTheDocument();
   });
 
-  it('shows validation error when submitting without menu description', async () => {
+  it('keeps the submit disabled for blank menu intent text', async () => {
     renderPage();
 
     const submitButton = screen.getByRole('button', { name: 'Start Planning' });
@@ -150,8 +153,14 @@ describe('NewSessionPage', () => {
     expect(submitButton).toBeDisabled();
   });
 
-  it('displays error message when session creation fails', async () => {
-    vi.spyOn(sessionsApi, 'createSession').mockRejectedValue(new Error('Session creation failed'));
+  it('keeps the loading state until a create failure settles and does not kick off the run', async () => {
+    let rejectCreate!: (reason?: unknown) => void;
+    vi.spyOn(sessionsApi, 'createSession').mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectCreate = reject;
+        }),
+    );
     const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline');
 
     renderPage();
@@ -159,8 +168,56 @@ describe('NewSessionPage', () => {
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
+    expect(await screen.findByRole('button', { name: 'Starting...' })).toBeDisabled();
+    expect(runPipelineSpy).not.toHaveBeenCalled();
+
+    rejectCreate(new Error('Session creation failed'));
+
     expect(await screen.findByText('Session creation failed')).toBeInTheDocument();
     expect(runPipelineSpy).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Start Planning' })).toBeEnabled();
+  });
+
+  it('keeps the loading state until the run kickoff settles and only navigates after create then run', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    let resolveRun!: (value: Awaited<ReturnType<typeof sessionsApi.runPipeline>>) => void;
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+    );
+
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    expect(await screen.findByRole('button', { name: 'Starting...' })).toBeDisabled();
+    expect(createSessionSpy).toHaveBeenCalledTimes(1);
+    expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    resolveRun({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123'));
+  });
+
+  it('displays fallback error text when the run kickoff rejects with a malformed response', async () => {
+    vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockRejectedValue({ unexpected: true });
+
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    expect(await screen.findByText('Something went wrong — please try again')).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
