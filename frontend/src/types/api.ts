@@ -297,3 +297,14 @@ export interface AuthoredRecipeListItem {
   created_at: string;
   updated_at: string;
 }
+
+export interface AuthoredRecipeValidationIssue {
+  type: string;
+  loc: Array<string | number>;
+  msg: string;
+  input?: unknown;
+}
+
+export interface AuthoredRecipeValidationDetail {
+  detail: AuthoredRecipeValidationIssue[];
+}

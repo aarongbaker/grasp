@@ -1,3 +1,5 @@
+import type { AuthoredRecipeValidationDetail } from '../types/api';
+
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const normalizedApiUrl = configuredApiUrl ? configuredApiUrl.replace(/\/$/, '') : '';
 const API_BASE = normalizedApiUrl ? `${normalizedApiUrl}/api/v1` : '/api/v1';
@@ -7,20 +9,48 @@ export type ApiErrorKind =
   | 'timeout'
   | 'network-unreachable'
   | 'network-offline'
-  | 'startup-config';
+  | 'startup-config'
+  | 'authored-validation';
 
 export class ApiError extends Error {
   status: number;
   detail: string;
   kind: ApiErrorKind;
+  payload?: unknown;
 
-  constructor(status: number, detail: string, kind: ApiErrorKind = 'http') {
+  constructor(status: number, detail: string, kind: ApiErrorKind = 'http', payload?: unknown) {
     super(detail);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
     this.kind = kind;
+    this.payload = payload;
   }
+}
+
+export function isAuthoredRecipeValidationDetail(value: unknown): value is AuthoredRecipeValidationDetail {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const detail = (value as { detail?: unknown }).detail;
+  if (!Array.isArray(detail) || detail.length === 0) {
+    return false;
+  }
+
+  return detail.every((issue) => {
+    if (!issue || typeof issue !== 'object') {
+      return false;
+    }
+
+    const candidate = issue as { type?: unknown; loc?: unknown; msg?: unknown };
+    return (
+      typeof candidate.type === 'string' &&
+      Array.isArray(candidate.loc) &&
+      candidate.loc.every((segment) => typeof segment === 'string' || typeof segment === 'number') &&
+      typeof candidate.msg === 'string'
+    );
+  });
 }
 
 function looksLikeStartupConfigFailure(detail: string): boolean {
@@ -156,9 +186,14 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    const detail = body.detail || res.statusText;
+
+    if (status === 422 && path === '/authored-recipes' && isAuthoredRecipeValidationDetail(body)) {
+      throw new ApiError(status, 'The recipe draft needs more detail before it can be saved.', 'authored-validation', body);
+    }
+
+    const detail = typeof body.detail === 'string' ? body.detail : res.statusText;
     const kind = looksLikeStartupConfigFailure(detail) ? 'startup-config' : 'http';
-    throw new ApiError(status, detail, kind);
+    throw new ApiError(status, detail, kind, body);
   }
 
   if (res.status === 204) return undefined as T;

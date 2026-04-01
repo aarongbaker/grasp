@@ -4,7 +4,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as authoredRecipesApi from '../../api/authoredRecipes';
 import * as sessionsApi from '../../api/sessions';
+import { ApiError } from '../../api/client';
 import { AuthProvider } from '../../context/AuthContext';
+import { getAuthoredRecipeValidationDetail } from '../../utils/errors';
 import { AuthoredRecipeWorkspacePage } from '../AuthoredRecipeWorkspacePage';
 
 const testUserId = '00000000-0000-0000-0000-000000000111';
@@ -267,5 +269,35 @@ describe('AuthoredRecipeWorkspacePage', () => {
     expect(screen.queryByText(/json/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/depends_on/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/duration_max/i)).not.toBeInTheDocument();
+  });
+
+  it('preserves authored validation detail for downstream translation helpers', () => {
+    const validationError = new ApiError(
+      422,
+      'The recipe draft needs more detail before it can be saved.',
+      'authored-validation',
+      {
+        detail: [
+          {
+            type: 'value_error',
+            loc: ['body', 'steps', 0, 'dependencies', 0, 'step_id'],
+            msg: "Value error, Step 'charred_carrots_with_whipped_feta_step_1' depends on 'missing_step' which does not exist.",
+            input: 'missing_step',
+          },
+        ],
+      },
+    );
+
+    expect(getAuthoredRecipeValidationDetail(validationError)).toEqual({
+      detail: [
+        {
+          type: 'value_error',
+          loc: ['body', 'steps', 0, 'dependencies', 0, 'step_id'],
+          msg: "Value error, Step 'charred_carrots_with_whipped_feta_step_1' depends on 'missing_step' which does not exist.",
+          input: 'missing_step',
+        },
+      ],
+    });
+    expect(getAuthoredRecipeValidationDetail(new ApiError(500, 'boom'))).toBeNull();
   });
 });

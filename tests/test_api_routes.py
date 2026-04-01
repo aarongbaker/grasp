@@ -528,6 +528,28 @@ async def test_create_authored_recipe_rejects_cross_user_body(app_with_overrides
     assert resp.json()["detail"] == "Access denied"
 
 
+async def test_create_authored_recipe_422_preserves_validation_detail(app_with_overrides, authored_recipe_payload):
+    payload = dict(authored_recipe_payload)
+    payload["steps"] = [
+        {
+            **payload["steps"][0],
+            "can_be_done_ahead": True,
+            "prep_ahead_window": None,
+        }
+    ]
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/v1/authored-recipes", json=payload)
+
+    assert resp.status_code == 422
+    data = resp.json()
+    assert isinstance(data["detail"], list)
+    assert data["detail"][0]["loc"] == ["body", "steps", 0]
+    assert "prep_ahead_window is required" in data["detail"][0]["msg"]
+    assert data["detail"][0]["type"] == "value_error"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Ingest routes (Fix #7)
 # ─────────────────────────────────────────────────────────────────────────────
