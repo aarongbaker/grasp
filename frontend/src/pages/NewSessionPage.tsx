@@ -378,23 +378,32 @@ export function NewSessionPage() {
           <div className={styles.anchorMeta}>
             <span className={styles.anchorMetaLabel}>
               {plannerAnchorMode === 'none'
-                ? 'No owned reference needed unless you want the planner anchored to one saved recipe or cookbook.'
+                ? 'No owned reference is required unless you want the planner anchored to one saved recipe or cookbook.'
                 : plannerAnchorMode === 'authored'
-                  ? 'Resolve an owned recipe title to keep no-match or ambiguous states visible before session creation.'
-                  : 'Resolve an owned cookbook name, then choose whether planning stays strict to that shelf or only leans toward it.'}
+                  ? 'Resolve one owned recipe title inline so no-match, ambiguity, and retry states stay visible before session creation.'
+                  : 'Resolve one owned cookbook inline, then choose whether planning stays strict to that shelf or only leans toward it.'}
             </span>
             {plannerResolution.phase === 'resolved' && plannerResolution.status === 'resolved' && selectedPlannerMatch && (
               <span className={styles.anchorMetaDetail}>
                 {selectedPlannerMatch.kind === 'authored'
-                  ? `Anchored to “${selectedPlannerMatch.title}”.`
-                  : `Targeting “${selectedPlannerMatch.name}”.`}
+                  ? `Planner anchor set to “${selectedPlannerMatch.title}”.`
+                  : `Planner target set to “${selectedPlannerMatch.name}”.`}
               </span>
             )}
           </div>
 
           {plannerAnchorMode !== 'none' && (
             <div className={styles.resolutionPanel} aria-live="polite">
-              {plannerResolution.phase === 'error' && <div className={styles.inlineError}>{plannerResolution.error}</div>}
+              {plannerResolution.phase === 'error' && (
+                <div className={styles.inlineError}>
+                  <p className={styles.resultEyebrow}>Resolve unavailable</p>
+                  <p className={styles.resultHeadline}>The planner could not confirm that owned reference right now.</p>
+                  <p className={styles.resultText}>{plannerResolution.error}</p>
+                  <p className={styles.recoveryHint}>
+                    Keep the dinner brief here, adjust the reference if needed, and resolve again when the library is reachable.
+                  </p>
+                </div>
+              )}
 
               {plannerResolution.phase === 'resolved' && plannerResolution.status === 'no_match' && (
                 <div className={styles.inlineNotice}>
@@ -404,7 +413,8 @@ export function NewSessionPage() {
                     {plannerResolution.query}”.
                   </p>
                   <p className={styles.resultText}>
-                    Adjust the reference text and resolve again before starting the planner.
+                    Correct the {plannerAnchorMode === 'authored' ? 'recipe title' : 'cookbook name'} and resolve again. The
+                    planner stays in this lane, but it will not start until one owned reference resolves.
                   </p>
                 </div>
               )}
@@ -415,13 +425,16 @@ export function NewSessionPage() {
                   {selectedPlannerMatch.kind === 'authored' ? (
                     <>
                       <p className={styles.resultHeadline}>{selectedPlannerMatch.title}</p>
-                      <p className={styles.resultText}>This saved recipe will anchor the planner while the rest of the menu stays open.</p>
+                      <p className={styles.resultText}>
+                        This saved recipe is the owned anchor. GRASP will plan the rest of the dinner around it while the
+                        remaining dishes stay open to generation.
+                      </p>
                     </>
                   ) : (
                     <>
                       <p className={styles.resultHeadline}>{selectedPlannerMatch.name}</p>
                       <p className={styles.resultText}>
-                        {selectedPlannerMatch.description || 'This owned cookbook shelf will shape the planner’s search space.'}
+                        {selectedPlannerMatch.description || 'This owned cookbook shelf is the planner target for the dinner brief.'}
                       </p>
                     </>
                   )}
@@ -434,7 +447,10 @@ export function NewSessionPage() {
                   <p className={styles.resultHeadline}>Choose the exact {plannerAnchorMode === 'authored' ? 'recipe' : 'cookbook'} before starting the planner.</p>
                   <p className={styles.resultText}>
                     “{plannerResolution.query}” matched more than one owned {plannerAnchorMode === 'authored' ? 'recipe' : 'cookbook'}.
-                    The planner stays blocked until you choose one.
+                    The planner stays blocked in this lane until you choose one exact match.
+                  </p>
+                  <p className={styles.recoveryHint}>
+                    Review the owned matches below, choose the one you mean, then continue with this dinner brief.
                   </p>
                   <div className={styles.choiceList} role="radiogroup" aria-label="Planner reference matches">
                     {plannerResolution.response.matches.map((match) => {
@@ -473,7 +489,10 @@ export function NewSessionPage() {
                 <div className={styles.modeCard}>
                   <p className={styles.resultEyebrow}>Cookbook planning mode</p>
                   <p className={styles.resultText}>
-                    Decide whether this dinner must stay inside the chosen cookbook or whether the planner can borrow outside ideas while leaning on it.
+                    Decide whether this dinner must stay inside the chosen cookbook or whether the planner can borrow outside dishes while still leaning on that owned shelf.
+                  </p>
+                  <p className={styles.recoveryHint}>
+                    The planner remains blocked until you pick one mode, so the target cookbook guidance is explicit before session creation.
                   </p>
                   <Select
                     label="Cookbook planning mode"
