@@ -38,6 +38,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlmodel import select
 
 from app.core.llm import extract_token_usage, is_timeout_error, llm_retry
 from app.core.settings import get_settings
@@ -48,6 +49,8 @@ from app.models.pipeline import (
     DinnerConcept,
     GRASPState,
     PlannerLibraryAuthoredRecipeAnchor,
+    PlannerLibraryCookbookTarget,
+    PlannerLibraryCookbookPlanningMode,
     SelectedAuthoredRecipe,
     SelectedCookbookRecipe,
 )
@@ -218,7 +221,7 @@ Your recipes are written for experienced home cooks who value precision, techniq
 - Cuisine: {anchor_recipe.cuisine}
 - Servings: {anchor_recipe.servings}
 - Estimated total minutes: {anchor_recipe.estimated_total_minutes}
-- Key ingredients: {', '.join(ingredient.name for ingredient in anchor_recipe.ingredients[:8]) or 'See anchored recipe'}
+- Key ingredients: {", ".join(ingredient.name for ingredient in anchor_recipe.ingredients[:8]) or "See anchored recipe"}
 
 ## DIETARY RESTRICTIONS
 {restrictions}
@@ -377,7 +380,9 @@ def _format_authored_selection(selection: SelectedAuthoredRecipe | PlannerLibrar
     return f"{selection.title!r} ({selection.recipe_id})"
 
 
-async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor) -> AuthoredRecipeRecord:
+async def _load_authored_recipe_record(
+    selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor,
+) -> AuthoredRecipeRecord:
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
     session_local = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -392,10 +397,27 @@ async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe | Plann
         await engine.dispose()
 
 
-async def _compile_authored_raw_recipe(
+async def _load_cookbook_authored_recipe_records(target: PlannerLibraryCookbookTarget) -> list[AuthoredRecipeRecord]:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, echo=False)
+    session_local = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    try:
+        async with session_local() as db:
+            stmt = (
+                select(AuthoredRecipeRecord)
+                .where(AuthoredRecipeRecord.cookbook_id == target.cookbook_id)
+                .order_by(AuthoredRecipeRecord.updated_at.desc(), AuthoredRecipeRecord.title.asc())
+            )
+            return list((await db.execute(stmt)).scalars().all())
+    finally:
+        await engine.dispose()
+
+
+async def _compile_authored_raw_recipe_from_record(
     selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor,
+    record: AuthoredRecipeRecord,
 ) -> RawRecipe:
-    record = await _load_authored_recipe_record(selection)
     payload = dict(record.authored_payload or {})
     payload.setdefault("user_id", record.user_id)
     payload.setdefault("cookbook_id", record.cookbook_id)
@@ -420,6 +442,13 @@ async def _compile_authored_raw_recipe(
     return raw_recipe
 
 
+async def _compile_authored_raw_recipe(
+    selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor,
+) -> RawRecipe:
+    record = await _load_authored_recipe_record(selection)
+    return await _compile_authored_raw_recipe_from_record(selection, record)
+
+
 async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
     if concept.selected_authored_recipe is None:
         raise ValueError("selected_authored_recipe is required when concept_source is 'authored'")
@@ -428,9 +457,7 @@ async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
 
 async def _build_planner_authored_anchor_raw_recipe(concept: DinnerConcept) -> RawRecipe:
     if concept.planner_authored_recipe_anchor is None:
-        raise ValueError(
-            "planner_authored_recipe_anchor is required when concept_source is 'planner_authored_anchor'"
-        )
+        raise ValueError("planner_authored_recipe_anchor is required when concept_source is 'planner_authored_anchor'")
     return await _compile_authored_raw_recipe(concept.planner_authored_recipe_anchor)
 
 
@@ -444,6 +471,38 @@ async def build_planner_authored_anchor_raw_recipes(concept: DinnerConcept) -> l
     if concept.concept_source != "planner_authored_anchor":
         return []
     return [await _build_planner_authored_anchor_raw_recipe(concept)]
+
+
+async def build_planner_cookbook_target_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
+    if concept.concept_source != "planner_cookbook_target":
+        return []
+
+    target = concept.planner_cookbook_target
+    if target is None:
+        raise ValueError("planner_cookbook_target is required when concept_source is 'planner_cookbook_target'")
+
+    records = await _load_cookbook_authored_recipe_records(target)
+    if not records:
+        raise ValueError(
+            f"Planner cookbook target {target.name!r} ({target.cookbook_id}) has no authored recipes available for runtime seeding"
+        )
+
+    compiled_recipes: list[RawRecipe] = []
+    compile_errors: list[str] = []
+    for record in records:
+        selection = PlannerLibraryAuthoredRecipeAnchor(recipe_id=record.recipe_id, title=record.title)
+        try:
+            compiled_recipes.append(await _compile_authored_raw_recipe_from_record(selection, record))
+        except ValueError as exc:
+            compile_errors.append(str(exc))
+
+    if not compiled_recipes:
+        raise ValueError(
+            f"Planner cookbook target {target.name!r} ({target.cookbook_id}) did not contain any authored recipes that could compile into scheduling inputs. "
+            + "; ".join(compile_errors)
+        )
+
+    return compiled_recipes
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -555,6 +614,62 @@ async def recipe_generator_node(state: GRASPState) -> dict:
             logger.info(
                 "Seeded planner-authored anchor %r and generated %d complementary recipes: %s",
                 anchor_recipe.name,
+                len(result.recipes),
+                [r.name for r in result.recipes],
+            )
+            return {
+                "raw_recipes": [recipe.model_dump(mode="json") for recipe in all_recipes],
+                "token_usage": [usage],
+            }
+
+        if concept.concept_source == "planner_cookbook_target":
+            target = concept.planner_cookbook_target
+            cookbook_recipes = await build_planner_cookbook_target_raw_recipes(concept)
+            seeded_recipes = cookbook_recipes[:recipe_count]
+            cookbook_mode = target.mode if target is not None else PlannerLibraryCookbookPlanningMode.STRICT
+
+            if cookbook_mode == PlannerLibraryCookbookPlanningMode.STRICT:
+                logger.info(
+                    "Seeded %d planner cookbook recipes from %r in strict mode",
+                    len(seeded_recipes),
+                    target.name if target else "unknown cookbook",
+                )
+                return {
+                    "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
+                }
+
+            complement_count = max(0, recipe_count - len(seeded_recipes))
+            if complement_count == 0:
+                logger.info(
+                    "Seeded %d planner cookbook recipes from %r with no complementary generation required",
+                    len(seeded_recipes),
+                    target.name if target else "unknown cookbook",
+                )
+                return {
+                    "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
+                }
+
+            anchor_recipe = seeded_recipes[0]
+            system_prompt = _build_mixed_origin_system_prompt(
+                concept=concept,
+                kitchen_config=kitchen_config,
+                equipment=equipment,
+                anchor_recipe=anchor_recipe,
+                complement_count=complement_count,
+            )
+            human_prompt = _build_mixed_origin_human_prompt(complement_count, anchor_recipe)
+
+            logger.info(
+                "Seeded %d planner cookbook recipes from %r and generating %d complementary recipes",
+                len(seeded_recipes),
+                target.name if target else "unknown cookbook",
+                complement_count,
+            )
+            result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+            all_recipes = [*seeded_recipes, *result.recipes]
+            logger.info(
+                "Seeded planner cookbook target %r and generated %d complementary recipes: %s",
+                target.name if target else "unknown cookbook",
                 len(result.recipes),
                 [r.name for r in result.recipes],
             )

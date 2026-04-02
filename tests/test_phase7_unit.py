@@ -41,6 +41,8 @@ from app.models.enums import ErrorType, MealType, Occasion, Resource
 from app.models.pipeline import (
     DinnerConcept,
     PlannerLibraryAuthoredRecipeAnchor,
+    PlannerLibraryCookbookPlanningMode,
+    PlannerLibraryCookbookTarget,
     SelectedAuthoredRecipe,
     SelectedCookbookRecipe,
 )
@@ -126,6 +128,34 @@ PLANNER_AUTHORED_ANCHOR_CONCEPT = DinnerConcept(
 )
 PLANNER_AUTHORED_ANCHOR_CONCEPT_DICT = PLANNER_AUTHORED_ANCHOR_CONCEPT.model_dump(mode="json")
 
+_PLANNER_COOKBOOK_ID = uuid.uuid4()
+PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT = DinnerConcept(
+    free_text="Plan dinner using dishes from my market supper club cookbook.",
+    guest_count=4,
+    meal_type=MealType.DINNER,
+    occasion=Occasion.DINNER_PARTY,
+    dietary_restrictions=["No shellfish"],
+    concept_source="planner_cookbook_target",
+    planner_cookbook_target=PlannerLibraryCookbookTarget(
+        cookbook_id=_PLANNER_COOKBOOK_ID,
+        name="Market Supper Club",
+        description="Late-summer dinner drafts.",
+        mode=PlannerLibraryCookbookPlanningMode.STRICT,
+    ),
+)
+PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT_DICT = PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT.model_dump(mode="json")
+PLANNER_COOKBOOK_TARGET_BIASED_CONCEPT = PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT.model_copy(
+    update={
+        "planner_cookbook_target": PlannerLibraryCookbookTarget(
+            cookbook_id=_PLANNER_COOKBOOK_ID,
+            name="Market Supper Club",
+            description="Late-summer dinner drafts.",
+            mode=PlannerLibraryCookbookPlanningMode.COOKBOOK_BIASED,
+        )
+    }
+)
+PLANNER_COOKBOOK_TARGET_BIASED_CONCEPT_DICT = PLANNER_COOKBOOK_TARGET_BIASED_CONCEPT.model_dump(mode="json")
+
 KITCHEN_CONFIG = {
     "max_burners": 4,
     "max_oven_racks": 2,
@@ -154,6 +184,52 @@ def _authored_record(payload: dict | None = None) -> AuthoredRecipeRecord:
         description=payload.get("description", base.description),
         cuisine=payload.get("cuisine", base.cuisine),
         authored_payload=payload,
+    )
+
+
+def _cookbook_authored_payload(title: str, description: str, cuisine: str) -> dict:
+    payload = AUTHORED_BRAISED_CHICKEN.model_dump(mode="python")
+    payload["title"] = title
+    payload["description"] = description
+    payload["cuisine"] = cuisine
+    payload["cookbook_id"] = _PLANNER_COOKBOOK_ID
+    payload["steps"] = [
+        {
+            **step,
+            "dependencies": [
+                {
+                    **dependency,
+                    "step_id": dependency["step_id"].replace(
+                        "braised_chicken_with_saffron_onions",
+                        title.lower().replace(" ", "_").replace("-", "_"),
+                    ),
+                }
+                for dependency in step.get("dependencies", [])
+            ],
+        }
+        for step in payload["steps"]
+    ]
+    return payload
+
+
+def _cookbook_authored_record(
+    *,
+    recipe_id: uuid.UUID,
+    title: str,
+    updated_at,
+    payload: dict | None = None,
+) -> AuthoredRecipeRecord:
+    payload = payload or _cookbook_authored_payload(title, AUTHORED_BRAISED_CHICKEN.description, AUTHORED_BRAISED_CHICKEN.cuisine)
+    payload.setdefault("cookbook_id", _PLANNER_COOKBOOK_ID)
+    return AuthoredRecipeRecord(
+        recipe_id=recipe_id,
+        user_id=payload["user_id"],
+        cookbook_id=payload["cookbook_id"],
+        title=title,
+        description=payload["description"],
+        cuisine=payload["cuisine"],
+        authored_payload=payload,
+        updated_at=updated_at,
     )
 
 
@@ -408,6 +484,174 @@ class TestPlannerAuthoredGeneratorSeeding:
         assert error["recoverable"] is False
         assert str(_AUTHORED_RECIPE_ID) in error["message"]
         assert "could not compile into a scheduling input" in error["message"]
+        assert "ingredients must contain at least one item" in error["message"]
+
+
+class TestPlannerCookbookGeneratorSeeding:
+    @pytest.mark.asyncio
+    async def test_planner_cookbook_strict_seeds_deterministic_authored_recipes_without_llm(self):
+        state = {
+            "concept": PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+        older_id = uuid.uuid4()
+        newer_id = uuid.uuid4()
+        records = [
+            _cookbook_authored_record(
+                recipe_id=older_id,
+                title="Olive Oil Cake",
+                updated_at="2025-01-01T12:00:00",
+                payload=_cookbook_authored_payload("Olive Oil Cake", "Tender citrus cake.", "Italian"),
+            ),
+            _cookbook_authored_record(
+                recipe_id=newer_id,
+                title="Braised Fennel",
+                updated_at="2025-01-02T12:00:00",
+                payload=_cookbook_authored_payload("Braised Fennel", "Jammy fennel wedges.", "French"),
+            ),
+        ]
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch(
+                "app.graph.nodes.generator._load_cookbook_authored_recipe_records",
+                new=AsyncMock(return_value=records),
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert "errors" not in result
+        assert [recipe["name"] for recipe in result["raw_recipes"]] == ["Olive Oil Cake", "Braised Fennel"]
+
+    @pytest.mark.asyncio
+    async def test_planner_cookbook_biased_seeds_cookbook_recipes_then_generates_missing_complements(self):
+        state = {
+            "concept": PLANNER_COOKBOOK_TARGET_BIASED_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [{"name": "Dutch oven", "category": "cookware", "unlocks_techniques": ["braise"]}],
+            "errors": [],
+        }
+        seeded_records = [
+            _cookbook_authored_record(
+                recipe_id=uuid.uuid4(),
+                title="Braised Fennel",
+                updated_at="2025-01-03T12:00:00",
+                payload=_cookbook_authored_payload("Braised Fennel", "Jammy fennel wedges.", "French"),
+            ),
+            _cookbook_authored_record(
+                recipe_id=uuid.uuid4(),
+                title="Olive Oil Cake",
+                updated_at="2025-01-02T12:00:00",
+                payload=_cookbook_authored_payload("Olive Oil Cake", "Tender citrus cake.", "Italian"),
+            ),
+        ]
+        expected_complements = _derive_recipe_count(MealType.DINNER, Occasion.DINNER_PARTY) - len(seeded_records)
+        complement_recipe = AUTHORED_BRAISED_CHICKEN.compile_raw_recipe().model_copy(
+            update={
+                "name": "Charred Chicory Salad",
+                "description": "A bitter, warm salad to balance the cookbook dishes.",
+                "cuisine": "French",
+                "estimated_total_minutes": 18,
+            }
+        )
+        mock_output = RecipeGenerationOutput(recipes=[complement_recipe] * expected_complements)
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.return_value = mock_output
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value = mock_chain
+
+        with (
+            patch("app.graph.nodes.generator._create_llm", return_value=mock_llm),
+            patch(
+                "app.graph.nodes.generator._load_cookbook_authored_recipe_records",
+                new=AsyncMock(return_value=seeded_records),
+            ),
+            patch(
+                "app.graph.nodes.generator.extract_token_usage",
+                return_value={"node_name": "recipe_generator", "input_tokens": 111, "output_tokens": 222},
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        assert "errors" not in result
+        assert [recipe["name"] for recipe in result["raw_recipes"][:2]] == ["Braised Fennel", "Olive Oil Cake"]
+        assert all(recipe["name"] == "Charred Chicory Salad" for recipe in result["raw_recipes"][2:])
+        assert len(result["raw_recipes"]) == len(seeded_records) + expected_complements
+        assert result["token_usage"] == [{"node_name": "recipe_generator", "input_tokens": 111, "output_tokens": 222}]
+        mock_llm.with_structured_output.assert_called_once_with(RecipeGenerationOutput)
+        messages = mock_chain.ainvoke.await_args.args[0]
+        system_prompt = messages[0].content
+        human_prompt = messages[1].content
+        assert f"Number of complementary courses to generate: {expected_complements}" in system_prompt
+        assert "Name: Braised Fennel" in system_prompt
+        assert "Do not regenerate, rename, restate, or paraphrase the anchor recipe" in system_prompt
+        assert "Generate 1 complementary recipes around the anchored dish 'Braised Fennel'" in human_prompt
+
+    @pytest.mark.asyncio
+    async def test_planner_cookbook_strict_returns_structured_validation_error_for_empty_cookbook(self):
+        state = {
+            "concept": PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch(
+                "app.graph.nodes.generator._load_cookbook_authored_recipe_records",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert result["raw_recipes"] == []
+        error = result["errors"][0]
+        assert error["error_type"] == ErrorType.VALIDATION_FAILURE.value
+        assert "has no authored recipes available for runtime seeding" in error["message"]
+        assert "Market Supper Club" in error["message"]
+
+    @pytest.mark.asyncio
+    async def test_planner_cookbook_strict_returns_structured_validation_error_when_all_authored_payloads_fail_to_compile(self):
+        state = {
+            "concept": PLANNER_COOKBOOK_TARGET_STRICT_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+        broken_payload = {
+            **AUTHORED_BRAISED_CHICKEN.model_dump(mode="python"),
+            "title": "Broken Braise",
+            "ingredients": [],
+            "cookbook_id": _PLANNER_COOKBOOK_ID,
+        }
+        records = [
+            _cookbook_authored_record(
+                recipe_id=uuid.uuid4(),
+                title="Broken Braise",
+                updated_at="2025-01-03T12:00:00",
+                payload=broken_payload,
+            )
+        ]
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch(
+                "app.graph.nodes.generator._load_cookbook_authored_recipe_records",
+                new=AsyncMock(return_value=records),
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert result["raw_recipes"] == []
+        error = result["errors"][0]
+        assert error["error_type"] == ErrorType.VALIDATION_FAILURE.value
+        assert "did not contain any authored recipes that could compile into scheduling inputs" in error["message"]
         assert "ingredients must contain at least one item" in error["message"]
 
 
