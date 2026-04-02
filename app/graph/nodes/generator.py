@@ -14,6 +14,10 @@ is resolved against the user's saved recipe library, compiled through the
 native authored-recipe model seam, and returned as one RawRecipe without
 calling the LLM.
 
+Planner-authored-anchor sessions are mixed-origin: one persisted authored
+anchor is compiled deterministically, then the LLM is asked only for the
+remaining complementary recipes needed to fill the meal/occasion count.
+
 Error handling: generator failure is always fatal (recoverable=False).
 Nothing can be enriched or scheduled without recipes.
 
@@ -40,7 +44,13 @@ from app.core.settings import get_settings
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
 from app.models.enums import ErrorType, MealType, Occasion
 from app.models.errors import NodeError
-from app.models.pipeline import DinnerConcept, GRASPState, SelectedAuthoredRecipe, SelectedCookbookRecipe
+from app.models.pipeline import (
+    DinnerConcept,
+    GRASPState,
+    PlannerLibraryAuthoredRecipeAnchor,
+    SelectedAuthoredRecipe,
+    SelectedCookbookRecipe,
+)
 from app.models.recipe import Ingredient, RawRecipe
 
 logger = logging.getLogger(__name__)
@@ -176,6 +186,75 @@ Your recipes are written for experienced home cooks who value precision, techniq
 10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.'''
 
 
+def _build_mixed_origin_system_prompt(
+    concept: DinnerConcept,
+    kitchen_config: dict,
+    equipment: list[dict],
+    anchor_recipe: RawRecipe,
+    complement_count: int,
+) -> str:
+    restrictions = _format_dietary_restrictions(concept.dietary_restrictions)
+    equip_text = _format_equipment(equipment)
+
+    max_burners = kitchen_config.get("max_burners", 4)
+    max_oven_racks = kitchen_config.get("max_oven_racks", 2)
+    has_second_oven = kitchen_config.get("has_second_oven", False)
+
+    return f'''You are GRASP, an expert chef assistant that designs cohesive multi-course meal plans.
+Your recipes are written for experienced home cooks who value precision, technique, and timing.
+
+## DINNER CONCEPT
+"{concept.free_text}"
+
+## MENU PARAMETERS
+- Meal type: {concept.meal_type.value}
+- Occasion: {concept.occasion.value}
+- Guest count: {concept.guest_count}
+- Number of complementary courses to generate: {complement_count}
+
+## FIXED ANCHOR RECIPE (ALREADY CHOSEN — DO NOT REGENERATE OR RENAME)
+- Name: {anchor_recipe.name}
+- Description: {anchor_recipe.description}
+- Cuisine: {anchor_recipe.cuisine}
+- Servings: {anchor_recipe.servings}
+- Estimated total minutes: {anchor_recipe.estimated_total_minutes}
+- Key ingredients: {', '.join(ingredient.name for ingredient in anchor_recipe.ingredients[:8]) or 'See anchored recipe'}
+
+## DIETARY RESTRICTIONS
+{restrictions}
+
+## KITCHEN CONSTRAINTS
+- Stovetop burners available: {max_burners}
+- Oven racks available: {max_oven_racks}
+- Second oven: {"Yes" if has_second_oven else "No"}
+
+## AVAILABLE EQUIPMENT
+{equip_text}
+
+## GUIDELINES
+1. Generate exactly {complement_count} NEW recipes that complement the fixed anchor recipe above.
+2. Do not regenerate, rename, restate, or paraphrase the anchor recipe as one of the outputs.
+3. The resulting menu should feel balanced and cohesive around the anchor recipe.
+4. Scale all ingredient quantities for {concept.guest_count} servings.
+5. Write clear, detailed steps with temperatures (Celsius), times, and visual doneness cues.
+6. STRICTLY respect all dietary restrictions. Never include restricted ingredients or derivatives.
+7. Design recipes that work within the kitchen's burner and oven rack limits alongside the anchor.
+8. Include cuisine attribution for each generated recipe.
+9. Provide realistic estimated_total_minutes for each generated recipe (prep through plating).
+10. Each generated recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.'''
+
+
+def _build_human_prompt(recipe_count: int, concept: DinnerConcept) -> str:
+    return f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."
+
+
+def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRecipe) -> str:
+    return (
+        f"Generate {complement_count} complementary recipes around the anchored dish {anchor_recipe.name!r}. "
+        "Return only the new complementary recipes."
+    )
+
+
 # ── Cookbook-mode deterministic parsing ─────────────────────────────────────
 
 
@@ -294,11 +373,11 @@ def build_cookbook_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
 # ── Authored-mode deterministic compilation ─────────────────────────────────
 
 
-def _format_authored_selection(selection: SelectedAuthoredRecipe) -> str:
+def _format_authored_selection(selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor) -> str:
     return f"{selection.title!r} ({selection.recipe_id})"
 
 
-async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe) -> AuthoredRecipeRecord:
+async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor) -> AuthoredRecipeRecord:
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
     session_local = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -313,11 +392,9 @@ async def _load_authored_recipe_record(selection: SelectedAuthoredRecipe) -> Aut
         await engine.dispose()
 
 
-async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
-    if concept.selected_authored_recipe is None:
-        raise ValueError("selected_authored_recipe is required when concept_source is 'authored'")
-
-    selection = concept.selected_authored_recipe
+async def _compile_authored_raw_recipe(
+    selection: SelectedAuthoredRecipe | PlannerLibraryAuthoredRecipeAnchor,
+) -> RawRecipe:
     record = await _load_authored_recipe_record(selection)
     payload = dict(record.authored_payload or {})
     payload.setdefault("user_id", record.user_id)
@@ -343,10 +420,30 @@ async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
     return raw_recipe
 
 
+async def _build_authored_raw_recipe(concept: DinnerConcept) -> RawRecipe:
+    if concept.selected_authored_recipe is None:
+        raise ValueError("selected_authored_recipe is required when concept_source is 'authored'")
+    return await _compile_authored_raw_recipe(concept.selected_authored_recipe)
+
+
+async def _build_planner_authored_anchor_raw_recipe(concept: DinnerConcept) -> RawRecipe:
+    if concept.planner_authored_recipe_anchor is None:
+        raise ValueError(
+            "planner_authored_recipe_anchor is required when concept_source is 'planner_authored_anchor'"
+        )
+    return await _compile_authored_raw_recipe(concept.planner_authored_recipe_anchor)
+
+
 async def build_authored_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
     if concept.concept_source != "authored":
         return []
     return [await _build_authored_raw_recipe(concept)]
+
+
+async def build_planner_authored_anchor_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
+    if concept.concept_source != "planner_authored_anchor":
+        return []
+    return [await _build_planner_authored_anchor_raw_recipe(concept)]
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -363,6 +460,29 @@ def _create_llm() -> ChatAnthropic:
         api_key=settings.anthropic_api_key,
         max_tokens=4096,
     )
+
+
+async def _invoke_recipe_generation(
+    *,
+    system_prompt: str,
+    human_prompt: str,
+) -> tuple[RecipeGenerationOutput, dict]:
+    """Run the structured LLM recipe generation path and return output + token usage."""
+    llm = _create_llm()
+    chain = llm.with_structured_output(RecipeGenerationOutput)
+
+    @llm_retry
+    async def _invoke_llm():
+        return await chain.ainvoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=human_prompt),
+            ]
+        )
+
+    result = await _invoke_llm()
+    usage = extract_token_usage(result, "recipe_generator")
+    return result, usage
 
 
 # ── Node function ────────────────────────────────────────────────────────────
@@ -400,33 +520,58 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in authored_recipes],
             }
 
-        # Derive recipe count from concept
         recipe_count = _derive_recipe_count(concept.meal_type, concept.occasion)
 
-        # Build prompt
-        system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
+        if concept.concept_source == "planner_authored_anchor":
+            anchor_recipes = await build_planner_authored_anchor_raw_recipes(concept)
+            anchor_recipe = anchor_recipes[0]
+            complement_count = max(0, recipe_count - len(anchor_recipes))
 
-        # Call Claude via structured output (with retry on transient errors)
-        llm = _create_llm()
-        chain = llm.with_structured_output(RecipeGenerationOutput)
+            if complement_count == 0:
+                logger.info(
+                    "Seeded planner-authored anchor %r with no complementary generation required",
+                    anchor_recipe.name,
+                )
+                return {
+                    "raw_recipes": [recipe.model_dump(mode="json") for recipe in anchor_recipes],
+                }
 
-        @llm_retry
-        async def _invoke_llm():
-            return await chain.ainvoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(
-                        content=f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."
-                    ),
-                ]
+            system_prompt = _build_mixed_origin_system_prompt(
+                concept=concept,
+                kitchen_config=kitchen_config,
+                equipment=equipment,
+                anchor_recipe=anchor_recipe,
+                complement_count=complement_count,
             )
+            human_prompt = _build_mixed_origin_human_prompt(complement_count, anchor_recipe)
+
+            logger.info(
+                "Generating %d complementary recipes around planner-authored anchor %r",
+                complement_count,
+                anchor_recipe.name,
+            )
+            result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+            all_recipes = [anchor_recipe, *result.recipes]
+            logger.info(
+                "Seeded planner-authored anchor %r and generated %d complementary recipes: %s",
+                anchor_recipe.name,
+                len(result.recipes),
+                [r.name for r in result.recipes],
+            )
+            return {
+                "raw_recipes": [recipe.model_dump(mode="json") for recipe in all_recipes],
+                "token_usage": [usage],
+            }
+
+        # Derive recipe count from concept
+        system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
+        human_prompt = _build_human_prompt(recipe_count, concept)
 
         logger.info("Generating %d recipes for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
-        result = await _invoke_llm()
+        result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
 
         logger.info("Generated %d recipes: %s", len(result.recipes), [r.name for r in result.recipes])
         # Return raw_recipes as dicts (replace semantics)
-        usage = extract_token_usage(result, "recipe_generator")
         return {
             "raw_recipes": [r.model_dump() for r in result.recipes],
             "token_usage": [usage],

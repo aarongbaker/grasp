@@ -19,7 +19,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.graph.nodes.generator import build_authored_raw_recipes, build_cookbook_raw_recipes, recipe_generator_node
+from app.graph.nodes.generator import (
+    RecipeGenerationOutput,
+    _derive_recipe_count,
+    build_authored_raw_recipes,
+    build_cookbook_raw_recipes,
+    build_planner_authored_anchor_raw_recipes,
+    recipe_generator_node,
+)
 from app.graph.nodes.renderer import (
     ScheduleSummaryOutput,
     _build_summary_prompt,
@@ -31,7 +38,12 @@ from app.graph.nodes.renderer import (
 )
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
 from app.models.enums import ErrorType, MealType, Occasion, Resource
-from app.models.pipeline import DinnerConcept, SelectedAuthoredRecipe, SelectedCookbookRecipe
+from app.models.pipeline import (
+    DinnerConcept,
+    PlannerLibraryAuthoredRecipeAnchor,
+    SelectedAuthoredRecipe,
+    SelectedCookbookRecipe,
+)
 from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
@@ -99,6 +111,20 @@ _AUTHORED_CONCEPT = DinnerConcept(
     ),
 )
 AUTHORED_CONCEPT_DICT = _AUTHORED_CONCEPT.model_dump(mode="json")
+
+PLANNER_AUTHORED_ANCHOR_CONCEPT = DinnerConcept(
+    free_text="Plan a balanced dinner around my saved braised chicken.",
+    guest_count=4,
+    meal_type=MealType.DINNER,
+    occasion=Occasion.DINNER_PARTY,
+    dietary_restrictions=["No shellfish"],
+    concept_source="planner_authored_anchor",
+    planner_authored_recipe_anchor=PlannerLibraryAuthoredRecipeAnchor(
+        recipe_id=_AUTHORED_RECIPE_ID,
+        title=AUTHORED_BRAISED_CHICKEN.title,
+    ),
+)
+PLANNER_AUTHORED_ANCHOR_CONCEPT_DICT = PLANNER_AUTHORED_ANCHOR_CONCEPT.model_dump(mode="json")
 
 KITCHEN_CONFIG = {
     "max_burners": 4,
@@ -288,6 +314,101 @@ class TestAuthoredGeneratorSeeding:
         assert len(recipes) == 1
         assert recipes[0].name == AUTHORED_BRAISED_CHICKEN.title
         assert recipes[0].estimated_total_minutes == 72
+
+
+class TestPlannerAuthoredGeneratorSeeding:
+    @pytest.mark.asyncio
+    async def test_build_planner_authored_anchor_raw_recipes_returns_single_compiled_recipe(self):
+        concept = DinnerConcept.model_validate(PLANNER_AUTHORED_ANCHOR_CONCEPT_DICT)
+
+        with patch("app.graph.nodes.generator._load_authored_recipe_record", new=AsyncMock(return_value=_authored_record())):
+            recipes = await build_planner_authored_anchor_raw_recipes(concept)
+
+        assert len(recipes) == 1
+        assert recipes[0].name == AUTHORED_BRAISED_CHICKEN.title
+        assert recipes[0].estimated_total_minutes == 72
+
+    @pytest.mark.asyncio
+    async def test_planner_authored_recipe_generator_seeds_anchor_and_generates_only_missing_complements(self):
+        state = {
+            "concept": PLANNER_AUTHORED_ANCHOR_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [{"name": "Dutch oven", "category": "cookware", "unlocks_techniques": ["braise"]}],
+            "errors": [],
+        }
+        complement_recipe = AUTHORED_BRAISED_CHICKEN.compile_raw_recipe().model_copy(
+            update={
+                "name": "Charred Chicory Salad",
+                "description": "A bitter, warm salad to balance the braise.",
+                "cuisine": "French",
+                "estimated_total_minutes": 18,
+            }
+        )
+        expected_complements = _derive_recipe_count(MealType.DINNER, Occasion.DINNER_PARTY) - 1
+        mock_output = RecipeGenerationOutput(recipes=[complement_recipe] * expected_complements)
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.return_value = mock_output
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value = mock_chain
+
+        with (
+            patch("app.graph.nodes.generator._create_llm", return_value=mock_llm),
+            patch("app.graph.nodes.generator._load_authored_recipe_record", new=AsyncMock(return_value=_authored_record())),
+            patch(
+                "app.graph.nodes.generator.extract_token_usage",
+                return_value={"node_name": "recipe_generator", "input_tokens": 101, "output_tokens": 202},
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        assert "errors" not in result
+        assert len(result["raw_recipes"]) == expected_complements + 1
+        anchor_recipe = result["raw_recipes"][0]
+        assert anchor_recipe["name"] == AUTHORED_BRAISED_CHICKEN.title
+        assert all(recipe["name"] == "Charred Chicory Salad" for recipe in result["raw_recipes"][1:])
+        assert result["token_usage"] == [{"node_name": "recipe_generator", "input_tokens": 101, "output_tokens": 202}]
+
+        mock_llm.with_structured_output.assert_called_once_with(RecipeGenerationOutput)
+        mock_chain.ainvoke.assert_awaited_once()
+        messages = mock_chain.ainvoke.await_args.args[0]
+        system_prompt = messages[0].content
+        human_prompt = messages[1].content
+        assert f"Number of complementary courses to generate: {expected_complements}" in system_prompt
+        assert f"Name: {AUTHORED_BRAISED_CHICKEN.title}" in system_prompt
+        assert "Do not regenerate, rename, restate, or paraphrase the anchor recipe" in system_prompt
+        assert f"Generate {expected_complements} complementary recipes around the anchored dish" in human_prompt
+        assert AUTHORED_BRAISED_CHICKEN.title in human_prompt
+
+    @pytest.mark.asyncio
+    async def test_planner_authored_recipe_generator_returns_structured_validation_error_for_malformed_anchor_payload(self):
+        broken_payload = AUTHORED_BRAISED_CHICKEN.model_dump(mode="python")
+        broken_payload["ingredients"] = []
+        state = {
+            "concept": PLANNER_AUTHORED_ANCHOR_CONCEPT_DICT,
+            "kitchen_config": KITCHEN_CONFIG,
+            "equipment": [],
+            "errors": [],
+        }
+
+        with (
+            patch("app.graph.nodes.generator._create_llm") as create_llm,
+            patch(
+                "app.graph.nodes.generator._load_authored_recipe_record",
+                new=AsyncMock(return_value=_authored_record(broken_payload)),
+            ),
+        ):
+            result = await recipe_generator_node(state)
+
+        create_llm.assert_not_called()
+        assert result["raw_recipes"] == []
+        assert len(result["errors"]) == 1
+        error = result["errors"][0]
+        assert error["node_name"] == "recipe_generator"
+        assert error["error_type"] == ErrorType.VALIDATION_FAILURE.value
+        assert error["recoverable"] is False
+        assert str(_AUTHORED_RECIPE_ID) in error["message"]
+        assert "could not compile into a scheduling input" in error["message"]
+        assert "ingredients must contain at least one item" in error["message"]
 
 
 # ── Timeline Entry Construction ──────────────────────────────────────────────
