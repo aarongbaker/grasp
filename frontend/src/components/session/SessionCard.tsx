@@ -53,7 +53,9 @@ export function SessionCard({ session, onDelete }: SessionCardProps) {
     <Link to={`/sessions/${session.session_id}`} className={styles.card}>
       <div className={styles.header}>
         <div className={styles.titleBlock}>
+          <div className={styles.sourceLabel}>{conceptDisplay.sourceLabel}</div>
           <div className={styles.concept}>{conceptDisplay.title}</div>
+          <div className={styles.sourceDetail}>{conceptDisplay.pathwayLabel} · {conceptDisplay.sourceDetail}</div>
         </div>
         <div className={styles.headerActions}>
           <StatusBadge status={session.status} />

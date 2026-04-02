@@ -395,6 +395,119 @@ async def test_create_session_with_authored_recipe_201(app_with_overrides, mock_
     assert "nut-free" in concept["dietary_restrictions"]
 
 
+async def test_create_session_with_planner_authored_anchor_201(app_with_overrides, mock_db, test_user):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Braised Fennel with Saffron",
+        description="Private library draft.",
+        cuisine="Mediterranean",
+        authored_payload={
+            "title": "Braised Fennel with Saffron",
+            "description": "Private library draft.",
+            "cuisine": "Mediterranean",
+            "yield_info": {"quantity": 4, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "4 bulbs"}],
+            "steps": [
+                {
+                    "title": "Braise",
+                    "instruction": "Cook gently until tender.",
+                    "duration_minutes": 30,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_authored_anchor",
+                "free_text": "Plan around this authored anchor.",
+                "planner_authored_recipe_anchor": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": "Client supplied title should be ignored",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": ["nut-free"],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    concept = data["concept_json"]
+    assert concept["concept_source"] == "planner_authored_anchor"
+    assert concept["selected_recipes"] == []
+    assert concept["selected_authored_recipe"] is None
+    assert concept["planner_cookbook_target"] is None
+    assert concept["planner_authored_recipe_anchor"] == {
+        "recipe_id": str(authored_recipe.recipe_id),
+        "title": authored_recipe.title,
+    }
+    assert "gluten-free" in concept["dietary_restrictions"]
+    assert "nut-free" in concept["dietary_restrictions"]
+
+
+async def test_create_session_with_planner_cookbook_target_201(app_with_overrides, mock_db, test_user):
+    cookbook = RecipeCookbookRecord(
+        user_id=test_user.user_id,
+        name="Weeknight Menus",
+        description="Planner-facing authored containers.",
+    )
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_cookbook_target",
+                "free_text": "Plan within this cookbook container.",
+                "planner_cookbook_target": {
+                    "cookbook_id": str(cookbook.cookbook_id),
+                    "name": "Client supplied name should be ignored",
+                },
+                "guest_count": 6,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    concept = data["concept_json"]
+    assert concept["concept_source"] == "planner_cookbook_target"
+    assert concept["selected_recipes"] == []
+    assert concept["selected_authored_recipe"] is None
+    assert concept["planner_authored_recipe_anchor"] is None
+    assert concept["planner_cookbook_target"] == {
+        "cookbook_id": str(cookbook.cookbook_id),
+        "name": cookbook.name,
+        "description": cookbook.description,
+    }
+
+
 async def test_create_session_with_authored_recipe_requires_ownership(app_with_overrides, mock_db):
     authored_recipe = AuthoredRecipeRecord(
         user_id=uuid.uuid4(),
@@ -457,6 +570,98 @@ async def test_create_session_with_authored_recipe_requires_ownership(app_with_o
     assert resp.json()["detail"] == "Access denied"
 
 
+async def test_create_session_with_planner_authored_anchor_requires_ownership(app_with_overrides, mock_db):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=uuid.uuid4(),
+        title="Private Braise",
+        description="Owned by someone else.",
+        cuisine="French",
+        authored_payload={
+            "title": "Private Braise",
+            "description": "Owned by someone else.",
+            "cuisine": "French",
+            "yield_info": {"quantity": 2, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "2 bulbs"}],
+            "steps": [
+                {
+                    "title": "Cook",
+                    "instruction": "Keep private.",
+                    "duration_minutes": 20,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_authored_anchor",
+                "free_text": "Plan around my private-library recipe.",
+                "planner_authored_recipe_anchor": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": authored_recipe.title,
+                },
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+async def test_create_session_with_planner_cookbook_target_requires_ownership(app_with_overrides, mock_db):
+    cookbook = RecipeCookbookRecord(
+        user_id=uuid.uuid4(),
+        name="Private Container",
+        description="Owned by someone else.",
+    )
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_cookbook_target",
+                "free_text": "Plan within my private cookbook.",
+                "planner_cookbook_target": {
+                    "cookbook_id": str(cookbook.cookbook_id),
+                    "name": cookbook.name,
+                },
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
 async def test_create_session_with_authored_recipe_rejects_missing_recipe(app_with_overrides):
     missing_recipe_id = uuid.uuid4()
 
@@ -480,6 +685,99 @@ async def test_create_session_with_authored_recipe_rejects_missing_recipe(app_wi
 
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Authored recipe not found"
+
+
+async def test_create_session_with_planner_cookbook_target_rejects_missing_cookbook(app_with_overrides):
+    missing_cookbook_id = uuid.uuid4()
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_cookbook_target",
+                "free_text": "Plan within this cookbook container.",
+                "planner_cookbook_target": {
+                    "cookbook_id": str(missing_cookbook_id),
+                    "name": "Missing Cookbook",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Recipe cookbook not found"
+
+
+async def test_create_session_rejects_mixed_planner_authored_anchor_shape(app_with_overrides, mock_db, test_user):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Braised Fennel with Saffron",
+        description="Private library draft.",
+        cuisine="Mediterranean",
+        authored_payload={
+            "title": "Braised Fennel with Saffron",
+            "description": "Private library draft.",
+            "cuisine": "Mediterranean",
+            "yield_info": {"quantity": 4, "unit": "plates"},
+            "ingredients": [{"name": "fennel", "quantity": "4 bulbs"}],
+            "steps": [
+                {
+                    "title": "Braise",
+                    "instruction": "Cook gently until tender.",
+                    "duration_minutes": 30,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_authored_anchor",
+                "free_text": "Plan around this authored anchor.",
+                "planner_authored_recipe_anchor": {
+                    "recipe_id": str(authored_recipe.recipe_id),
+                    "title": authored_recipe.title,
+                },
+                "planner_cookbook_target": {
+                    "cookbook_id": str(uuid.uuid4()),
+                    "name": "Should not be allowed",
+                },
+                "guest_count": 2,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 422
+    data = resp.json()
+    assert isinstance(data["detail"], list)
+    assert any("planner_cookbook_target" in issue["loc"] for issue in data["detail"])
 
 
 async def test_create_session_rejects_mixed_authored_shape(app_with_overrides, mock_db, test_user):

@@ -125,21 +125,33 @@ describe('session presentation', () => {
     cleanup();
   });
 
-  it('builds display metadata from menu intent', () => {
+  it('builds generated-planner display metadata from menu intent', () => {
     expect(getSessionConceptDisplay(menuSession.concept_json)).toEqual({
       title: 'A rustic Italian dinner with handmade pasta and seasonal vegetables',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Generated plan',
+      sourceDetail: 'Built from a fresh dinner brief inside the dinner planner.',
     });
   });
 
   it('keeps free-text sessions on the original meal-idea presentation path', () => {
     expect(getSessionConceptDisplay(freeTextSession.concept_json)).toEqual({
       title: 'A bright spring dinner party with fish and citrus',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Generated plan',
+      sourceDetail: 'Built from a fresh dinner brief inside the dinner planner.',
     });
   });
 
-  it('prefers the authored recipe title for authored sessions', () => {
+  it('prefers the authored recipe title and library labeling for authored sessions', () => {
     expect(getSessionConceptDisplay(authoredSession.concept_json)).toEqual({
       title: 'Chicken Ballotine with Tarragon Jus',
+      pathwayKey: 'recipe-library',
+      pathwayLabel: 'Browse Recipe Library',
+      sourceLabel: 'Authored recipe',
+      sourceDetail: 'Built from your private library so the session reflects a saved dish rather than a new menu brief.',
     });
   });
 
@@ -155,6 +167,10 @@ describe('session presentation', () => {
 
     expect(getSessionConceptDisplay(malformedConcept)).toEqual({
       title: 'Fallback authored planning note',
+      pathwayKey: 'recipe-library',
+      pathwayLabel: 'Browse Recipe Library',
+      sourceLabel: 'Authored recipe',
+      sourceDetail: 'Built from the authored-recipe path. The saved title was missing, so the planning note is shown instead.',
     });
   });
 
@@ -167,37 +183,48 @@ describe('session presentation', () => {
 
     expect(getSessionConceptDisplay(malformedConcept)).toEqual({
       title: 'Dinner session',
+      pathwayKey: 'recipe-library',
+      pathwayLabel: 'Browse Recipe Library',
+      sourceLabel: 'Authored recipe',
+      sourceDetail: 'Built from the authored-recipe path. The saved title was missing, so the planning note is shown instead.',
     });
   });
 
-  it('renders menu intent on dashboard cards', () => {
+  it('renders generated-planner labels on dashboard cards', () => {
     render(
       <MemoryRouter>
         <SessionCard session={menuSession} />
       </MemoryRouter>,
     );
 
+    expect(screen.getByText('Generated plan')).toBeInTheDocument();
     expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
+    expect(screen.getByText('Plan a Dinner · Built from a fresh dinner brief inside the dinner planner.')).toBeInTheDocument();
   });
 
-  it('renders authored recipe titles on dashboard cards', () => {
+  it('renders authored labels on dashboard cards', () => {
     render(
       <MemoryRouter>
         <SessionCard session={authoredSession} />
       </MemoryRouter>,
     );
 
+    expect(screen.getByText('Authored recipe')).toBeInTheDocument();
     expect(screen.getByText('Chicken Ballotine with Tarragon Jus')).toBeInTheDocument();
+    expect(screen.getByText('Browse Recipe Library · Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
   });
 
-  it('renders menu context on the session detail page without changing tabs or status flow', async () => {
+  it('renders shared generated-planner metadata on the session detail page without changing tabs or status flow', async () => {
     renderDetailPage();
 
+    expect(screen.getByText('Generated plan')).toBeInTheDocument();
+    expect(screen.getByText('Plan a Dinner')).toBeInTheDocument();
     expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
+    expect(screen.getByText('Built from a fresh dinner brief inside the dinner planner.')).toBeInTheDocument();
     await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(menuSession.session_id));
   });
 
-  it('renders authored recipe titles on the session detail page', async () => {
+  it('renders shared authored metadata on the session detail page', async () => {
     vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
       data: authoredSession,
       error: null,
@@ -207,29 +234,40 @@ describe('session presentation', () => {
 
     renderDetailPage(authoredSession.session_id);
 
+    expect(screen.getByText('Authored recipe')).toBeInTheDocument();
+    expect(screen.getByText('Browse Recipe Library')).toBeInTheDocument();
     expect(screen.getByText('Chicken Ballotine with Tarragon Jus')).toBeInTheDocument();
+    expect(screen.getByText('Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
     await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(authoredSession.session_id));
   });
 
-  it('keeps the existing detail retry banner when result fetching fails', async () => {
+  it('keeps the existing detail retry banner when result fetching fails while header metadata stays stable', async () => {
     vi.spyOn(sessionsApi, 'getSessionResults').mockRejectedValue(new Error('Results unavailable'));
 
     renderDetailPage();
 
+    expect(screen.getByText('Generated plan')).toBeInTheDocument();
+    expect(screen.getByText('Plan a Dinner')).toBeInTheDocument();
     expect(await screen.findByText('Could not load results')).toBeInTheDocument();
     expect(screen.getByText('Results unavailable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  it('uses the menu intent in the PDF surface', () => {
+  it('uses generated-planner metadata in the PDF surface', () => {
     render(<RecipePDF session={menuSession} results={results} />);
 
+    expect(screen.getByText('Generated plan')).toBeInTheDocument();
+    expect(screen.getByText('Plan a Dinner')).toBeInTheDocument();
     expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
+    expect(screen.getByText('Built from a fresh dinner brief inside the dinner planner.')).toBeInTheDocument();
   });
 
-  it('uses the authored recipe title in the PDF surface', () => {
+  it('uses authored metadata in the PDF surface', () => {
     render(<RecipePDF session={authoredSession} results={results} />);
 
+    expect(screen.getByText('Authored recipe')).toBeInTheDocument();
+    expect(screen.getByText('Browse Recipe Library')).toBeInTheDocument();
     expect(screen.getByText('Chicken Ballotine with Tarragon Jus')).toBeInTheDocument();
+    expect(screen.getByText('Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
   });
 });

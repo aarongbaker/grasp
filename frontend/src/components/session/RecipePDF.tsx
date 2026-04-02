@@ -94,6 +94,35 @@ const s = StyleSheet.create({
   conceptText: {
     fontSize: 10,
     color: C.textSecondary,
+    marginBottom: 8,
+    lineHeight: 1.5,
+  },
+  conceptMetaRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  conceptLabel: {
+    fontFamily: 'IBM Plex Mono',
+    fontSize: 7,
+    color: C.accent,
+    backgroundColor: C.bgRaised,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  conceptPathway: {
+    fontFamily: 'IBM Plex Mono',
+    fontSize: 8,
+    color: C.textMuted,
+  },
+  conceptSourceDetail: {
+    fontSize: 9,
+    color: C.textMuted,
     marginBottom: 16,
     lineHeight: 1.5,
   },
@@ -443,6 +472,11 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
         <View style={s.divider} />
 
         <Text style={s.conceptText}>{conceptDisplay.title}</Text>
+        <View style={s.conceptMetaRow}>
+          <Text style={s.conceptLabel}>{conceptDisplay.sourceLabel}</Text>
+          <Text style={s.conceptPathway}>{conceptDisplay.pathwayLabel}</Text>
+        </View>
+        <Text style={s.conceptSourceDetail}>{conceptDisplay.sourceDetail}</Text>
 
         {schedule.summary ? (
           <View style={s.summaryBlock}>

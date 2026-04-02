@@ -21,12 +21,14 @@ from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
-from app.models.authored_recipe import AuthoredRecipeRecord
+from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
     CreateSessionAuthoredRequest,
     CreateSessionCookbookRequest,
     CreateSessionLegacyRequest,
+    CreateSessionPlannerAuthoredAnchorRequest,
+    CreateSessionPlannerCookbookTargetRequest,
     CreateSessionRequest,
     DinnerConcept,
 )
@@ -62,6 +64,51 @@ async def _resolve_authored_selection(
     }
 
 
+async def _resolve_planner_authored_anchor(
+    *,
+    body: CreateSessionPlannerAuthoredAnchorRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    authored_recipe = await db.get(AuthoredRecipeRecord, body.planner_authored_recipe_anchor.recipe_id)
+    if authored_recipe is None:
+        raise HTTPException(status_code=404, detail="Authored recipe not found")
+    if authored_recipe.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "concept_source": "planner_authored_anchor",
+        "free_text": body.free_text,
+        "planner_authored_recipe_anchor": {
+            "recipe_id": authored_recipe.recipe_id,
+            "title": authored_recipe.title,
+        },
+    }
+
+
+async def _resolve_planner_cookbook_target(
+    *,
+    body: CreateSessionPlannerCookbookTargetRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    cookbook = await db.get(RecipeCookbookRecord, body.planner_cookbook_target.cookbook_id)
+    if cookbook is None:
+        raise HTTPException(status_code=404, detail="Recipe cookbook not found")
+    if cookbook.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "concept_source": "planner_cookbook_target",
+        "free_text": body.free_text,
+        "planner_cookbook_target": {
+            "cookbook_id": cookbook.cookbook_id,
+            "name": cookbook.name,
+            "description": cookbook.description,
+        },
+    }
+
+
 @router.post("", status_code=201)
 @limiter.limit("30/minute")
 async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
@@ -78,6 +125,10 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
 
     if isinstance(body, CreateSessionAuthoredRequest):
         concept_fields.update(await _resolve_authored_selection(body=body, db=db, current_user=current_user))
+    elif isinstance(body, CreateSessionPlannerAuthoredAnchorRequest):
+        concept_fields.update(await _resolve_planner_authored_anchor(body=body, db=db, current_user=current_user))
+    elif isinstance(body, CreateSessionPlannerCookbookTargetRequest):
+        concept_fields.update(await _resolve_planner_cookbook_target(body=body, db=db, current_user=current_user))
     elif isinstance(body, CreateSessionCookbookRequest):
         concept_fields.update(
             {

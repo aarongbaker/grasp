@@ -46,6 +46,21 @@ class SelectedAuthoredRecipe(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
+class PlannerLibraryAuthoredRecipeAnchor(BaseModel):
+    """Planner-lane reference to one owned authored recipe in the private library."""
+
+    recipe_id: uuid.UUID
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class PlannerLibraryCookbookTarget(BaseModel):
+    """Planner-lane reference to one owned authored-recipe cookbook container."""
+
+    cookbook_id: uuid.UUID
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
 class DinnerConcept(BaseModel):
     """
     Hybrid input: free_text preserves nuance; typed fields ensure
@@ -59,9 +74,13 @@ class DinnerConcept(BaseModel):
     occasion: Occasion
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
-    concept_source: Literal["free_text", "cookbook", "authored"] = "free_text"
+    concept_source: Literal[
+        "free_text", "cookbook", "authored", "planner_authored_anchor", "planner_cookbook_target"
+    ] = "free_text"
     selected_recipes: list[SelectedCookbookRecipe] = []
     selected_authored_recipe: Optional[SelectedAuthoredRecipe] = None
+    planner_authored_recipe_anchor: Optional[PlannerLibraryAuthoredRecipeAnchor] = None
+    planner_cookbook_target: Optional[PlannerLibraryCookbookTarget] = None
 
     @field_validator("serving_time")
     @classmethod
@@ -74,26 +93,85 @@ class DinnerConcept(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_contract(self) -> "DinnerConcept":
+        has_selected_recipes = bool(self.selected_recipes)
+        has_selected_authored_recipe = self.selected_authored_recipe is not None
+        has_planner_authored_anchor = self.planner_authored_recipe_anchor is not None
+        has_planner_cookbook_target = self.planner_cookbook_target is not None
+
         if self.concept_source == "cookbook":
-            if not self.selected_recipes:
+            if not has_selected_recipes:
                 raise ValueError("selected_recipes is required when concept_source is 'cookbook'")
-            if self.selected_authored_recipe is not None:
+            if has_selected_authored_recipe:
                 raise ValueError(
                     "selected_authored_recipe is only allowed when concept_source is 'authored'"
                 )
+            if has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is only allowed when concept_source is 'planner_authored_anchor'"
+                )
+            if has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
+                )
         elif self.concept_source == "authored":
-            if self.selected_recipes:
+            if has_selected_recipes:
                 raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
-            if self.selected_authored_recipe is None:
+            if not has_selected_authored_recipe:
                 raise ValueError(
                     "selected_authored_recipe is required when concept_source is 'authored'"
                 )
-        else:
-            if self.selected_recipes:
+            if has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is only allowed when concept_source is 'planner_authored_anchor'"
+                )
+            if has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
+                )
+        elif self.concept_source == "planner_authored_anchor":
+            if has_selected_recipes:
                 raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
-            if self.selected_authored_recipe is not None:
+            if has_selected_authored_recipe:
                 raise ValueError(
                     "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
+            if not has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is required when concept_source is 'planner_authored_anchor'"
+                )
+            if has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
+                )
+        elif self.concept_source == "planner_cookbook_target":
+            if has_selected_recipes:
+                raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+            if has_selected_authored_recipe:
+                raise ValueError(
+                    "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
+            if has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is only allowed when concept_source is 'planner_authored_anchor'"
+                )
+            if not has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is required when concept_source is 'planner_cookbook_target'"
+                )
+        else:
+            if has_selected_recipes:
+                raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+            if has_selected_authored_recipe:
+                raise ValueError(
+                    "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
+            if has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is only allowed when concept_source is 'planner_authored_anchor'"
+                )
+            if has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
                 )
         return self
 
@@ -119,6 +197,20 @@ class CreateSessionAuthoredSelection(BaseModel):
 
 class CreateSessionCookbookSelection(BaseModel):
     chunk_id: uuid.UUID
+
+
+class CreateSessionPlannerAuthoredAnchor(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    recipe_id: uuid.UUID
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class CreateSessionPlannerCookbookTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    cookbook_id: uuid.UUID
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 
 class CreateSessionCookbookRequest(BaseModel):
@@ -147,8 +239,38 @@ class CreateSessionAuthoredRequest(BaseModel):
     serving_time: Optional[str] = None
 
 
+class CreateSessionPlannerAuthoredAnchorRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    concept_source: Literal["planner_authored_anchor"] = "planner_authored_anchor"
+    free_text: str = Field(max_length=2000)
+    planner_authored_recipe_anchor: CreateSessionPlannerAuthoredAnchor
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
+class CreateSessionPlannerCookbookTargetRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    concept_source: Literal["planner_cookbook_target"] = "planner_cookbook_target"
+    free_text: str = Field(max_length=2000)
+    planner_cookbook_target: CreateSessionPlannerCookbookTarget
+    guest_count: int = Field(ge=1, le=100)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
 CreateSessionRequest = Annotated[
-    CreateSessionLegacyRequest | CreateSessionCookbookRequest | CreateSessionAuthoredRequest,
+    CreateSessionLegacyRequest
+    | CreateSessionCookbookRequest
+    | CreateSessionAuthoredRequest
+    | CreateSessionPlannerAuthoredAnchorRequest
+    | CreateSessionPlannerCookbookTargetRequest,
     Field(discriminator=None),
 ]
 

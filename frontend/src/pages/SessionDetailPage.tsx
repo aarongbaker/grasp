@@ -98,7 +98,12 @@ export function SessionDetailPage() {
           <h1 className={styles.title}>Session</h1>
           <StatusBadge status={session.status} />
         </div>
+        <div className={styles.conceptBadgeRow}>
+          <span className={styles.conceptLabel}>{conceptDisplay?.sourceLabel ?? 'Generated plan'}</span>
+          <span className={styles.conceptMeta}>{conceptDisplay?.pathwayLabel ?? 'Plan a Dinner'}</span>
+        </div>
         <p className={styles.conceptText}>{conceptDisplay?.title ?? session.concept_json.free_text}</p>
+        <p className={styles.conceptSourceDetail}>{conceptDisplay?.sourceDetail ?? 'Built from the current session concept.'}</p>
       </div>
 
       {/* In-progress state */}

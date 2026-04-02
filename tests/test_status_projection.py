@@ -24,6 +24,8 @@ from app.core.status import status_projection
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
     DinnerConcept,
+    PlannerLibraryAuthoredRecipeAnchor,
+    PlannerLibraryCookbookTarget,
     SelectedCookbookRecipe,
     build_initial_pipeline_state,
     build_session_initial_state,
@@ -162,6 +164,106 @@ async def test_empty_lists_treated_as_not_populated():
     )
     status = await status_projection(uuid.uuid4(), graph)
     assert status == SessionStatus.GENERATING
+
+
+def test_build_initial_pipeline_state_preserves_planner_authored_anchor_without_status_fields():
+    recipe_id = uuid.uuid4()
+    concept = DinnerConcept(
+        free_text="Plan a menu around my saved braise.",
+        guest_count=6,
+        meal_type=MealType.DINNER,
+        occasion=Occasion.DINNER_PARTY,
+        concept_source="planner_authored_anchor",
+        planner_authored_recipe_anchor=PlannerLibraryAuthoredRecipeAnchor(
+            recipe_id=recipe_id,
+            title="Sunday Braise",
+        ),
+    )
+
+    state = build_initial_pipeline_state(
+        concept=concept,
+        user_id="user-123",
+        rag_owner_key="owner-123",
+        kitchen_config={"max_burners": 4},
+        equipment=[{"name": "Dutch oven"}],
+    )
+
+    assert state["concept"]["concept_source"] == "planner_authored_anchor"
+    assert state["concept"]["planner_authored_recipe_anchor"] == {
+        "recipe_id": str(recipe_id),
+        "title": "Sunday Braise",
+    }
+    assert state["concept"]["planner_cookbook_target"] is None
+    assert state["raw_recipes"] == []
+    assert state["errors"] == []
+
+
+def test_build_session_initial_state_preserves_planner_cookbook_target():
+    cookbook_id = uuid.uuid4()
+    concept_payload = {
+        "free_text": "Plan within my plated-dessert shelf.",
+        "guest_count": 8,
+        "meal_type": "dinner",
+        "occasion": "dinner_party",
+        "dietary_restrictions": [],
+        "concept_source": "planner_cookbook_target",
+        "planner_cookbook_target": {
+            "cookbook_id": str(cookbook_id),
+            "name": "Desserts",
+            "description": "Late-course authored recipes.",
+        },
+    }
+
+    concept, state = build_session_initial_state(
+        concept_payload=concept_payload,
+        user_id="user-123",
+        rag_owner_key="owner-123",
+        kitchen_config={"max_burners": 4},
+        equipment=[{"name": "Dutch oven"}],
+    )
+
+    assert concept.concept_source == "planner_cookbook_target"
+    assert concept.planner_cookbook_target == PlannerLibraryCookbookTarget(
+        cookbook_id=cookbook_id,
+        name="Desserts",
+        description="Late-course authored recipes.",
+    )
+    assert state["concept"]["planner_authored_recipe_anchor"] is None
+    assert state["concept"]["planner_cookbook_target"] == {
+        "cookbook_id": str(cookbook_id),
+        "name": "Desserts",
+        "description": "Late-course authored recipes.",
+    }
+    assert state["raw_recipes"] == []
+    assert state["errors"] == []
+
+
+def test_build_session_initial_state_rejects_planner_authored_anchor_when_mixed_with_runtime_authored_shape():
+    concept_payload = {
+        "free_text": "Plan around my saved braise.",
+        "guest_count": 4,
+        "meal_type": "dinner",
+        "occasion": "casual",
+        "dietary_restrictions": [],
+        "concept_source": "planner_authored_anchor",
+        "planner_authored_recipe_anchor": {
+            "recipe_id": str(uuid.uuid4()),
+            "title": "Sunday Braise",
+        },
+        "selected_authored_recipe": {
+            "recipe_id": str(uuid.uuid4()),
+            "title": "Should not coexist",
+        },
+    }
+
+    with pytest.raises(Exception, match="selected_authored_recipe is only allowed when concept_source is 'authored'"):
+        build_session_initial_state(
+            concept_payload=concept_payload,
+            user_id="user-123",
+            rag_owner_key="owner-123",
+            kitchen_config={},
+            equipment=[],
+        )
 
 
 def test_build_initial_pipeline_state_preserves_cookbook_concept_without_status_fields():
