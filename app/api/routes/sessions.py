@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
@@ -31,6 +32,12 @@ from app.models.pipeline import (
     CreateSessionPlannerCookbookTargetRequest,
     CreateSessionRequest,
     DinnerConcept,
+    PlannerAuthoredResolutionMatch,
+    PlannerCookbookResolutionMatch,
+    PlannerReferenceKind,
+    PlannerReferenceResolutionRequest,
+    PlannerReferenceResolutionResponse,
+    PlannerResolutionMatchStatus,
 )
 from app.models.session import Session
 
@@ -40,6 +47,64 @@ router = APIRouter(prefix="/sessions")
 
 def _session_status(value: SessionStatus | str) -> SessionStatus:
     return value if isinstance(value, SessionStatus) else SessionStatus(value)
+
+
+def _normalize_reference_search(value: str) -> str:
+    return value.strip().lower()
+
+
+async def _resolve_planner_reference_matches(
+    *,
+    kind: PlannerReferenceKind,
+    reference: str,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> PlannerReferenceResolutionResponse:
+    normalized_reference = _normalize_reference_search(reference)
+    search_term = f"%{normalized_reference}%"
+
+    if kind == PlannerReferenceKind.AUTHORED:
+        stmt = (
+            select(AuthoredRecipeRecord)
+            .where(AuthoredRecipeRecord.user_id == current_user.user_id)
+            .where(func.lower(AuthoredRecipeRecord.title).like(search_term))
+            .order_by(AuthoredRecipeRecord.updated_at.desc(), AuthoredRecipeRecord.title.asc())
+        )
+        records = (await db.exec(stmt)).all()
+        matches = [
+            PlannerAuthoredResolutionMatch(recipe_id=record.recipe_id, title=record.title)
+            for record in records
+        ]
+    else:
+        stmt = (
+            select(RecipeCookbookRecord)
+            .where(RecipeCookbookRecord.user_id == current_user.user_id)
+            .where(func.lower(RecipeCookbookRecord.name).like(search_term))
+            .order_by(RecipeCookbookRecord.updated_at.desc(), RecipeCookbookRecord.name.asc())
+        )
+        records = (await db.exec(stmt)).all()
+        matches = [
+            PlannerCookbookResolutionMatch(
+                cookbook_id=record.cookbook_id,
+                name=record.name,
+                description=record.description,
+            )
+            for record in records
+        ]
+
+    if not matches:
+        status = PlannerResolutionMatchStatus.NO_MATCH
+    elif len(matches) == 1:
+        status = PlannerResolutionMatchStatus.RESOLVED
+    else:
+        status = PlannerResolutionMatchStatus.AMBIGUOUS
+
+    return PlannerReferenceResolutionResponse(
+        kind=kind,
+        reference=reference.strip(),
+        status=status,
+        matches=matches,
+    )
 
 
 async def _resolve_authored_selection(
@@ -105,8 +170,25 @@ async def _resolve_planner_cookbook_target(
             "cookbook_id": cookbook.cookbook_id,
             "name": cookbook.name,
             "description": cookbook.description,
+            "mode": body.planner_cookbook_target.mode,
         },
     }
+
+
+@router.post("/planner/resolve", response_model=PlannerReferenceResolutionResponse)
+@limiter.limit("30/minute")
+async def resolve_planner_reference(
+    request: Request,
+    body: PlannerReferenceResolutionRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    return await _resolve_planner_reference_matches(
+        kind=body.kind,
+        reference=body.reference,
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.post("", status_code=201)

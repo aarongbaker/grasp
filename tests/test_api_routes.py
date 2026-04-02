@@ -115,17 +115,34 @@ class MockDBSession:
             return self.exec_result
 
         statement_text = str(stmt)
-        if "FROM authored_recipes" in statement_text:
-            user_id = None
-            for criterion in getattr(stmt, "_where_criteria", ()):
+        lowered_text = statement_text.lower()
+        where_criteria = getattr(stmt, "_where_criteria", ())
+
+        def _extract_uuid_filter():
+            for criterion in where_criteria:
                 right = getattr(criterion, "right", None)
                 value = getattr(right, "value", None)
                 if isinstance(value, uuid.UUID):
-                    user_id = value
+                    return value
+            return None
+
+        def _extract_like_filter():
+            for criterion in where_criteria:
+                right = getattr(criterion, "right", None)
+                value = getattr(right, "value", None)
+                if isinstance(value, str) and "%" in value:
+                    return value.strip("%").lower()
+            return None
+
+        if "from authored_recipes" in lowered_text:
+            user_id = _extract_uuid_filter()
+            name_filter = _extract_like_filter()
             rows = [
                 obj
                 for (model_class, _), obj in self._store.items()
-                if model_class is AuthoredRecipeRecord and (user_id is None or obj.user_id == user_id)
+                if model_class is AuthoredRecipeRecord
+                and (user_id is None or obj.user_id == user_id)
+                and (name_filter is None or name_filter in obj.title.lower())
             ]
             rows.sort(key=lambda record: record.updated_at, reverse=True)
             mock_result = MagicMock()
@@ -133,17 +150,15 @@ class MockDBSession:
             mock_result.all.return_value = rows
             return mock_result
 
-        if "FROM recipe_cookbooks" in statement_text:
-            user_id = None
-            for criterion in getattr(stmt, "_where_criteria", ()):
-                right = getattr(criterion, "right", None)
-                value = getattr(right, "value", None)
-                if isinstance(value, uuid.UUID):
-                    user_id = value
+        if "from recipe_cookbooks" in lowered_text:
+            user_id = _extract_uuid_filter()
+            name_filter = _extract_like_filter()
             rows = [
                 obj
                 for (model_class, _), obj in self._store.items()
-                if model_class is RecipeCookbookRecord and (user_id is None or obj.user_id == user_id)
+                if model_class is RecipeCookbookRecord
+                and (user_id is None or obj.user_id == user_id)
+                and (name_filter is None or name_filter in obj.name.lower())
             ]
             rows.sort(key=lambda record: (record.updated_at, record.name), reverse=True)
             mock_result = MagicMock()
@@ -486,6 +501,7 @@ async def test_create_session_with_planner_cookbook_target_201(app_with_override
                 "planner_cookbook_target": {
                     "cookbook_id": str(cookbook.cookbook_id),
                     "name": "Client supplied name should be ignored",
+                    "mode": "cookbook_biased",
                 },
                 "guest_count": 6,
                 "meal_type": "dinner",
@@ -505,6 +521,142 @@ async def test_create_session_with_planner_cookbook_target_201(app_with_override
         "cookbook_id": str(cookbook.cookbook_id),
         "name": cookbook.name,
         "description": cookbook.description,
+        "mode": "cookbook_biased",
+    }
+
+
+async def test_resolve_planner_authored_reference_returns_resolved_match(app_with_overrides, mock_db, test_user):
+    authored_recipe = AuthoredRecipeRecord(
+        user_id=test_user.user_id,
+        title="Sunday Braise",
+        description="Anchoring dish.",
+        cuisine="French",
+        authored_payload={
+            "title": "Sunday Braise",
+            "description": "Anchoring dish.",
+            "cuisine": "French",
+            "yield_info": {"quantity": 4, "unit": "plates"},
+            "ingredients": [{"name": "beef", "quantity": "2 lb"}],
+            "steps": [
+                {
+                    "title": "Braise",
+                    "instruction": "Cook gently until tender.",
+                    "duration_minutes": 120,
+                    "resource": "stovetop",
+                    "required_equipment": [],
+                    "dependencies": [],
+                    "can_be_done_ahead": False,
+                    "prep_ahead_window": None,
+                    "prep_ahead_notes": None,
+                    "target_internal_temperature_f": None,
+                    "until_condition": None,
+                    "yield_contribution": None,
+                    "chef_notes": None,
+                }
+            ],
+            "equipment_notes": [],
+            "storage": None,
+            "hold": None,
+            "reheat": None,
+            "make_ahead_guidance": None,
+            "plating_notes": None,
+            "chef_notes": None,
+        },
+    )
+    foreign_recipe = AuthoredRecipeRecord(
+        user_id=uuid.uuid4(),
+        title="Sunday Braise",
+        description="Should not leak.",
+        cuisine="French",
+        authored_payload=authored_recipe.authored_payload,
+    )
+    mock_db.seed(AuthoredRecipeRecord, authored_recipe.recipe_id, authored_recipe)
+    mock_db.seed(AuthoredRecipeRecord, foreign_recipe.recipe_id, foreign_recipe)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions/planner/resolve",
+            json={"kind": "authored", "reference": " sunday braise "},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "kind": "authored",
+        "reference": "sunday braise",
+        "status": "resolved",
+        "matches": [
+            {
+                "kind": "authored",
+                "recipe_id": str(authored_recipe.recipe_id),
+                "title": authored_recipe.title,
+            }
+        ],
+    }
+
+
+async def test_resolve_planner_cookbook_reference_returns_ambiguous_matches(app_with_overrides, mock_db, test_user):
+    first = RecipeCookbookRecord(
+        user_id=test_user.user_id,
+        name="Desserts",
+        description="Plated desserts.",
+    )
+    second = RecipeCookbookRecord(
+        user_id=test_user.user_id,
+        name="Frozen Desserts",
+        description="Ice cream service.",
+    )
+    foreign = RecipeCookbookRecord(
+        user_id=uuid.uuid4(),
+        name="Desserts",
+        description="Should not leak.",
+    )
+    mock_db.seed(RecipeCookbookRecord, first.cookbook_id, first)
+    mock_db.seed(RecipeCookbookRecord, second.cookbook_id, second)
+    mock_db.seed(RecipeCookbookRecord, foreign.cookbook_id, foreign)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions/planner/resolve",
+            json={"kind": "cookbook", "reference": "desserts"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "cookbook"
+    assert data["reference"] == "desserts"
+    assert data["status"] == "ambiguous"
+    assert {match["cookbook_id"] for match in data["matches"]} == {
+        str(first.cookbook_id),
+        str(second.cookbook_id),
+    }
+    assert {match["name"] for match in data["matches"]} == {first.name, second.name}
+    assert all(match["kind"] == "cookbook" for match in data["matches"])
+    assert all(match["description"] in {first.description, second.description} for match in data["matches"])
+
+
+async def test_resolve_planner_reference_returns_no_match(app_with_overrides, mock_db, test_user):
+    cookbook = RecipeCookbookRecord(
+        user_id=test_user.user_id,
+        name="Vegetables",
+        description="Produce-forward.",
+    )
+    mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions/planner/resolve",
+            json={"kind": "cookbook", "reference": "desserts"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "kind": "cookbook",
+        "reference": "desserts",
+        "status": "no_match",
+        "matches": [],
     }
 
 
@@ -650,6 +802,7 @@ async def test_create_session_with_planner_cookbook_target_requires_ownership(ap
                 "planner_cookbook_target": {
                     "cookbook_id": str(cookbook.cookbook_id),
                     "name": cookbook.name,
+                    "mode": "strict",
                 },
                 "guest_count": 2,
                 "meal_type": "dinner",
@@ -700,6 +853,7 @@ async def test_create_session_with_planner_cookbook_target_rejects_missing_cookb
                 "planner_cookbook_target": {
                     "cookbook_id": str(missing_cookbook_id),
                     "name": "Missing Cookbook",
+                    "mode": "strict",
                 },
                 "guest_count": 4,
                 "meal_type": "dinner",

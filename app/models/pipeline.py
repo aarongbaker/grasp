@@ -21,11 +21,19 @@ every session.
 import operator
 import re
 import uuid
+from enum import Enum
 from typing import Annotated, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from app.models.enums import MealType, Occasion
+
+
+class PlannerLibraryCookbookPlanningMode(str, Enum):
+    """Planner intent for how tightly cookbook scope should constrain generation."""
+
+    STRICT = "strict"
+    COOKBOOK_BIASED = "cookbook_biased"
 
 
 class SelectedCookbookRecipe(BaseModel):
@@ -59,6 +67,51 @@ class PlannerLibraryCookbookTarget(BaseModel):
     cookbook_id: uuid.UUID
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
     description: Optional[str] = Field(default=None, max_length=500)
+    mode: PlannerLibraryCookbookPlanningMode
+
+
+class PlannerReferenceKind(str, Enum):
+    AUTHORED = "authored"
+    COOKBOOK = "cookbook"
+
+
+class PlannerResolutionMatchStatus(str, Enum):
+    NO_MATCH = "no_match"
+    RESOLVED = "resolved"
+    AMBIGUOUS = "ambiguous"
+
+
+class PlannerReferenceResolutionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    kind: PlannerReferenceKind
+    reference: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class PlannerAuthoredResolutionMatch(BaseModel):
+    kind: Literal[PlannerReferenceKind.AUTHORED] = PlannerReferenceKind.AUTHORED
+    recipe_id: uuid.UUID
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class PlannerCookbookResolutionMatch(BaseModel):
+    kind: Literal[PlannerReferenceKind.COOKBOOK] = PlannerReferenceKind.COOKBOOK
+    cookbook_id: uuid.UUID
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+PlannerResolutionMatch = Annotated[
+    PlannerAuthoredResolutionMatch | PlannerCookbookResolutionMatch,
+    Field(discriminator="kind"),
+]
+
+
+class PlannerReferenceResolutionResponse(BaseModel):
+    kind: PlannerReferenceKind
+    reference: str
+    status: PlannerResolutionMatchStatus
+    matches: list[PlannerResolutionMatch] = Field(default_factory=list)
 
 
 class DinnerConcept(BaseModel):
@@ -211,6 +264,7 @@ class CreateSessionPlannerCookbookTarget(BaseModel):
 
     cookbook_id: uuid.UUID
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    mode: PlannerLibraryCookbookPlanningMode
 
 
 class CreateSessionCookbookRequest(BaseModel):

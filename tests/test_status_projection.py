@@ -211,6 +211,7 @@ def test_build_session_initial_state_preserves_planner_cookbook_target():
             "cookbook_id": str(cookbook_id),
             "name": "Desserts",
             "description": "Late-course authored recipes.",
+            "mode": "strict",
         },
     }
 
@@ -227,15 +228,53 @@ def test_build_session_initial_state_preserves_planner_cookbook_target():
         cookbook_id=cookbook_id,
         name="Desserts",
         description="Late-course authored recipes.",
+        mode="strict",
     )
     assert state["concept"]["planner_authored_recipe_anchor"] is None
     assert state["concept"]["planner_cookbook_target"] == {
         "cookbook_id": str(cookbook_id),
         "name": "Desserts",
         "description": "Late-course authored recipes.",
+        "mode": "strict",
     }
     assert state["raw_recipes"] == []
     assert state["errors"] == []
+
+
+def test_build_session_initial_state_rejects_planner_cookbook_target_when_mixed_with_runtime_cookbook_shape():
+    concept_payload = {
+        "free_text": "Plan within my plated-dessert shelf.",
+        "guest_count": 8,
+        "meal_type": "dinner",
+        "occasion": "dinner_party",
+        "dietary_restrictions": [],
+        "concept_source": "planner_cookbook_target",
+        "planner_cookbook_target": {
+            "cookbook_id": str(uuid.uuid4()),
+            "name": "Desserts",
+            "description": "Late-course authored recipes.",
+            "mode": "cookbook_biased",
+        },
+        "selected_recipes": [
+            {
+                "chunk_id": str(uuid.uuid4()),
+                "book_id": str(uuid.uuid4()),
+                "book_title": "Book One",
+                "text": "Recipe One\nMethod:\n1. Prep\n2. Cook\n3. Serve",
+                "chapter": "Chapter One",
+                "page_number": 10,
+            }
+        ],
+    }
+
+    with pytest.raises(Exception, match="selected_recipes is only allowed when concept_source is 'cookbook'"):
+        build_session_initial_state(
+            concept_payload=concept_payload,
+            user_id="user-123",
+            rag_owner_key="owner-123",
+            kitchen_config={},
+            equipment=[],
+        )
 
 
 def test_build_session_initial_state_rejects_planner_authored_anchor_when_mixed_with_runtime_authored_shape():
