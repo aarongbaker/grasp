@@ -288,6 +288,9 @@ describe('RecipeLibraryPage', () => {
       meal_type: 'dinner',
       occasion: 'dinner_party',
     }));
+    expect(createSessionSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ concept_source: 'planner_authored_anchor' }),
+    );
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
     expect(mockNavigate).toHaveBeenCalledWith('/sessions/session-123');
   });

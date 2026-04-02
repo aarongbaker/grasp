@@ -19,12 +19,23 @@ function getAuthoredTitle(concept: DinnerConcept): string | null {
   return cleanText(concept.selected_authored_recipe?.title);
 }
 
-export function getSessionConceptDisplay(concept: DinnerConcept): SessionConceptDisplayModel {
-  const authoredTitle = getAuthoredTitle(concept);
-  const freeText = cleanText(concept.free_text);
-  const title = authoredTitle ?? freeText ?? 'Dinner session';
+function getPlannerAuthoredAnchorTitle(concept: DinnerConcept): string | null {
+  return cleanText(concept.planner_authored_recipe_anchor?.title);
+}
 
-  if (concept.concept_source === 'authored') {
+function getPlannerCookbookTargetTitle(concept: DinnerConcept): string | null {
+  return cleanText(concept.planner_cookbook_target?.name);
+}
+
+export function getSessionConceptDisplay(concept: DinnerConcept): SessionConceptDisplayModel {
+  const conceptSource = concept.concept_source ?? 'free_text';
+  const authoredTitle = getAuthoredTitle(concept);
+  const plannerAuthoredTitle = getPlannerAuthoredAnchorTitle(concept);
+  const plannerCookbookTitle = getPlannerCookbookTargetTitle(concept);
+  const freeText = cleanText(concept.free_text);
+  const title = authoredTitle ?? plannerAuthoredTitle ?? plannerCookbookTitle ?? freeText ?? 'Dinner session';
+
+  if (conceptSource === 'authored') {
     const recipeLibrary = pathwayByKey['recipe-library'];
 
     return {
@@ -38,8 +49,35 @@ export function getSessionConceptDisplay(concept: DinnerConcept): SessionConcept
     };
   }
 
+  if (conceptSource === 'planner_authored_anchor') {
+    const generatedPlanner = pathwayByKey['generated-planner'];
+
+    return {
+      title,
+      pathwayKey: generatedPlanner.key,
+      pathwayLabel: generatedPlanner.title,
+      sourceLabel: 'Planner recipe anchor',
+      sourceDetail: plannerAuthoredTitle
+        ? 'Built from the dinner planner using one saved recipe as the anchor for a broader service plan.'
+        : 'Built from the dinner planner with an authored anchor, but the saved recipe title was missing from the persisted concept.',
+    };
+  }
+
+  if (conceptSource === 'planner_cookbook_target') {
+    const generatedPlanner = pathwayByKey['generated-planner'];
+
+    return {
+      title,
+      pathwayKey: generatedPlanner.key,
+      pathwayLabel: generatedPlanner.title,
+      sourceLabel: 'Planner cookbook target',
+      sourceDetail: plannerCookbookTitle
+        ? 'Built from the dinner planner using one cookbook folder as the planning target.'
+        : 'Built from the dinner planner with a cookbook target, but the saved folder name was missing from the persisted concept.',
+    };
+  }
+
   const generatedPlanner = pathwayByKey['generated-planner'];
-  const conceptSource = concept.concept_source ?? 'free_text';
   const sourceDetail = conceptSource === 'cookbook'
     ? 'Built from selected cookbook recipes inside the dinner planner.'
     : 'Built from a fresh dinner brief inside the dinner planner.';

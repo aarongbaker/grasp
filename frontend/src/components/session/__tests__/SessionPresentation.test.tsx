@@ -86,6 +86,49 @@ const authoredSession: Session = {
   },
 };
 
+const plannerAuthoredAnchorSession: Session = {
+  ...menuSession,
+  session_id: 'session-planner-authored-anchor',
+  concept_json: {
+    free_text: 'Use the chicken ballotine as the anchor and build a dinner around it',
+    guest_count: 8,
+    meal_type: 'dinner',
+    occasion: 'dinner_party',
+    dietary_restrictions: [],
+    serving_time: '19:30',
+    concept_source: 'planner_authored_anchor',
+    selected_recipes: [],
+    selected_authored_recipe: null,
+    planner_authored_recipe_anchor: {
+      recipe_id: 'recipe-authored-1',
+      title: 'Chicken Ballotine with Tarragon Jus',
+    },
+    planner_cookbook_target: null,
+  },
+};
+
+const plannerCookbookTargetSession: Session = {
+  ...menuSession,
+  session_id: 'session-planner-cookbook-target',
+  concept_json: {
+    free_text: 'Build a dinner from the spring pastry folder',
+    guest_count: 8,
+    meal_type: 'dinner',
+    occasion: 'dinner_party',
+    dietary_restrictions: [],
+    serving_time: '19:30',
+    concept_source: 'planner_cookbook_target',
+    selected_recipes: [],
+    selected_authored_recipe: null,
+    planner_authored_recipe_anchor: null,
+    planner_cookbook_target: {
+      cookbook_id: 'cookbook-spring-pastry',
+      name: 'Spring Pastry',
+      description: 'Tarts, galettes, and plated fruit desserts.',
+    },
+  },
+};
+
 const results: SessionResults = {
   schedule: {
     timeline: [],
@@ -152,6 +195,65 @@ describe('session presentation', () => {
       pathwayLabel: 'Browse Recipe Library',
       sourceLabel: 'Authored recipe',
       sourceDetail: 'Built from your private library so the session reflects a saved dish rather than a new menu brief.',
+    });
+  });
+
+  it('keeps planner-authored anchors on the planner lane instead of mislabeling them as direct library sessions', () => {
+    expect(getSessionConceptDisplay(plannerAuthoredAnchorSession.concept_json)).toEqual({
+      title: 'Chicken Ballotine with Tarragon Jus',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner recipe anchor',
+      sourceDetail: 'Built from the dinner planner using one saved recipe as the anchor for a broader service plan.',
+    });
+  });
+
+  it('uses the cookbook folder name for planner cookbook targets', () => {
+    expect(getSessionConceptDisplay(plannerCookbookTargetSession.concept_json)).toEqual({
+      title: 'Spring Pastry',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner cookbook target',
+      sourceDetail: 'Built from the dinner planner using one cookbook folder as the planning target.',
+    });
+  });
+
+  it('falls back to free text when a planner-authored anchor is missing the trusted title', () => {
+    const malformedConcept: DinnerConcept = {
+      ...plannerAuthoredAnchorSession.concept_json,
+      free_text: 'Fallback planner note',
+      planner_authored_recipe_anchor: {
+        recipe_id: 'recipe-authored-1',
+        title: '   ',
+      },
+    };
+
+    expect(getSessionConceptDisplay(malformedConcept)).toEqual({
+      title: 'Fallback planner note',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner recipe anchor',
+      sourceDetail: 'Built from the dinner planner with an authored anchor, but the saved recipe title was missing from the persisted concept.',
+    });
+  });
+
+  it('falls back to free text when a planner cookbook target is missing the saved folder name', () => {
+    const malformedConcept: DinnerConcept = {
+      ...plannerCookbookTargetSession.concept_json,
+      free_text: 'Fallback cookbook note',
+      planner_cookbook_target: {
+        cookbook_id: 'cookbook-spring-pastry',
+        name: '   ',
+        description: 'Tarts, galettes, and plated fruit desserts.',
+      },
+    };
+
+    expect(getSessionConceptDisplay(malformedConcept)).toEqual({
+      title: 'Fallback cookbook note',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner cookbook target',
+      sourceDetail: 'Built from the dinner planner with a cookbook target, but the saved folder name was missing from the persisted concept.',
     });
   });
 
