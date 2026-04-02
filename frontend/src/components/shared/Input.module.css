@@ -12,23 +12,27 @@
 
 .input {
   padding: var(--space-sm) var(--space-md);
-  background: var(--bg-base);
-  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(26, 22, 18, 0.98), rgba(35, 31, 26, 0.96));
+  border: 1px solid rgba(212, 149, 106, 0.18);
   border-radius: var(--radius-md);
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: var(--text-base);
-  transition: border-color var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .input:hover {
-  border-color: var(--text-muted);
+  border-color: rgba(212, 149, 106, 0.28);
 }
 
 .input:focus {
   border-color: var(--accent-primary);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.15);
+  box-shadow: 0 0 0 2px rgba(201, 129, 58, 0.2);
 }
 
 .input::placeholder {
