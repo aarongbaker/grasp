@@ -5,16 +5,16 @@
 }
 
 .header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-xl);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  gap: clamp(1rem, 2vw, 1.5rem);
 }
 
 .headerCopy {
   display: grid;
   gap: var(--space-sm);
-  max-width: 64ch;
+  max-width: none;
 }
 
 .kicker {
@@ -28,10 +28,10 @@
 
 .title {
   margin: 0;
-  max-width: 13ch;
-  font-size: clamp(2.1rem, 4.2vw, 3.5rem);
+  max-width: 18ch;
+  font-size: clamp(2rem, 3.6vw, 3rem);
   line-height: 1;
-  text-wrap: balance;
+  text-wrap: pretty;
 }
 
 .subtitle {
