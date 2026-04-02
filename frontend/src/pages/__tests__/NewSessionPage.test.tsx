@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NewSessionPage } from '../NewSessionPage';
+import * as authoredRecipesApi from '../../api/authoredRecipes';
+import * as recipeCookbooksApi from '../../api/recipeCookbooks';
 import * as sessionsApi from '../../api/sessions';
-import type { Session } from '../../types/api';
+import type { AuthoredRecipeListItem, RecipeCookbookDetail, Session } from '../../types/api';
 
 const navigateMock = vi.fn();
 
@@ -16,13 +18,51 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <NewSessionPage />
-    </MemoryRouter>,
-  );
-}
+const plannerRecipes: AuthoredRecipeListItem[] = [
+  {
+    recipe_id: 'recipe-1',
+    user_id: 'user-1',
+    title: 'Braised fennel with citrus glaze',
+    cuisine: 'Mediterranean',
+    cookbook_id: null,
+    cookbook: null,
+    created_at: '2026-04-01T00:00:00Z',
+    updated_at: '2026-04-02T00:00:00Z',
+  },
+  {
+    recipe_id: 'recipe-2',
+    user_id: 'user-1',
+    title: 'Marinated peppers',
+    cuisine: 'Spanish',
+    cookbook_id: 'cookbook-1',
+    cookbook: {
+      cookbook_id: 'cookbook-1',
+      name: 'Dinner Party Staples',
+      description: 'Reliable service anchors.',
+    },
+    created_at: '2026-04-01T00:00:00Z',
+    updated_at: '2026-04-03T00:00:00Z',
+  },
+];
+
+const plannerCookbooks: RecipeCookbookDetail[] = [
+  {
+    cookbook_id: 'cookbook-1',
+    user_id: 'user-1',
+    name: 'Dinner Party Staples',
+    description: 'Reliable service anchors.',
+    created_at: '2026-04-01T00:00:00Z',
+    updated_at: '2026-04-02T00:00:00Z',
+  },
+  {
+    cookbook_id: 'cookbook-2',
+    user_id: 'user-1',
+    name: 'Late Summer Menu',
+    description: 'Stone fruit and charcoal notes.',
+    created_at: '2026-04-03T00:00:00Z',
+    updated_at: '2026-04-04T00:00:00Z',
+  },
+];
 
 const createdSession: Session = {
   session_id: 'session-123',
@@ -35,6 +75,11 @@ const createdSession: Session = {
     occasion: 'dinner_party',
     dietary_restrictions: [],
     serving_time: null,
+    concept_source: 'free_text',
+    selected_recipes: [],
+    selected_authored_recipe: null,
+    planner_authored_recipe_anchor: null,
+    planner_cookbook_target: null,
   },
   schedule_summary: null,
   total_duration_minutes: null,
@@ -47,110 +92,152 @@ const createdSession: Session = {
   completed_at: null,
 };
 
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <NewSessionPage />
+    </MemoryRouter>,
+  );
+}
+
 describe('NewSessionPage', () => {
   beforeEach(() => {
     navigateMock.mockReset();
     vi.restoreAllMocks();
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue(plannerRecipes);
+    vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue(plannerCookbooks);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('renders only menu intent form with route-local guidance and no cookbook mode switcher', () => {
+  it('renders the planner lane with anchor controls and guidance links', async () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
     expect(screen.getByText(/Describe the meal you want to cook/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Start here when service timing leads.' })).toBeInTheDocument();
-    expect(screen.getByText(/Keep this route for menu-intent planning/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Browse Recipe Library/i })).toHaveAttribute('href', '/recipes');
     expect(screen.getByRole('link', { name: /Start a Recipe Draft/i })).toHaveAttribute('href', '/recipes/new');
+    expect(screen.getByLabelText('Planner anchor')).toBeInTheDocument();
+    expect(screen.getByText(/Loading owned planner references/i)).toBeInTheDocument();
 
-    expect(screen.queryByText(/Select from cookbook/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/cookbook mode/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/free-text mode/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /switch.*mode/i })).not.toBeInTheDocument();
+    expect(await screen.findByText(/2 saved recipes and 2 cookbooks ready/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Saved recipe anchor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Cookbook target')).not.toBeInTheDocument();
   });
 
-  it('renders the menu intent form with all required fields', () => {
-    renderPage();
-
-    expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
-    expect(screen.getByText(/Describe the meal you want to cook/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('What are you cooking?')).toBeInTheDocument();
-    expect(screen.getByLabelText('Guests')).toBeInTheDocument();
-    expect(screen.getByLabelText('Meal type')).toBeInTheDocument();
-    expect(screen.getByLabelText('Occasion')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dietary restrictions')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start Planning' })).toBeInTheDocument();
-  });
-
-  it('submits the menu intent and navigates to the session detail page', async () => {
-    const callOrder: string[] = [];
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockImplementation(async (payload) => {
-      callOrder.push(`create:${JSON.stringify(payload)}`);
-      return createdSession;
-    });
-    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockImplementation(async (sessionId) => {
-      callOrder.push(`run:${sessionId}`);
-      return {
-        session_id: 'session-123',
-        status: 'generating',
-        message: 'Pipeline enqueued',
-      };
+  it('submits a free-text planner request and navigates to the session detail page', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
     });
 
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
-    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
-    expect(createSessionSpy).toHaveBeenCalledWith({
-      free_text: 'A bright spring dinner',
-      guest_count: 4,
-      meal_type: 'dinner',
-      occasion: 'dinner_party',
-      dietary_restrictions: [],
-      serving_time: undefined,
-    });
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'free_text',
+        free_text: 'A bright spring dinner',
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: undefined,
+      }),
+    );
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
-    expect(callOrder).toEqual([
-      'create:{"free_text":"A bright spring dinner","guest_count":4,"meal_type":"dinner","occasion":"dinner_party","dietary_restrictions":[]}',
-      'run:session-123',
-    ]);
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
   });
 
-  it('adds and removes dietary restrictions', async () => {
+  it('submits a planner authored anchor request with the selected saved recipe', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
     renderPage();
 
-    const restrictionInput = screen.getByLabelText('Dietary restrictions');
-    await userEvent.type(restrictionInput, 'gluten-free{Enter}');
-    
-    expect(screen.getByText('gluten-free')).toBeInTheDocument();
-    expect(restrictionInput).toHaveValue('');
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build a service around the fennel course');
+    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
+    await userEvent.selectOptions(screen.getByLabelText('Saved recipe anchor'), 'recipe-1');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
-    await userEvent.type(restrictionInput, 'dairy-free{Enter}');
-    expect(screen.getByText('dairy-free')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Remove gluten-free' }));
-    expect(screen.queryByText('gluten-free')).not.toBeInTheDocument();
-    expect(screen.getByText('dairy-free')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'planner_authored_anchor',
+        free_text: 'Build a service around the fennel course',
+        planner_authored_recipe_anchor: {
+          recipe_id: 'recipe-1',
+          title: 'Braised fennel with citrus glaze',
+        },
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: undefined,
+      }),
+    );
   });
 
-  it('keeps the submit disabled for blank menu intent text', async () => {
+  it('submits a planner cookbook target request with the selected shelf', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
     renderPage();
 
-    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
-    expect(submitButton).toBeDisabled();
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Shape a late-summer dinner for six');
+    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'cookbook');
+    await userEvent.selectOptions(screen.getByLabelText('Cookbook target'), 'cookbook-2');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
-    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Dinner');
-    expect(submitButton).not.toBeDisabled();
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'planner_cookbook_target',
+        free_text: 'Shape a late-summer dinner for six',
+        planner_cookbook_target: {
+          cookbook_id: 'cookbook-2',
+          name: 'Late Summer Menu',
+        },
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: undefined,
+      }),
+    );
+  });
 
-    await userEvent.clear(screen.getByLabelText('What are you cooking?'));
-    expect(submitButton).toBeDisabled();
+  it('surfaces create-time planner anchor validation and does not kick off the run', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+    const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline');
+
+    renderPage();
+
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build a service around the fennel course');
+    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    expect(await screen.findByText('Choose one saved recipe anchor before starting the plan.')).toBeInTheDocument();
+    expect(createSessionSpy).not.toHaveBeenCalled();
+    expect(runPipelineSpy).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('keeps the loading state until a create failure settles and does not kick off the run', async () => {
@@ -165,6 +252,7 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
@@ -191,6 +279,7 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
@@ -214,11 +303,56 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     expect(await screen.findByText('Something went wrong — please try again')).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('shows planner library load failures inline while preserving the planner form', async () => {
+    vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockRejectedValue(new Error('Library unavailable'));
+
+    renderPage();
+
+    expect(await screen.findByText('Library unavailable')).toBeInTheDocument();
+    expect(screen.getByLabelText('Planner anchor')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Planning' })).toBeInTheDocument();
+  });
+
+  it('adds and removes dietary restrictions', async () => {
+    renderPage();
+
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
+
+    const restrictionInput = screen.getByLabelText('Dietary restrictions');
+    await userEvent.type(restrictionInput, 'gluten-free{Enter}');
+
+    expect(screen.getByText('gluten-free')).toBeInTheDocument();
+    expect(restrictionInput).toHaveValue('');
+
+    await userEvent.type(restrictionInput, 'dairy-free{Enter}');
+    expect(screen.getByText('dairy-free')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove gluten-free' }));
+    expect(screen.queryByText('gluten-free')).not.toBeInTheDocument();
+    expect(screen.getByText('dairy-free')).toBeInTheDocument();
+  });
+
+  it('keeps the submit disabled for blank menu intent text', async () => {
+    renderPage();
+
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
+
+    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
+    expect(submitButton).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Dinner');
+    expect(submitButton).not.toBeDisabled();
+
+    await userEvent.clear(screen.getByLabelText('What are you cooking?'));
+    expect(submitButton).toBeDisabled();
   });
 
   it('allows customizing guest count, meal type, and serving time', async () => {
@@ -231,6 +365,7 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A festive brunch');
     await userEvent.clear(screen.getByLabelText('Guests'));
     await userEvent.type(screen.getByLabelText('Guests'), '8');
@@ -239,19 +374,23 @@ describe('NewSessionPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
-    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledWith({
-      free_text: 'A festive brunch',
-      guest_count: 8,
-      meal_type: 'lunch',
-      occasion: 'dinner_party',
-      dietary_restrictions: [],
-      serving_time: '12:30',
-    }));
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'free_text',
+        free_text: 'A festive brunch',
+        guest_count: 8,
+        meal_type: 'lunch',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: '12:30',
+      }),
+    );
   });
 
   it('navigates back to dashboard when cancel is clicked', async () => {
     renderPage();
 
+    await screen.findByText(/2 saved recipes and 2 cookbooks ready/i);
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(navigateMock).toHaveBeenCalledWith('/');
   });

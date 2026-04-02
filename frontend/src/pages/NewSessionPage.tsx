@@ -1,5 +1,7 @@
-import { type FormEvent, type KeyboardEvent, useMemo, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { listAuthoredRecipes } from '../api/authoredRecipes';
+import { listRecipeCookbooks } from '../api/recipeCookbooks';
 import { createSession, runPipeline } from '../api/sessions';
 import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
@@ -8,15 +10,29 @@ import { Select } from '../components/shared/Select';
 import {
   MEAL_TYPE_LABELS,
   OCCASION_LABELS,
+  type AuthoredRecipeListItem,
   type CreateFreeTextSessionRequest,
+  type CreatePlannerAuthoredAnchorSessionRequest,
+  type CreatePlannerCookbookTargetSessionRequest,
+  type CreateSessionRequest,
   type MealType,
   type Occasion,
+  type RecipeCookbookDetail,
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 const occasionOptions = Object.entries(OCCASION_LABELS).map(([value, label]) => ({ value, label }));
+
+const plannerAnchorOptions = [
+  { value: 'none', label: 'Menu intent only' },
+  { value: 'authored', label: 'Saved recipe anchor' },
+  { value: 'cookbook', label: 'Cookbook target' },
+] as const;
+
+type PlannerAnchorMode = (typeof plannerAnchorOptions)[number]['value'];
+type PlannerLibraryStatus = 'loading' | 'ready' | 'error';
 
 export function NewSessionPage() {
   const navigate = useNavigate();
@@ -27,6 +43,13 @@ export function NewSessionPage() {
   const [restrictions, setRestrictions] = useState<string[]>([]);
   const [restrictionInput, setRestrictionInput] = useState('');
   const [servingTime, setServingTime] = useState('');
+  const [plannerAnchorMode, setPlannerAnchorMode] = useState<PlannerAnchorMode>('none');
+  const [plannerRecipes, setPlannerRecipes] = useState<AuthoredRecipeListItem[]>([]);
+  const [plannerCookbooks, setPlannerCookbooks] = useState<RecipeCookbookDetail[]>([]);
+  const [selectedPlannerRecipeId, setSelectedPlannerRecipeId] = useState('');
+  const [selectedPlannerCookbookId, setSelectedPlannerCookbookId] = useState('');
+  const [plannerLibraryStatus, setPlannerLibraryStatus] = useState<PlannerLibraryStatus>('loading');
+  const [plannerLibraryError, setPlannerLibraryError] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -48,6 +71,63 @@ export function NewSessionPage() {
     [authoredWorkspace.title, authoredWorkspace.to, recipeLibrary.title, recipeLibrary.to],
   );
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadPlannerLibrary() {
+      setPlannerLibraryStatus('loading');
+      setPlannerLibraryError('');
+
+      try {
+        const [recipes, cookbooks] = await Promise.all([listAuthoredRecipes(), listRecipeCookbooks()]);
+        if (!active) {
+          return;
+        }
+        setPlannerRecipes(recipes);
+        setPlannerCookbooks(cookbooks);
+        setPlannerLibraryStatus('ready');
+      } catch (err: unknown) {
+        if (!active) {
+          return;
+        }
+        setPlannerLibraryStatus('error');
+        setPlannerLibraryError(getErrorMessage(err, 'Could not load your saved recipes and cookbooks.'));
+      }
+    }
+
+    void loadPlannerLibrary();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const plannerRecipeOptions = useMemo(
+    () => [
+      { value: '', label: plannerRecipes.length > 0 ? 'Choose one saved recipe' : 'No saved recipes yet' },
+      ...plannerRecipes.map((recipe) => ({ value: recipe.recipe_id, label: recipe.title })),
+    ],
+    [plannerRecipes],
+  );
+
+  const plannerCookbookOptions = useMemo(
+    () => [
+      { value: '', label: plannerCookbooks.length > 0 ? 'Choose one cookbook' : 'No cookbooks yet' },
+      ...plannerCookbooks.map((cookbook) => ({ value: cookbook.cookbook_id, label: cookbook.name })),
+    ],
+    [plannerCookbooks],
+  );
+
+  const selectedPlannerRecipe = useMemo(
+    () => plannerRecipes.find((recipe) => recipe.recipe_id === selectedPlannerRecipeId) ?? null,
+    [plannerRecipes, selectedPlannerRecipeId],
+  );
+
+  const selectedPlannerCookbook = useMemo(
+    () => plannerCookbooks.find((cookbook) => cookbook.cookbook_id === selectedPlannerCookbookId) ?? null,
+    [plannerCookbooks, selectedPlannerCookbookId],
+  );
+
   function addRestriction(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -59,12 +139,81 @@ export function NewSessionPage() {
     }
   }
 
+  function handlePlannerAnchorModeChange(value: PlannerAnchorMode) {
+    setPlannerAnchorMode(value);
+    setError('');
+    if (value !== 'authored') {
+      setSelectedPlannerRecipeId('');
+    }
+    if (value !== 'cookbook') {
+      setSelectedPlannerCookbookId('');
+    }
+  }
+
+  function buildRequest(): CreateSessionRequest {
+    const sharedFields = {
+      free_text: freeText,
+      guest_count: guestCount,
+      meal_type: mealType,
+      occasion,
+      dietary_restrictions: restrictions,
+      serving_time: servingTime || undefined,
+    };
+
+    if (plannerAnchorMode === 'authored') {
+      if (!selectedPlannerRecipe) {
+        throw new Error('Choose one saved recipe anchor before starting the plan.');
+      }
+
+      const request: CreatePlannerAuthoredAnchorSessionRequest = {
+        concept_source: 'planner_authored_anchor',
+        ...sharedFields,
+        planner_authored_recipe_anchor: {
+          recipe_id: selectedPlannerRecipe.recipe_id,
+          title: selectedPlannerRecipe.title,
+        },
+      };
+      return request;
+    }
+
+    if (plannerAnchorMode === 'cookbook') {
+      if (!selectedPlannerCookbook) {
+        throw new Error('Choose one cookbook target before starting the plan.');
+      }
+
+      const request: CreatePlannerCookbookTargetSessionRequest = {
+        concept_source: 'planner_cookbook_target',
+        ...sharedFields,
+        planner_cookbook_target: {
+          cookbook_id: selectedPlannerCookbook.cookbook_id,
+          name: selectedPlannerCookbook.name,
+        },
+      };
+      return request;
+    }
+
+    const request: CreateFreeTextSessionRequest = {
+      ...sharedFields,
+      concept_source: 'free_text',
+    };
+    return request;
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
+
+    let request: CreateSessionRequest;
+    try {
+      request = buildRequest();
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Something went wrong — please try again'));
+      return;
+    }
+
     setLoading(true);
     try {
-      const session = await createSession(buildRequest());
+      const session = await createSession(request);
       await runPipeline(session.session_id);
       navigate(`/sessions/${session.session_id}`);
     } catch (err: unknown) {
@@ -74,18 +223,13 @@ export function NewSessionPage() {
     }
   }
 
-  function buildRequest(): CreateFreeTextSessionRequest {
-    return {
-      free_text: freeText,
-      guest_count: guestCount,
-      meal_type: mealType,
-      occasion,
-      dietary_restrictions: restrictions,
-      serving_time: servingTime || undefined,
-    };
-  }
-
   const canSubmit = !!freeText.trim();
+  const plannerAnchorDescription =
+    plannerAnchorMode === 'authored'
+      ? 'Ground the plan in one owned authored recipe while keeping the rest of the dinner brief open.'
+      : plannerAnchorMode === 'cookbook'
+        ? 'Point the planner at one cookbook shelf so the brief stays inside that owned collection.'
+        : 'Start from menu intent alone when you want the planner to build the dinner from a clean brief.';
 
   return (
     <div className={styles.page}>
@@ -129,6 +273,63 @@ export function NewSessionPage() {
           maxLength={2000}
           required
         />
+
+        <section className={styles.anchorCard} aria-labelledby="planner-anchor-heading">
+          <div className={styles.anchorHeader}>
+            <div>
+              <p className={styles.anchorEyebrow}>Planner reference</p>
+              <h2 id="planner-anchor-heading" className={styles.anchorTitle}>
+                Keep the planner in one lane, with one owned anchor when needed.
+              </h2>
+            </div>
+            <p className={styles.anchorDescription}>{plannerAnchorDescription}</p>
+          </div>
+
+          <div className={styles.anchorGrid}>
+            <Select
+              label="Planner anchor"
+              options={plannerAnchorOptions.map((option) => ({ value: option.value, label: option.label }))}
+              value={plannerAnchorMode}
+              onChange={(e) => handlePlannerAnchorModeChange(e.target.value as PlannerAnchorMode)}
+            />
+
+            {plannerAnchorMode === 'authored' && (
+              <Select
+                label="Saved recipe anchor"
+                options={plannerRecipeOptions}
+                value={selectedPlannerRecipeId}
+                onChange={(e) => setSelectedPlannerRecipeId(e.target.value)}
+                disabled={plannerLibraryStatus !== 'ready' || plannerRecipes.length === 0}
+              />
+            )}
+
+            {plannerAnchorMode === 'cookbook' && (
+              <Select
+                label="Cookbook target"
+                options={plannerCookbookOptions}
+                value={selectedPlannerCookbookId}
+                onChange={(e) => setSelectedPlannerCookbookId(e.target.value)}
+                disabled={plannerLibraryStatus !== 'ready' || plannerCookbooks.length === 0}
+              />
+            )}
+          </div>
+
+          <div className={styles.anchorMeta}>
+            <span className={styles.anchorMetaLabel}>
+              {plannerLibraryStatus === 'loading'
+                ? 'Loading owned planner references…'
+                : plannerLibraryStatus === 'error'
+                  ? plannerLibraryError
+                  : `${plannerRecipes.length} saved recipe${plannerRecipes.length === 1 ? '' : 's'} and ${plannerCookbooks.length} cookbook${plannerCookbooks.length === 1 ? '' : 's'} ready.`}
+            </span>
+            {plannerLibraryStatus === 'ready' && plannerAnchorMode === 'authored' && selectedPlannerRecipe && (
+              <span className={styles.anchorMetaDetail}>Anchored to “{selectedPlannerRecipe.title}”.</span>
+            )}
+            {plannerLibraryStatus === 'ready' && plannerAnchorMode === 'cookbook' && selectedPlannerCookbook && (
+              <span className={styles.anchorMetaDetail}>Targeting the “{selectedPlannerCookbook.name}” shelf.</span>
+            )}
+          </div>
+        </section>
 
         <div className={styles.row}>
           <Input

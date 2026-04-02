@@ -6,6 +6,12 @@ export type SessionStatus = 'pending' | 'generating' | 'enriching' | 'validating
 export type Resource = 'oven' | 'stovetop' | 'passive' | 'hands';
 export type EquipmentCategory = 'precision' | 'baking' | 'prep' | 'specialty';
 export type AuthoredDependencyKind = 'finish_to_start';
+export type DinnerConceptSource =
+  | 'free_text'
+  | 'cookbook'
+  | 'authored'
+  | 'planner_authored_anchor'
+  | 'planner_cookbook_target';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -89,13 +95,28 @@ export interface UserProfile {
 
 // Session
 export interface SelectedCookbookRecipe {
+  chunk_id: string;
+  book_id: string;
+  book_title: string;
+  text: string;
+  chapter: string;
   page_number: number;
-  recipe_name: string;
 }
 
 export interface SelectedAuthoredRecipe {
   recipe_id: string;
   title: string;
+}
+
+export interface PlannerLibraryAuthoredRecipeAnchor {
+  recipe_id: string;
+  title: string;
+}
+
+export interface PlannerLibraryCookbookTarget {
+  cookbook_id: string;
+  name: string;
+  description: string | null;
 }
 
 export interface DinnerConcept {
@@ -105,12 +126,15 @@ export interface DinnerConcept {
   occasion: Occasion;
   dietary_restrictions: string[];
   serving_time: string | null;
-  concept_source?: 'free_text' | 'cookbook' | 'authored';
+  concept_source?: DinnerConceptSource;
   selected_recipes?: SelectedCookbookRecipe[];
   selected_authored_recipe?: SelectedAuthoredRecipe | null;
+  planner_authored_recipe_anchor?: PlannerLibraryAuthoredRecipeAnchor | null;
+  planner_cookbook_target?: PlannerLibraryCookbookTarget | null;
 }
 
 export interface CreateFreeTextSessionRequest {
+  concept_source?: 'free_text';
   free_text: string;
   guest_count: number;
   meal_type: MealType;
@@ -124,6 +148,31 @@ export interface CreateSessionAuthoredSelection {
   title: string;
 }
 
+export interface CreateSessionCookbookSelection {
+  chunk_id: string;
+}
+
+export interface CreateSessionPlannerAuthoredAnchor {
+  recipe_id: string;
+  title: string;
+}
+
+export interface CreateSessionPlannerCookbookTarget {
+  cookbook_id: string;
+  name: string;
+}
+
+export interface CreateCookbookSessionRequest {
+  concept_source: 'cookbook';
+  free_text: string;
+  selected_recipes: CreateSessionCookbookSelection[];
+  guest_count: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+}
+
 export interface CreateAuthoredSessionRequest {
   concept_source: 'authored';
   free_text: string;
@@ -135,7 +184,34 @@ export interface CreateAuthoredSessionRequest {
   serving_time?: string;
 }
 
-export type CreateSessionRequest = CreateFreeTextSessionRequest | CreateAuthoredSessionRequest;
+export interface CreatePlannerAuthoredAnchorSessionRequest {
+  concept_source: 'planner_authored_anchor';
+  free_text: string;
+  planner_authored_recipe_anchor: CreateSessionPlannerAuthoredAnchor;
+  guest_count: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+}
+
+export interface CreatePlannerCookbookTargetSessionRequest {
+  concept_source: 'planner_cookbook_target';
+  free_text: string;
+  planner_cookbook_target: CreateSessionPlannerCookbookTarget;
+  guest_count: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+}
+
+export type CreateSessionRequest =
+  | CreateFreeTextSessionRequest
+  | CreateCookbookSessionRequest
+  | CreateAuthoredSessionRequest
+  | CreatePlannerAuthoredAnchorSessionRequest
+  | CreatePlannerCookbookTargetSessionRequest;
 
 export interface Session {
   session_id: string;
