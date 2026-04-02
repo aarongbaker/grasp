@@ -12,6 +12,9 @@ export type DinnerConceptSource =
   | 'authored'
   | 'planner_authored_anchor'
   | 'planner_cookbook_target';
+export type PlannerCookbookPlanningMode = 'strict' | 'cookbook_biased';
+export type PlannerReferenceKind = 'authored' | 'cookbook';
+export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -41,6 +44,11 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
   stovetop: 'Stovetop',
   passive: 'Passive',
   hands: 'Hands',
+};
+
+export const PLANNER_COOKBOOK_MODE_LABELS: Record<PlannerCookbookPlanningMode, string> = {
+  strict: 'Strict to this cookbook',
+  cookbook_biased: 'Cookbook-biased',
 };
 
 // Auth
@@ -117,6 +125,34 @@ export interface PlannerLibraryCookbookTarget {
   cookbook_id: string;
   name: string;
   description: string | null;
+  mode: PlannerCookbookPlanningMode;
+}
+
+export interface PlannerReferenceResolutionRequest {
+  kind: PlannerReferenceKind;
+  reference: string;
+}
+
+export interface PlannerAuthoredResolutionMatch {
+  kind: 'authored';
+  recipe_id: string;
+  title: string;
+}
+
+export interface PlannerCookbookResolutionMatch {
+  kind: 'cookbook';
+  cookbook_id: string;
+  name: string;
+  description: string | null;
+}
+
+export type PlannerResolutionMatch = PlannerAuthoredResolutionMatch | PlannerCookbookResolutionMatch;
+
+export interface PlannerReferenceResolutionResponse {
+  kind: PlannerReferenceKind;
+  reference: string;
+  status: PlannerResolutionMatchStatus;
+  matches: PlannerResolutionMatch[];
 }
 
 export interface DinnerConcept {
@@ -160,6 +196,7 @@ export interface CreateSessionPlannerAuthoredAnchor {
 export interface CreateSessionPlannerCookbookTarget {
   cookbook_id: string;
   name: string;
+  mode: PlannerCookbookPlanningMode;
 }
 
 export interface CreateCookbookSessionRequest {

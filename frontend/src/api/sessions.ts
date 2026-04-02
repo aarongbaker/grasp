@@ -1,8 +1,23 @@
 import { apiFetch } from './client';
-import type { CreateSessionRequest, Session, SessionResults } from '../types/api';
+import type {
+  CreateSessionRequest,
+  PlannerReferenceResolutionRequest,
+  PlannerReferenceResolutionResponse,
+  Session,
+  SessionResults,
+} from '../types/api';
 
 export function listSessions(userId: string): Promise<Session[]> {
   return apiFetch<Session[]>(`/users/${userId}/sessions`);
+}
+
+export function resolvePlannerReference(
+  body: PlannerReferenceResolutionRequest,
+): Promise<PlannerReferenceResolutionResponse> {
+  return apiFetch<PlannerReferenceResolutionResponse>('/sessions/planner/resolve', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function createSession(body: CreateSessionRequest): Promise<Session> {

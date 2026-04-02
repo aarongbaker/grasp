@@ -1,8 +1,6 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { listAuthoredRecipes } from '../api/authoredRecipes';
-import { listRecipeCookbooks } from '../api/recipeCookbooks';
-import { createSession, runPipeline } from '../api/sessions';
+import { createSession, resolvePlannerReference, runPipeline } from '../api/sessions';
 import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
@@ -10,14 +8,19 @@ import { Select } from '../components/shared/Select';
 import {
   MEAL_TYPE_LABELS,
   OCCASION_LABELS,
-  type AuthoredRecipeListItem,
+  PLANNER_COOKBOOK_MODE_LABELS,
   type CreateFreeTextSessionRequest,
   type CreatePlannerAuthoredAnchorSessionRequest,
   type CreatePlannerCookbookTargetSessionRequest,
   type CreateSessionRequest,
   type MealType,
   type Occasion,
-  type RecipeCookbookDetail,
+  type PlannerAuthoredResolutionMatch,
+  type PlannerCookbookPlanningMode,
+  type PlannerCookbookResolutionMatch,
+  type PlannerReferenceKind,
+  type PlannerReferenceResolutionResponse,
+  type PlannerResolutionMatchStatus,
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
@@ -31,8 +34,35 @@ const plannerAnchorOptions = [
   { value: 'cookbook', label: 'Cookbook target' },
 ] as const;
 
+const plannerCookbookModeOptions = Object.entries(PLANNER_COOKBOOK_MODE_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
+
 type PlannerAnchorMode = (typeof plannerAnchorOptions)[number]['value'];
-type PlannerLibraryStatus = 'loading' | 'ready' | 'error';
+type PlannerResolutionPhase = 'idle' | 'resolving' | 'resolved' | 'error';
+
+interface PlannerResolutionState {
+  phase: PlannerResolutionPhase;
+  status: PlannerResolutionMatchStatus | null;
+  query: string;
+  response: PlannerReferenceResolutionResponse | null;
+  error: string;
+  selectedMatchId: string;
+}
+
+const idleResolutionState: PlannerResolutionState = {
+  phase: 'idle',
+  status: null,
+  query: '',
+  response: null,
+  error: '',
+  selectedMatchId: '',
+};
+
+function getPlannerMatchId(match: PlannerAuthoredResolutionMatch | PlannerCookbookResolutionMatch): string {
+  return match.kind === 'authored' ? match.recipe_id : match.cookbook_id;
+}
 
 export function NewSessionPage() {
   const navigate = useNavigate();
@@ -44,12 +74,9 @@ export function NewSessionPage() {
   const [restrictionInput, setRestrictionInput] = useState('');
   const [servingTime, setServingTime] = useState('');
   const [plannerAnchorMode, setPlannerAnchorMode] = useState<PlannerAnchorMode>('none');
-  const [plannerRecipes, setPlannerRecipes] = useState<AuthoredRecipeListItem[]>([]);
-  const [plannerCookbooks, setPlannerCookbooks] = useState<RecipeCookbookDetail[]>([]);
-  const [selectedPlannerRecipeId, setSelectedPlannerRecipeId] = useState('');
-  const [selectedPlannerCookbookId, setSelectedPlannerCookbookId] = useState('');
-  const [plannerLibraryStatus, setPlannerLibraryStatus] = useState<PlannerLibraryStatus>('loading');
-  const [plannerLibraryError, setPlannerLibraryError] = useState('');
+  const [plannerReferenceInput, setPlannerReferenceInput] = useState('');
+  const [plannerResolution, setPlannerResolution] = useState<PlannerResolutionState>(idleResolutionState);
+  const [plannerCookbookMode, setPlannerCookbookMode] = useState<PlannerCookbookPlanningMode | ''>('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -71,62 +98,22 @@ export function NewSessionPage() {
     [authoredWorkspace.title, authoredWorkspace.to, recipeLibrary.title, recipeLibrary.to],
   );
 
-  useEffect(() => {
-    let active = true;
+  const plannerAnchorDescription =
+    plannerAnchorMode === 'authored'
+      ? 'Name the owned recipe you mean, resolve it inline, and keep the dinner brief anchored there.'
+      : plannerAnchorMode === 'cookbook'
+        ? 'Name the owned cookbook you mean, resolve it inline, and choose how tightly the planner should stay inside it.'
+        : 'Start from menu intent alone when you want the planner to build the dinner from a clean brief.';
 
-    async function loadPlannerLibrary() {
-      setPlannerLibraryStatus('loading');
-      setPlannerLibraryError('');
-
-      try {
-        const [recipes, cookbooks] = await Promise.all([listAuthoredRecipes(), listRecipeCookbooks()]);
-        if (!active) {
-          return;
-        }
-        setPlannerRecipes(recipes);
-        setPlannerCookbooks(cookbooks);
-        setPlannerLibraryStatus('ready');
-      } catch (err: unknown) {
-        if (!active) {
-          return;
-        }
-        setPlannerLibraryStatus('error');
-        setPlannerLibraryError(getErrorMessage(err, 'Could not load your saved recipes and cookbooks.'));
-      }
+  const selectedPlannerMatch = useMemo(() => {
+    if (!plannerResolution.response) {
+      return null;
     }
-
-    void loadPlannerLibrary();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const plannerRecipeOptions = useMemo(
-    () => [
-      { value: '', label: plannerRecipes.length > 0 ? 'Choose one saved recipe' : 'No saved recipes yet' },
-      ...plannerRecipes.map((recipe) => ({ value: recipe.recipe_id, label: recipe.title })),
-    ],
-    [plannerRecipes],
-  );
-
-  const plannerCookbookOptions = useMemo(
-    () => [
-      { value: '', label: plannerCookbooks.length > 0 ? 'Choose one cookbook' : 'No cookbooks yet' },
-      ...plannerCookbooks.map((cookbook) => ({ value: cookbook.cookbook_id, label: cookbook.name })),
-    ],
-    [plannerCookbooks],
-  );
-
-  const selectedPlannerRecipe = useMemo(
-    () => plannerRecipes.find((recipe) => recipe.recipe_id === selectedPlannerRecipeId) ?? null,
-    [plannerRecipes, selectedPlannerRecipeId],
-  );
-
-  const selectedPlannerCookbook = useMemo(
-    () => plannerCookbooks.find((cookbook) => cookbook.cookbook_id === selectedPlannerCookbookId) ?? null,
-    [plannerCookbooks, selectedPlannerCookbookId],
-  );
+    return (
+      plannerResolution.response.matches.find((match) => getPlannerMatchId(match) === plannerResolution.selectedMatchId) ??
+      null
+    );
+  }, [plannerResolution.response, plannerResolution.selectedMatchId]);
 
   function addRestriction(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -139,14 +126,78 @@ export function NewSessionPage() {
     }
   }
 
+  function resetPlannerResolution() {
+    setPlannerResolution(idleResolutionState);
+    setPlannerCookbookMode('');
+  }
+
   function handlePlannerAnchorModeChange(value: PlannerAnchorMode) {
     setPlannerAnchorMode(value);
+    setPlannerReferenceInput('');
+    resetPlannerResolution();
     setError('');
-    if (value !== 'authored') {
-      setSelectedPlannerRecipeId('');
+  }
+
+  function handlePlannerReferenceInputChange(value: string) {
+    setPlannerReferenceInput(value);
+    setError('');
+    setPlannerResolution((current) => {
+      if (current.phase === 'idle' && current.query === '') {
+        return current;
+      }
+      return {
+        ...idleResolutionState,
+      };
+    });
+    if (plannerAnchorMode !== 'cookbook') {
+      setPlannerCookbookMode('');
     }
-    if (value !== 'cookbook') {
-      setSelectedPlannerCookbookId('');
+  }
+
+  async function handleResolvePlannerReference() {
+    if (plannerAnchorMode === 'none') {
+      return;
+    }
+
+    const reference = plannerReferenceInput.trim();
+    if (!reference) {
+      setPlannerResolution({
+        ...idleResolutionState,
+        phase: 'error',
+        error: plannerAnchorMode === 'authored' ? 'Enter a saved recipe name to resolve it.' : 'Enter a cookbook name to resolve it.',
+      });
+      return;
+    }
+
+    const kind: PlannerReferenceKind = plannerAnchorMode === 'authored' ? 'authored' : 'cookbook';
+    setPlannerResolution({
+      phase: 'resolving',
+      status: null,
+      query: reference,
+      response: null,
+      error: '',
+      selectedMatchId: '',
+    });
+
+    try {
+      const response = await resolvePlannerReference({ kind, reference });
+      setPlannerResolution({
+        phase: 'resolved',
+        status: response.status,
+        query: response.reference,
+        response,
+        error: '',
+        selectedMatchId: response.status === 'resolved' && response.matches[0] ? getPlannerMatchId(response.matches[0]) : '',
+      });
+    } catch (err: unknown) {
+      setPlannerResolution({
+        phase: 'error',
+        status: null,
+        query: reference,
+        response: null,
+        error: getErrorMessage(err, 'Could not resolve that planner reference right now.'),
+        selectedMatchId: '',
+      });
     }
   }
 
@@ -161,32 +212,42 @@ export function NewSessionPage() {
     };
 
     if (plannerAnchorMode === 'authored') {
-      if (!selectedPlannerRecipe) {
-        throw new Error('Choose one saved recipe anchor before starting the plan.');
+      if (!plannerResolution.response || plannerResolution.response.status === 'no_match') {
+        throw new Error('Resolve the saved recipe reference before starting the plan.');
+      }
+      if (!selectedPlannerMatch || selectedPlannerMatch.kind !== 'authored') {
+        throw new Error('Choose the intended saved recipe before starting the plan.');
       }
 
       const request: CreatePlannerAuthoredAnchorSessionRequest = {
         concept_source: 'planner_authored_anchor',
         ...sharedFields,
         planner_authored_recipe_anchor: {
-          recipe_id: selectedPlannerRecipe.recipe_id,
-          title: selectedPlannerRecipe.title,
+          recipe_id: selectedPlannerMatch.recipe_id,
+          title: selectedPlannerMatch.title,
         },
       };
       return request;
     }
 
     if (plannerAnchorMode === 'cookbook') {
-      if (!selectedPlannerCookbook) {
-        throw new Error('Choose one cookbook target before starting the plan.');
+      if (!plannerResolution.response || plannerResolution.response.status === 'no_match') {
+        throw new Error('Resolve the cookbook reference before starting the plan.');
+      }
+      if (!selectedPlannerMatch || selectedPlannerMatch.kind !== 'cookbook') {
+        throw new Error('Choose the intended cookbook before starting the plan.');
+      }
+      if (!plannerCookbookMode) {
+        throw new Error('Choose how tightly the planner should follow that cookbook before starting the plan.');
       }
 
       const request: CreatePlannerCookbookTargetSessionRequest = {
         concept_source: 'planner_cookbook_target',
         ...sharedFields,
         planner_cookbook_target: {
-          cookbook_id: selectedPlannerCookbook.cookbook_id,
-          name: selectedPlannerCookbook.name,
+          cookbook_id: selectedPlannerMatch.cookbook_id,
+          name: selectedPlannerMatch.name,
+          mode: plannerCookbookMode,
         },
       };
       return request;
@@ -224,12 +285,8 @@ export function NewSessionPage() {
   }
 
   const canSubmit = !!freeText.trim();
-  const plannerAnchorDescription =
-    plannerAnchorMode === 'authored'
-      ? 'Ground the plan in one owned authored recipe while keeping the rest of the dinner brief open.'
-      : plannerAnchorMode === 'cookbook'
-        ? 'Point the planner at one cookbook shelf so the brief stays inside that owned collection.'
-        : 'Start from menu intent alone when you want the planner to build the dinner from a clean brief.';
+  const isPlannerResolutionBusy = plannerResolution.phase === 'resolving';
+  const isCookbookModeResolved = plannerResolution.response?.kind === 'cookbook';
 
   return (
     <div className={styles.page}>
@@ -293,42 +350,141 @@ export function NewSessionPage() {
               onChange={(e) => handlePlannerAnchorModeChange(e.target.value as PlannerAnchorMode)}
             />
 
-            {plannerAnchorMode === 'authored' && (
-              <Select
-                label="Saved recipe anchor"
-                options={plannerRecipeOptions}
-                value={selectedPlannerRecipeId}
-                onChange={(e) => setSelectedPlannerRecipeId(e.target.value)}
-                disabled={plannerLibraryStatus !== 'ready' || plannerRecipes.length === 0}
-              />
-            )}
-
-            {plannerAnchorMode === 'cookbook' && (
-              <Select
-                label="Cookbook target"
-                options={plannerCookbookOptions}
-                value={selectedPlannerCookbookId}
-                onChange={(e) => setSelectedPlannerCookbookId(e.target.value)}
-                disabled={plannerLibraryStatus !== 'ready' || plannerCookbooks.length === 0}
-              />
+            {plannerAnchorMode !== 'none' && (
+              <div className={styles.referenceInputRow}>
+                <Input
+                  label={plannerAnchorMode === 'authored' ? 'Saved recipe reference' : 'Cookbook reference'}
+                  placeholder={
+                    plannerAnchorMode === 'authored'
+                      ? 'Type the owned recipe name the planner should anchor to'
+                      : 'Type the owned cookbook name the planner should target'
+                  }
+                  value={plannerReferenceInput}
+                  onChange={(e) => handlePlannerReferenceInputChange(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={styles.resolveButton}
+                  onClick={() => void handleResolvePlannerReference()}
+                  disabled={isPlannerResolutionBusy}
+                >
+                  {isPlannerResolutionBusy ? 'Resolving…' : 'Resolve'}
+                </Button>
+              </div>
             )}
           </div>
 
           <div className={styles.anchorMeta}>
             <span className={styles.anchorMetaLabel}>
-              {plannerLibraryStatus === 'loading'
-                ? 'Loading owned planner references…'
-                : plannerLibraryStatus === 'error'
-                  ? plannerLibraryError
-                  : `${plannerRecipes.length} saved recipe${plannerRecipes.length === 1 ? '' : 's'} and ${plannerCookbooks.length} cookbook${plannerCookbooks.length === 1 ? '' : 's'} ready.`}
+              {plannerAnchorMode === 'none'
+                ? 'No owned reference needed unless you want the planner anchored to one saved recipe or cookbook.'
+                : plannerAnchorMode === 'authored'
+                  ? 'Resolve an owned recipe title to keep no-match or ambiguous states visible before session creation.'
+                  : 'Resolve an owned cookbook name, then choose whether planning stays strict to that shelf or only leans toward it.'}
             </span>
-            {plannerLibraryStatus === 'ready' && plannerAnchorMode === 'authored' && selectedPlannerRecipe && (
-              <span className={styles.anchorMetaDetail}>Anchored to “{selectedPlannerRecipe.title}”.</span>
-            )}
-            {plannerLibraryStatus === 'ready' && plannerAnchorMode === 'cookbook' && selectedPlannerCookbook && (
-              <span className={styles.anchorMetaDetail}>Targeting the “{selectedPlannerCookbook.name}” shelf.</span>
+            {plannerResolution.phase === 'resolved' && plannerResolution.status === 'resolved' && selectedPlannerMatch && (
+              <span className={styles.anchorMetaDetail}>
+                {selectedPlannerMatch.kind === 'authored'
+                  ? `Anchored to “${selectedPlannerMatch.title}”.`
+                  : `Targeting “${selectedPlannerMatch.name}”.`}
+              </span>
             )}
           </div>
+
+          {plannerAnchorMode !== 'none' && (
+            <div className={styles.resolutionPanel} aria-live="polite">
+              {plannerResolution.phase === 'error' && <div className={styles.inlineError}>{plannerResolution.error}</div>}
+
+              {plannerResolution.phase === 'resolved' && plannerResolution.status === 'no_match' && (
+                <div className={styles.inlineNotice}>
+                  <p className={styles.resultEyebrow}>No owned match</p>
+                  <p className={styles.resultHeadline}>
+                    Nothing in your {plannerAnchorMode === 'authored' ? 'saved recipes' : 'cookbooks'} matched “
+                    {plannerResolution.query}”.
+                  </p>
+                  <p className={styles.resultText}>
+                    Adjust the reference text and resolve again before starting the planner.
+                  </p>
+                </div>
+              )}
+
+              {plannerResolution.phase === 'resolved' && plannerResolution.status === 'resolved' && selectedPlannerMatch && (
+                <div className={styles.resultCard}>
+                  <p className={styles.resultEyebrow}>Owned match resolved</p>
+                  {selectedPlannerMatch.kind === 'authored' ? (
+                    <>
+                      <p className={styles.resultHeadline}>{selectedPlannerMatch.title}</p>
+                      <p className={styles.resultText}>This saved recipe will anchor the planner while the rest of the menu stays open.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className={styles.resultHeadline}>{selectedPlannerMatch.name}</p>
+                      <p className={styles.resultText}>
+                        {selectedPlannerMatch.description || 'This owned cookbook shelf will shape the planner’s search space.'}
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {plannerResolution.phase === 'resolved' && plannerResolution.status === 'ambiguous' && plannerResolution.response && (
+                <div className={styles.resultCard}>
+                  <p className={styles.resultEyebrow}>Multiple owned matches</p>
+                  <p className={styles.resultHeadline}>Choose the exact {plannerAnchorMode === 'authored' ? 'recipe' : 'cookbook'} before starting the planner.</p>
+                  <p className={styles.resultText}>
+                    “{plannerResolution.query}” matched more than one owned {plannerAnchorMode === 'authored' ? 'recipe' : 'cookbook'}.
+                    The planner stays blocked until you choose one.
+                  </p>
+                  <div className={styles.choiceList} role="radiogroup" aria-label="Planner reference matches">
+                    {plannerResolution.response.matches.map((match) => {
+                      const matchId = getPlannerMatchId(match);
+                      const checked = plannerResolution.selectedMatchId === matchId;
+                      return (
+                        <label key={matchId} className={styles.choiceCard}>
+                          <input
+                            type="radio"
+                            name="planner-reference-match"
+                            value={matchId}
+                            checked={checked}
+                            onChange={() =>
+                              setPlannerResolution((current) => ({
+                                ...current,
+                                selectedMatchId: matchId,
+                              }))
+                            }
+                          />
+                          <span className={styles.choiceBody}>
+                            <span className={styles.choiceTitle}>{match.kind === 'authored' ? match.title : match.name}</span>
+                            <span className={styles.choiceDescription}>
+                              {match.kind === 'authored'
+                                ? 'Saved recipe anchor'
+                                : match.description || 'Cookbook shelf'}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {plannerAnchorMode === 'cookbook' && isCookbookModeResolved && (
+                <div className={styles.modeCard}>
+                  <p className={styles.resultEyebrow}>Cookbook planning mode</p>
+                  <p className={styles.resultText}>
+                    Decide whether this dinner must stay inside the chosen cookbook or whether the planner can borrow outside ideas while leaning on it.
+                  </p>
+                  <Select
+                    label="Cookbook planning mode"
+                    options={[{ value: '', label: 'Choose a planning mode' }, ...plannerCookbookModeOptions]}
+                    value={plannerCookbookMode}
+                    onChange={(e) => setPlannerCookbookMode(e.target.value as PlannerCookbookPlanningMode | '')}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         <div className={styles.row}>
