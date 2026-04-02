@@ -16,11 +16,12 @@
   gap: var(--space-md);
   padding: clamp(1.75rem, 3vw, 2.75rem);
   background:
-    radial-gradient(circle at top left, rgba(201, 129, 58, 0.18), transparent 36%),
-    linear-gradient(145deg, rgba(35, 31, 26, 0.98), rgba(46, 40, 34, 0.94));
-  border: 1px solid rgba(212, 149, 106, 0.18);
+    radial-gradient(circle at top left, rgba(194, 65, 12, 0.08), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(212, 149, 106, 0.12), transparent 22%),
+    var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 30px;
-  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.26);
+  box-shadow: 0 20px 45px rgba(28, 25, 23, 0.08);
   overflow: hidden;
 }
 
@@ -31,7 +32,7 @@
   width: 180px;
   height: 180px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(201, 129, 58, 0.18), transparent 68%);
+  background: radial-gradient(circle, rgba(194, 65, 12, 0.12), transparent 68%);
   pointer-events: none;
 }
 
@@ -113,10 +114,10 @@
 .metricCard {
   display: grid;
   gap: var(--space-sm);
-  background:
-    radial-gradient(circle at top right, rgba(201, 129, 58, 0.14), transparent 42%),
-    linear-gradient(180deg, rgba(46, 40, 34, 0.96), rgba(35, 31, 26, 0.98));
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-primary);
+  box-shadow: var(--shadow-md);
 }
 
 .metricLabel,
@@ -141,11 +142,9 @@
   gap: var(--space-sm);
   padding: var(--space-lg);
   border-radius: 22px;
-  border: 1px solid rgba(212, 149, 106, 0.16);
-  background:
-    radial-gradient(circle at bottom left, rgba(201, 129, 58, 0.1), transparent 48%),
-    rgba(46, 40, 34, 0.92);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
 }
 
 .metricNumber {
@@ -160,10 +159,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
   gap: var(--space-xl);
-  background:
-    radial-gradient(circle at top left, rgba(201, 129, 58, 0.11), transparent 52%),
-    linear-gradient(135deg, rgba(46, 40, 34, 0.94), rgba(35, 31, 26, 0.98));
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
 }
 
 .composerHeader {
@@ -271,16 +269,13 @@
 .cookbookCard {
   padding: var(--space-lg);
   border-radius: 22px;
-  border: 1px solid rgba(212, 149, 106, 0.14);
-  background:
-    linear-gradient(145deg, rgba(46, 40, 34, 0.86), rgba(35, 31, 26, 0.92));
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .recipeCardInset {
-  background:
-    linear-gradient(145deg, rgba(35, 31, 26, 0.92), rgba(26, 22, 18, 0.96));
-  border-color: rgba(212, 149, 106, 0.1);
+  background: var(--bg-raised);
 }
 
 .recipeMeta {
