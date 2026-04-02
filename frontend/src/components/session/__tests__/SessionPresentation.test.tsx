@@ -125,6 +125,7 @@ const plannerCookbookTargetSession: Session = {
       cookbook_id: 'cookbook-spring-pastry',
       name: 'Spring Pastry',
       description: 'Tarts, galettes, and plated fruit desserts.',
+      mode: 'cookbook_biased',
     },
   },
 };
@@ -218,6 +219,22 @@ describe('session presentation', () => {
     });
   });
 
+  it('ignores planner cookbook mode metadata when building shared display copy', () => {
+    const strictPlannerCookbookTarget: DinnerConcept = {
+      ...plannerCookbookTargetSession.concept_json,
+      planner_cookbook_target: {
+        cookbook_id: 'cookbook-spring-pastry',
+        name: 'Spring Pastry',
+        description: 'Tarts, galettes, and plated fruit desserts.',
+        mode: 'strict',
+      },
+    };
+
+    expect(getSessionConceptDisplay(strictPlannerCookbookTarget)).toEqual(
+      getSessionConceptDisplay(plannerCookbookTargetSession.concept_json),
+    );
+  });
+
   it('falls back to free text when a planner-authored anchor is missing the trusted title', () => {
     const malformedConcept: DinnerConcept = {
       ...plannerAuthoredAnchorSession.concept_json,
@@ -245,6 +262,7 @@ describe('session presentation', () => {
         cookbook_id: 'cookbook-spring-pastry',
         name: '   ',
         description: 'Tarts, galettes, and plated fruit desserts.',
+        mode: 'cookbook_biased',
       },
     };
 

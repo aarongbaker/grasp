@@ -277,7 +277,9 @@ describe('RecipeLibraryPage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Schedule from shelf' }));
 
-    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledWith({
+    await waitFor(() => expect(createSessionSpy).toHaveBeenCalledTimes(1));
+    const request = createSessionSpy.mock.calls[0]?.[0];
+    expect(request).toEqual({
       concept_source: 'authored',
       free_text: 'Schedule authored recipe: Marinated peppers',
       selected_authored_recipe: {
@@ -287,10 +289,9 @@ describe('RecipeLibraryPage', () => {
       guest_count: 4,
       meal_type: 'dinner',
       occasion: 'dinner_party',
-    }));
-    expect(createSessionSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ concept_source: 'planner_authored_anchor' }),
-    );
+    });
+    expect(request).not.toHaveProperty('planner_authored_recipe_anchor');
+    expect(request).not.toHaveProperty('planner_cookbook_target');
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
     expect(mockNavigate).toHaveBeenCalledWith('/sessions/session-123');
   });
