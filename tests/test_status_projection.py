@@ -427,6 +427,84 @@ async def test_cookbook_raw_recipes_still_project_enriching():
 
 
 @pytest.mark.asyncio
+async def test_planner_authored_anchor_raw_recipes_still_project_enriching_without_planner_runtime_fields():
+    """Planner-authored mixed-origin runs should need only raw_recipes to project ENRICHING."""
+    recipe_id = uuid.uuid4()
+    graph = _make_mock_graph(
+        {
+            "concept": {
+                "free_text": "Plan a menu around my saved braise.",
+                "guest_count": 6,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+                "concept_source": "planner_authored_anchor",
+                "planner_authored_recipe_anchor": {
+                    "recipe_id": str(recipe_id),
+                    "title": "Sunday Braise",
+                },
+            },
+            "raw_recipes": [
+                {
+                    "name": "Sunday Braise",
+                    "steps": ["Brown", "Braise", "Rest"],
+                },
+                {
+                    "name": "Charred Chicory Salad",
+                    "steps": ["Prep", "Char", "Dress"],
+                },
+            ],
+        }
+    )
+
+    status = await status_projection(uuid.uuid4(), graph)
+
+    assert status == SessionStatus.ENRICHING
+
+
+@pytest.mark.asyncio
+async def test_planner_cookbook_target_raw_recipes_still_project_enriching_without_planner_runtime_fields():
+    """Planner-cookbook mixed-origin runs should project ENRICHING from raw_recipes alone."""
+    cookbook_id = uuid.uuid4()
+    graph = _make_mock_graph(
+        {
+            "concept": {
+                "free_text": "Plan dinner using dishes from my market supper club cookbook.",
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+                "concept_source": "planner_cookbook_target",
+                "planner_cookbook_target": {
+                    "cookbook_id": str(cookbook_id),
+                    "name": "Market Supper Club",
+                    "description": "Late-summer dinner drafts.",
+                    "mode": "cookbook_biased",
+                },
+            },
+            "raw_recipes": [
+                {
+                    "name": "Braised Fennel",
+                    "steps": ["Prep", "Braise", "Finish"],
+                },
+                {
+                    "name": "Olive Oil Cake",
+                    "steps": ["Mix", "Bake", "Cool"],
+                },
+                {
+                    "name": "Charred Chicory Salad",
+                    "steps": ["Prep", "Char", "Dress"],
+                },
+            ],
+        }
+    )
+
+    status = await status_projection(uuid.uuid4(), graph)
+
+    assert status == SessionStatus.ENRICHING
+
+
+@pytest.mark.asyncio
 async def test_most_advanced_field_wins():
     """When multiple fields populated, the most advanced one determines status."""
     graph = _make_mock_graph(
