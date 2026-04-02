@@ -1,7 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthoredRecipe, getAuthoredRecipe } from '../api/authoredRecipes';
-import { AuthoringSectionCard } from '../components/authoring/AuthoringSectionCard';
 import { Button } from '../components/shared/Button';
 import { Input, Textarea } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
@@ -23,13 +22,11 @@ import type {
 import styles from './AuthoredRecipeWorkspacePage.module.css';
 
 type DraftStatus = 'new' | 'loading' | 'ready' | 'saving' | 'saved';
-
 type IngredientDraft = Ingredient;
 type StepDraft = AuthoredRecipeStep;
-
 type ValidationSectionKey = 'foundation' | 'steps' | 'advance';
-
 type GuidanceMap = Record<string, string[]>;
+type WorkspaceTab = ValidationSectionKey;
 
 const resourceOptions: { value: Resource; label: string }[] = [
   { value: 'hands', label: 'Hands on the board' },
@@ -43,6 +40,27 @@ const sectionTitles: Record<ValidationSectionKey, string> = {
   steps: 'Mise en place',
   advance: 'Advance work',
 };
+
+const tabs: { id: WorkspaceTab; label: string; title: string; description: string }[] = [
+  {
+    id: 'foundation',
+    label: '1. Foundation',
+    title: 'Anchor the plate',
+    description: 'Name the dish, define how it should eat, and capture the core ingredient set before you worry about service detail.',
+  },
+  {
+    id: 'steps',
+    label: '2. Mise en place',
+    title: 'Sketch the rhythm',
+    description: 'Lay out the working beats one at a time so timing, dependencies, and station detail stay legible.',
+  },
+  {
+    id: 'advance',
+    label: '3. Advance work',
+    title: 'Plan what can happen ahead',
+    description: 'Keep hold, storage, and recovery notes tucked away until the dish actually needs them.',
+  },
+];
 
 function createBlankIngredient(): IngredientDraft {
   return { name: '', quantity: '', preparation: '' };
@@ -162,8 +180,7 @@ function buildSavePayload(draft: AuthoredRecipeCreateRequest): AuthoredRecipeCre
         yield_contribution: step.yield_contribution?.trim() || null,
         chef_notes: step.chef_notes?.trim() || null,
         target_internal_temperature_f: step.target_internal_temperature_f || null,
-        duration_max:
-          step.duration_max && step.duration_max >= step.duration_minutes ? step.duration_max : null,
+        duration_max: step.duration_max && step.duration_max >= step.duration_minutes ? step.duration_max : null,
       }))
       .filter((step) => step.title && step.instruction),
     equipment_notes: draft.equipment_notes.map((note) => note.trim()).filter(Boolean),
@@ -197,28 +214,28 @@ function buildSavePayload(draft: AuthoredRecipeCreateRequest): AuthoredRecipeCre
 function statusCopy(status: DraftStatus, recipeId: string | null) {
   if (status === 'loading') {
     return {
-      label: 'Draft status',
-      value: 'Pulling your saved draft forward.',
+      badge: 'Opening saved draft',
+      value: 'Pulling your recipe forward.',
       text: 'Loading the authored recipe before you add or refine service detail.',
     };
   }
   if (status === 'saving') {
     return {
-      label: 'Draft status',
-      value: 'Saving to your private recipe ledger.',
-      text: 'This stores the authored contract without touching dinner-planning sessions.',
+      badge: 'Saving draft',
+      value: 'Writing to your private recipe shelf.',
+      text: 'This stores the draft without starting a dinner-planning session.',
     };
   }
   if (status === 'saved' && recipeId) {
     return {
-      label: 'Draft status',
-      value: 'Saved as a private recipe draft.',
-      text: `Saved draft ${recipeId.slice(0, 8)}… can be reopened here without starting a dinner plan.`,
+      badge: 'Saved draft',
+      value: `Saved as ${recipeId.slice(0, 8)}…`,
+      text: 'You can reopen this draft here any time without leaving the authored workspace.',
     };
   }
   return {
-    label: 'Draft status',
-    value: 'Working draft, not yet saved.',
+    badge: 'Working draft',
+    value: 'Not yet saved.',
     text: 'Shape the dish in chef language first, then save when the draft can stand on its own.',
   };
 }
@@ -253,7 +270,6 @@ function preflightValidationGuidance(draft: AuthoredRecipeCreateRequest): Author
   if (!draft.yield_info.unit.trim() || draft.yield_info.quantity <= 0) {
     guidance.push({ path: 'yield_info', message: 'Set a real yield so this draft reads like service, not a note to self.' });
   }
-
   if (!draft.ingredients.some((ingredient) => ingredient.name.trim() && ingredient.quantity.trim())) {
     guidance.push({ path: 'ingredients', message: 'Add at least one ingredient with both product and quantity.' });
   }
@@ -280,53 +296,29 @@ function preflightValidationGuidance(draft: AuthoredRecipeCreateRequest): Author
       guidance.push({ path: `steps.${index}.instruction`, message: `Step ${stepNumber} needs a clear instruction before it can be scheduled.` });
     }
     if (step.duration_max !== null && step.duration_max < step.duration_minutes) {
-      guidance.push({
-        path: `steps.${index}.duration_max`,
-        message: `Step ${stepNumber} has an outer edge that ends before its expected time. Make that service cushion equal to or longer than the working time.`,
-      });
+      guidance.push({ path: `steps.${index}.duration_max`, message: `Step ${stepNumber} has an outer edge that ends before its expected time. Make that cushion equal to or longer than the working time.` });
     }
     if (step.can_be_done_ahead && !step.prep_ahead_window?.trim()) {
-      guidance.push({
-        path: `steps.${index}.prep_ahead_window`,
-        message: `Step ${stepNumber} is marked make-ahead, but it still needs a window for how far before service it can happen.`,
-      });
+      guidance.push({ path: `steps.${index}.prep_ahead_window`, message: `Step ${stepNumber} is marked make-ahead, but it still needs a window for how far before service it can happen.` });
     }
     if (step.can_be_done_ahead && !step.prep_ahead_notes?.trim()) {
-      guidance.push({
-        path: `steps.${index}.prep_ahead_notes`,
-        message: `Step ${stepNumber} can be handled ahead, but the recovery note is missing. Explain how it comes back for service.`,
-      });
+      guidance.push({ path: `steps.${index}.prep_ahead_notes`, message: `Step ${stepNumber} can be handled ahead, but the recovery note is missing.` });
     }
     step.dependencies.forEach((dependency, dependencyIndex) => {
       const dependencyStepNumber = Number(dependency.step_id);
       if (Number.isNaN(dependencyStepNumber)) {
-        guidance.push({
-          path: `steps.${index}.dependencies.${dependencyIndex}.step_id`,
-          message: `Step ${stepNumber} has a handoff that no longer points to a visible beat. Re-link it to an earlier step.`,
-        });
+        guidance.push({ path: `steps.${index}.dependencies.${dependencyIndex}.step_id`, message: `Step ${stepNumber} has a handoff that no longer points to a visible beat.` });
         return;
       }
-      if (dependencyStepNumber === index) {
-        guidance.push({
-          path: `steps.${index}.dependencies.${dependencyIndex}.step_id`,
-          message: `Step ${stepNumber} cannot wait on itself. Link it to an earlier beat instead.`,
-        });
-      }
-      if (dependencyStepNumber > index || dependencyStepNumber < 0) {
-        guidance.push({
-          path: `steps.${index}.dependencies.${dependencyIndex}.step_id`,
-          message: `Step ${stepNumber} can only wait on earlier beats. Choose a prior visible step.`,
-        });
+      if (dependencyStepNumber === index || dependencyStepNumber > index || dependencyStepNumber < 0) {
+        guidance.push({ path: `steps.${index}.dependencies.${dependencyIndex}.step_id`, message: `Step ${stepNumber} can only wait on earlier beats.` });
       }
     });
   });
 
   const hasMakeAheadStep = draft.steps.some((step) => step.can_be_done_ahead);
   if (hasMakeAheadStep && !draft.make_ahead_guidance?.trim()) {
-    guidance.push({
-      path: 'make_ahead_guidance',
-      message: 'You marked work that can happen ahead. Add whole-dish make-ahead guidance so the next cook knows the plan.',
-    });
+    guidance.push({ path: 'make_ahead_guidance', message: 'You marked work that can happen ahead. Add whole-dish make-ahead guidance so the next cook knows the plan.' });
   }
 
   return guidance;
@@ -358,7 +350,6 @@ function dependencyLabelForStep(steps: StepDraft[], dependencyStepId: string): s
     const title = steps[dependencyIndex].title.trim();
     return `${dependencyIndex + 1}. ${title || `Step ${dependencyIndex + 1}`}`;
   }
-
   const numericSuffix = dependencyStepId.match(/_step_(\d+)$/i);
   if (numericSuffix) {
     const index = Number(numericSuffix[1]) - 1;
@@ -367,7 +358,6 @@ function dependencyLabelForStep(steps: StepDraft[], dependencyStepId: string): s
       return `${index + 1}. ${title || `Step ${index + 1}`}`;
     }
   }
-
   return 'Unlinked beat';
 }
 
@@ -384,6 +374,7 @@ export function AuthoredRecipeWorkspacePage() {
   const [showAdvanceDetails, setShowAdvanceDetails] = useState(false);
   const [saveGuidanceSummary, setSaveGuidanceSummary] = useState<string | null>(null);
   const [serverGuidance, setServerGuidance] = useState<AuthoredRecipeFieldGuidance[]>([]);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('foundation');
 
   useEffect(() => {
     if (!userId) {
@@ -417,21 +408,14 @@ export function AuthoredRecipeWorkspacePage() {
     if (!requestedRecipeId || requestedRecipeId === savedRecipeId || draftStatus === 'loading') {
       return;
     }
-
     void loadDraftById(requestedRecipeId);
   }, [draftStatus, loadDraftById, requestedRecipeId, savedRecipeId]);
 
   const currentDraft = draft;
   const currentStep = currentDraft?.steps[activeStepIndex] ?? null;
   const note = useMemo(() => statusCopy(draftStatus, savedRecipeId), [draftStatus, savedRecipeId]);
-  const preflightGuidance = useMemo(
-    () => (currentDraft && saveGuidanceSummary ? preflightValidationGuidance(currentDraft) : []),
-    [currentDraft, saveGuidanceSummary],
-  );
-  const fieldGuidance = useMemo(
-    () => mergeGuidanceMaps(createFieldGuidanceMap(preflightGuidance), createFieldGuidanceMap(serverGuidance)),
-    [preflightGuidance, serverGuidance],
-  );
+  const preflightGuidance = useMemo(() => (currentDraft && saveGuidanceSummary ? preflightValidationGuidance(currentDraft) : []), [currentDraft, saveGuidanceSummary]);
+  const fieldGuidance = useMemo(() => mergeGuidanceMaps(createFieldGuidanceMap(preflightGuidance), createFieldGuidanceMap(serverGuidance)), [preflightGuidance, serverGuidance]);
   const foundationMessages = sectionMessages(fieldGuidance, 'title')
     .concat(sectionMessages(fieldGuidance, 'description'))
     .concat(sectionMessages(fieldGuidance, 'cuisine'))
@@ -460,38 +444,24 @@ export function AuthoredRecipeWorkspacePage() {
   }
 
   function updateYield<K extends keyof AuthoredRecipeYield>(key: K, value: AuthoredRecipeYield[K]) {
-    updateDraft((current) => ({
-      ...current,
-      yield_info: {
-        ...current.yield_info,
-        [key]: value,
-      },
-    }));
+    updateDraft((current) => ({ ...current, yield_info: { ...current.yield_info, [key]: value } }));
   }
 
   function updateIngredient(index: number, patch: Partial<IngredientDraft>) {
     updateDraft((current) => ({
       ...current,
-      ingredients: current.ingredients.map((ingredient, ingredientIndex) =>
-        ingredientIndex === index ? { ...ingredient, ...patch } : ingredient,
-      ),
+      ingredients: current.ingredients.map((ingredient, ingredientIndex) => ingredientIndex === index ? { ...ingredient, ...patch } : ingredient),
     }));
   }
 
   function addIngredient() {
-    updateDraft((current) => ({
-      ...current,
-      ingredients: [...current.ingredients, createBlankIngredient()],
-    }));
+    updateDraft((current) => ({ ...current, ingredients: [...current.ingredients, createBlankIngredient()] }));
   }
 
   function removeIngredient(index: number) {
     updateDraft((current) => ({
       ...current,
-      ingredients:
-        current.ingredients.length === 1
-          ? [createBlankIngredient()]
-          : current.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index),
+      ingredients: current.ingredients.length === 1 ? [createBlankIngredient()] : current.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index),
     }));
   }
 
@@ -503,10 +473,7 @@ export function AuthoredRecipeWorkspacePage() {
   }
 
   function addStep() {
-    updateDraft((current) => ({
-      ...current,
-      steps: [...current.steps, createBlankStep()],
-    }));
+    updateDraft((current) => ({ ...current, steps: [...current.steps, createBlankStep()] }));
     setActiveStepIndex((currentIndex) => currentIndex + 1);
   }
 
@@ -522,29 +489,16 @@ export function AuthoredRecipeWorkspacePage() {
     if (!currentDraft || !currentStep) return;
     const dependencyIndex = Number(selectedIndex);
     if (Number.isNaN(dependencyIndex) || dependencyIndex === activeStepIndex) return;
-
-    const dependencies = currentStep.dependencies.some(
-      (dependency) => Number(dependency.step_id) === dependencyIndex,
-    )
+    const dependencies = currentStep.dependencies.some((dependency) => Number(dependency.step_id) === dependencyIndex)
       ? currentStep.dependencies
-      : [
-          ...currentStep.dependencies,
-          {
-            step_id: String(dependencyIndex),
-            kind: 'finish_to_start' as const,
-            lag_minutes: 0,
-          },
-        ];
-
+      : [...currentStep.dependencies, { step_id: String(dependencyIndex), kind: 'finish_to_start' as const, lag_minutes: 0 }];
     updateStep(activeStepIndex, { dependencies });
   }
 
   function removeDependency(stepIndex: number, dependencyStepId: string) {
     const step = draft?.steps[stepIndex];
     if (!step) return;
-    updateStep(stepIndex, {
-      dependencies: step.dependencies.filter((dependency) => dependency.step_id !== dependencyStepId),
-    });
+    updateStep(stepIndex, { dependencies: step.dependencies.filter((dependency) => dependency.step_id !== dependencyStepId) });
   }
 
   function updateGuidance(updater: (current: AuthoredRecipeCreateRequest) => AuthoredRecipeCreateRequest) {
@@ -567,11 +521,7 @@ export function AuthoredRecipeWorkspacePage() {
     const localGuidance = preflightValidationGuidance(currentDraft);
     if (localGuidance.length > 0) {
       setDraftStatus('ready');
-      setSaveGuidanceSummary(
-        localGuidance.length === 1
-          ? 'One part of the draft still needs kitchen detail before it can save.'
-          : `${localGuidance.length} parts of the draft still need kitchen detail before they can save.`,
-      );
+      setSaveGuidanceSummary(localGuidance.length === 1 ? 'One part of the draft still needs kitchen detail before it can save.' : `${localGuidance.length} parts of the draft still need kitchen detail before they can save.`);
       return;
     }
 
@@ -595,663 +545,302 @@ export function AuthoredRecipeWorkspacePage() {
     }
   }
 
-  if (!currentDraft) {
-    return null;
-  }
+  if (!currentDraft) return null;
 
   const dependencyOptions = buildStepDependencyOptions(currentDraft.steps, activeStepIndex);
   const draftReadyToSave = preflightGuidance.length === 0;
+  const activeTabMeta = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
   return (
     <div className={styles.page}>
-      <header className={styles.hero}>
-        <div className={styles.heroCopy}>
+      <header className={styles.header}>
+        <div className={styles.headerCopy}>
           <p className={styles.kicker}>Chef-authored workspace</p>
           <h1 className={styles.title}>Open a fresh page for a dish you already know how to talk through.</h1>
-          <p className={styles.subtitle}>
-            Capture a private recipe draft in kitchen language: the dish itself, the prep rhythm, and what can be
-            handled ahead without flattening service.
-          </p>
+          <p className={styles.subtitle}>Capture the dish first. Add prep rhythm and advance-work detail only when they matter.</p>
         </div>
-
-        <aside className={styles.heroNote} aria-label="Draft status">
-          <p className={styles.noteLabel}>{note.label}</p>
-          <p className={styles.noteValue}>{note.value}</p>
-          <p className={styles.noteText}>{note.text}</p>
-        </aside>
+        <div className={styles.headerActions}>
+          <div className={styles.statusBadge}>{note.badge}</div>
+          <Button type="submit" form="authored-recipe-form" size="lg" disabled={draftStatus === 'saving' || !draftReadyToSave}>
+            {draftStatus === 'saving' ? 'Saving draft…' : 'Save draft'}
+          </Button>
+        </div>
       </header>
 
-      <section className={styles.callout} aria-labelledby="workspace-approach-heading">
-        <div>
-          <p className={styles.calloutEyebrow}>Kitchen notebook</p>
-          <h2 id="workspace-approach-heading" className={styles.calloutTitle}>
-            Build the draft in passes, not all at once.
-          </h2>
-          <p className={styles.calloutText}>
-            Start with the plate, then move into ingredients, station rhythm, and hold guidance. This save seam stays
-            private to authored recipes and does not start a dinner plan.
-          </p>
-        </div>
-
-        <div className={styles.actions}>
-          <form className={styles.loadForm} onSubmit={handleLoadDraft}>
-            <Input
-              label="Reopen a saved draft"
-              placeholder="Paste a recipe draft ID"
-              value={loadRecipeId}
-              onChange={(event) => setLoadRecipeId(event.target.value)}
-            />
-            <Button type="submit" variant="secondary" disabled={draftStatus === 'loading' || !loadRecipeId.trim()}>
-              {draftStatus === 'loading' ? 'Opening…' : 'Open saved draft'}
-            </Button>
-          </form>
-          <div className={styles.routeGuide}>
-            <p className={styles.routeGuideLabel}>Where to go next</p>
-            <p className={styles.routeGuideText}>
-              Draft the dish here first, browse <span className={styles.routeGuideEmphasis}>Recipe Library</span> when it belongs on your shelf, and use <span className={styles.routeGuideEmphasis}>Plan a Dinner</span> only when service timing becomes the main job.
-            </p>
-            <div className={styles.routeGuideLinks}>
-              <Link to="/recipes" className={styles.secondaryLink}>
-                Browse the recipe shelf instead.
-              </Link>
-              <Link to="/sessions/new" className={styles.secondaryLink}>
-                Need to plan a full dinner instead?
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <form className={styles.workspace} onSubmit={handleSaveDraft}>
-        {error ? <div className={styles.error}>{error}</div> : null}
-        {saveGuidanceSummary ? (
-          <section className={styles.guidanceBanner} aria-labelledby="validation-guidance-heading">
-            <div>
-              <p className={styles.guidanceEyebrow}>Kitchen guidance</p>
-              <h2 id="validation-guidance-heading" className={styles.guidanceTitle}>
-                {saveGuidanceSummary}
-              </h2>
-              <p className={styles.guidanceText}>
-                The notes below stay aligned to the visible sections so you can fix the draft without reading backend
-                field names.
-              </p>
-            </div>
-            <div className={styles.guidanceColumns}>
-              {(Object.keys(sectionGuidance) as ValidationSectionKey[])
-                .filter((key) => sectionGuidance[key].length > 0)
-                .map((key) => (
-                  <div key={key} className={styles.guidanceColumn}>
-                    <h3 className={styles.guidanceColumnTitle}>{sectionTitles[key]}</h3>
-                    <ul className={styles.guidanceList}>
-                      {sectionGuidance[key].map((message) => (
-                        <li key={`${key}-${message}`}>{message}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className={styles.grid} aria-label="Authoring sections">
-          <AuthoringSectionCard
-            eyebrow="Foundation"
-            title="Name the dish and the feeling you want on the pass"
-            description="Anchor the plate first, then record the portions and ingredient set that define the draft."
-            prompt='"Tonight this should eat like…"'
-            aside="This section keeps identity, yield, and ingredient intent together so the draft opens with what the guest meets on the plate."
-            validationMessages={sectionGuidance.foundation}
-          >
-            <div className={styles.sectionBody}>
-              <Input
-                label="Dish title"
-                value={currentDraft.title}
-                onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))}
-                placeholder="Charred carrots with whipped feta"
-                error={fieldMessages(fieldGuidance, 'title')}
-              />
-              <Textarea
-                label="How would you describe the dish at the pass?"
-                value={currentDraft.description}
-                onChange={(event) => updateDraft((current) => ({ ...current, description: event.target.value }))}
-                placeholder="A warm vegetable course with smoke, acidity, and a cold dairy contrast."
-                rows={4}
-                error={fieldMessages(fieldGuidance, 'description')}
-              />
-              <div className={styles.inlineFields}>
-                <Input
-                  label="Cuisine or lens"
-                  value={currentDraft.cuisine}
-                  onChange={(event) => updateDraft((current) => ({ ...current, cuisine: event.target.value }))}
-                  placeholder="Levantine"
-                  error={fieldMessages(fieldGuidance, 'cuisine')}
-                />
-                <Input
-                  label="Yield"
-                  type="number"
-                  min={1}
-                  step="0.5"
-                  value={currentDraft.yield_info.quantity}
-                  onChange={(event) => updateYield('quantity', Number(event.target.value) || 0)}
-                  error={fieldMessages(fieldGuidance, 'yield_info')}
-                />
-                <Input
-                  label="Yield unit"
-                  value={currentDraft.yield_info.unit}
-                  onChange={(event) => updateYield('unit', event.target.value)}
-                  placeholder="plates"
-                  error={fieldMessages(fieldGuidance, 'yield_info')}
-                />
+      <div className={styles.workspaceShell}>
+        <form id="authored-recipe-form" className={styles.mainColumn} onSubmit={handleSaveDraft}>
+          {error ? <div className={styles.error}>{error}</div> : null}
+          {saveGuidanceSummary ? (
+            <section className={styles.guidanceBanner} aria-labelledby="validation-guidance-heading">
+              <div>
+                <p className={styles.guidanceEyebrow}>Kitchen guidance</p>
+                <h2 id="validation-guidance-heading" className={styles.guidanceTitle}>{saveGuidanceSummary}</h2>
               </div>
-              <Textarea
-                label="Yield note"
-                value={currentDraft.yield_info.notes ?? ''}
-                onChange={(event) => updateYield('notes', event.target.value || null)}
-                placeholder="One composed plate with generous garnish."
-                rows={2}
-              />
-              <div className={styles.listHeader}>
-                <h3 className={styles.listTitle}>Ingredient list</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={addIngredient}>
-                  Add ingredient
-                </Button>
-              </div>
-              <div className={styles.stack}>
-                {currentDraft.ingredients.map((ingredient, index) => (
-                  <div key={`ingredient-${index}`} className={styles.cardRow}>
-                    <div className={styles.inlineFields}>
-                      <Input
-                        label={`Ingredient ${index + 1}`}
-                        value={ingredient.name}
-                        onChange={(event) => updateIngredient(index, { name: event.target.value })}
-                        placeholder="carrots"
-                        error={fieldMessages(fieldGuidance, `ingredients.${index}.name`) || (index === 0 ? fieldMessages(fieldGuidance, 'ingredients') : undefined)}
-                      />
-                      <Input
-                        label="Quantity"
-                        value={ingredient.quantity}
-                        onChange={(event) => updateIngredient(index, { quantity: event.target.value })}
-                        placeholder="2 lb"
-                        error={fieldMessages(fieldGuidance, `ingredients.${index}.quantity`) || (index === 0 ? fieldMessages(fieldGuidance, 'ingredients') : undefined)}
-                      />
+              <div className={styles.guidanceColumns}>
+                {(Object.keys(sectionGuidance) as ValidationSectionKey[])
+                  .filter((key) => sectionGuidance[key].length > 0)
+                  .map((key) => (
+                    <div key={key} className={styles.guidanceColumn}>
+                      <h3 className={styles.guidanceColumnTitle}>{sectionTitles[key]}</h3>
+                      <ul className={styles.guidanceList}>
+                        {sectionGuidance[key].map((message) => <li key={`${key}-${message}`}>{message}</li>)}
+                      </ul>
                     </div>
-                    <div className={styles.inlineFields}>
-                      <Input
-                        label="Prep note"
-                        value={ingredient.preparation}
-                        onChange={(event) => updateIngredient(index, { preparation: event.target.value })}
-                        placeholder="scrubbed, halved lengthwise"
-                      />
-                      <Button type="button" variant="secondary" size="sm" onClick={() => removeIngredient(index)}>
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
               </div>
-            </div>
-          </AuthoringSectionCard>
+            </section>
+          ) : null}
 
-          <AuthoringSectionCard
-            eyebrow="Mise en place"
-            title="Sketch the prep rhythm before you worry about detail"
-            description="Lay out the working beats, then open one step at a time for timing, dependencies, and station needs."
-            prompt='"The work opens with…, then it tightens at…"'
-            aside="The page uses step cards instead of backend field labels so timing and dependency detail stays legible in kitchen language."
-            validationMessages={sectionGuidance.steps}
-          >
-            <div className={styles.sectionBody}>
-              <div className={styles.listHeader}>
-                <h3 className={styles.listTitle}>Working beats</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={addStep}>
-                  Add step
-                </Button>
+          <nav className={styles.tabNav} aria-label="Recipe draft sections">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`${styles.tabButton} ${activeTab === tab.id ? styles.tabButtonActive : ''} ${sectionGuidance[tab.id].length > 0 ? styles.tabButtonWarn : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          <section className={styles.editorSection}>
+            <header className={styles.sectionHeader}>
+              <div>
+                <h2 className={styles.sectionTitle}>{activeTabMeta.title}</h2>
+                <p className={styles.sectionText}>{activeTabMeta.description}</p>
               </div>
-              <div className={styles.stepRail}>
-                {currentDraft.steps.map((step, index) => (
-                  <button
-                    key={`step-tab-${index}`}
-                    type="button"
-                    className={`${styles.stepTab} ${index === activeStepIndex ? styles.stepTabActive : ''} ${
-                      sectionMessages(fieldGuidance, `steps.${index}`).length > 0 ? styles.stepTabError : ''
-                    }`}
-                    onClick={() => setActiveStepIndex(index)}
-                  >
-                    <span className={styles.stepTabEyebrow}>Step {index + 1}</span>
-                    <span className={styles.stepTabTitle}>{step.title.trim() || 'Untitled beat'}</span>
-                  </button>
-                ))}
-              </div>
-              {currentStep ? (
-                <div className={styles.stepEditor}>
-                  <div className={styles.inlineFields}>
-                    <Input
-                      label="Step title"
-                      value={currentStep.title}
-                      onChange={(event) => updateStep(activeStepIndex, { title: event.target.value })}
-                      placeholder="Roast carrots"
-                      error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.title`) || fieldMessages(fieldGuidance, 'steps')}
-                    />
-                    <Select
-                      label="Where does the work happen?"
-                      options={resourceOptions}
-                      value={currentStep.resource}
-                      onChange={(event) => updateStep(activeStepIndex, { resource: event.target.value as Resource })}
-                      error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.resource`)}
-                    />
+            </header>
+
+            {activeTab === 'foundation' ? (
+              <div className={styles.sectionStack}>
+                <section className={styles.sectionCard}>
+                  <div className={styles.sectionIntro}>
+                    <h3 className={styles.cardTitle}>Dish identity</h3>
+                    <p className={styles.cardText}>Start with what the guest meets on the plate.</p>
                   </div>
-                  <Textarea
-                    label="What happens in this beat?"
-                    value={currentStep.instruction}
-                    onChange={(event) => updateStep(activeStepIndex, { instruction: event.target.value })}
-                    placeholder="Roast until deeply caramelized and tender at the core."
-                    rows={4}
-                    error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.instruction`) || fieldMessages(fieldGuidance, 'steps')}
-                  />
-                  <div className={styles.inlineFields}>
-                    <Input
-                      label="Expected minutes"
-                      type="number"
-                      min={1}
-                      value={currentStep.duration_minutes}
-                      onChange={(event) => updateStep(activeStepIndex, { duration_minutes: Number(event.target.value) || 1 })}
-                    />
-                    <Input
-                      label="Outer edge if service drifts"
-                      type="number"
-                      min={currentStep.duration_minutes}
-                      value={currentStep.duration_max ?? ''}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        updateStep(activeStepIndex, { duration_max: next ? Number(next) : null });
-                      }}
-                      error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.duration_max`)}
-                    />
-                    <Input
-                      label="Equipment needed"
-                      value={currentStep.required_equipment.join(', ')}
-                      onChange={(event) =>
-                        updateStep(activeStepIndex, {
-                          required_equipment: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
-                        })
-                      }
-                      placeholder="sheet tray, offset spatula"
-                    />
+                  <Input label="Dish title" value={currentDraft.title} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Charred carrots with whipped feta" error={fieldMessages(fieldGuidance, 'title')} />
+                  <Textarea label="How should this dish eat at the pass?" value={currentDraft.description} onChange={(event) => updateDraft((current) => ({ ...current, description: event.target.value }))} placeholder="A warm vegetable course with smoke, acidity, and a cold dairy contrast." rows={4} error={fieldMessages(fieldGuidance, 'description')} />
+                  <div className={styles.inlineFieldsThree}>
+                    <Input label="Cuisine or lens" value={currentDraft.cuisine} onChange={(event) => updateDraft((current) => ({ ...current, cuisine: event.target.value }))} placeholder="Levantine" error={fieldMessages(fieldGuidance, 'cuisine')} />
+                    <Input label="Yield" type="number" min={1} step="0.5" value={currentDraft.yield_info.quantity} onChange={(event) => updateYield('quantity', Number(event.target.value) || 0)} error={fieldMessages(fieldGuidance, 'yield_info')} />
+                    <Input label="Yield unit" value={currentDraft.yield_info.unit} onChange={(event) => updateYield('unit', event.target.value)} placeholder="plates" error={fieldMessages(fieldGuidance, 'yield_info')} />
                   </div>
-                  <div className={styles.inlineFields}>
-                    <Input
-                      label="Until condition"
-                      value={currentStep.until_condition ?? ''}
-                      onChange={(event) => updateStep(activeStepIndex, { until_condition: event.target.value || null })}
-                      placeholder="Edges blistered, center yielding"
-                    />
-                    <Input
-                      label="Target internal temp"
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={currentStep.target_internal_temperature_f ?? ''}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        updateStep(activeStepIndex, {
-                          target_internal_temperature_f: next ? Number(next) : null,
-                        });
-                      }}
-                    />
-                    <Input
-                      label="Yield contribution"
-                      value={currentStep.yield_contribution ?? ''}
-                      onChange={(event) => updateStep(activeStepIndex, { yield_contribution: event.target.value || null })}
-                      placeholder="Main roasted component"
-                    />
+                  <Textarea label="Yield note" value={currentDraft.yield_info.notes ?? ''} onChange={(event) => updateYield('notes', event.target.value || null)} placeholder="One composed plate with generous garnish." rows={2} />
+                </section>
+
+                <section className={styles.sectionCard}>
+                  <div className={styles.sectionRowHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>Ingredients</h3>
+                      <p className={styles.cardText}>Capture the core ingredient set without turning this into a prep spreadsheet.</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={addIngredient}>Add ingredient</Button>
                   </div>
-                  <Textarea
-                    label="Chef note for this beat"
-                    value={currentStep.chef_notes ?? ''}
-                    onChange={(event) => updateStep(activeStepIndex, { chef_notes: event.target.value || null })}
-                    placeholder="Do not crowd the pan or you lose the char."
-                    rows={2}
-                  />
-                  <div className={styles.disclosure}>
-                    <label className={styles.checkboxRow}>
-                      <input
-                        type="checkbox"
-                        checked={currentStep.can_be_done_ahead}
-                        onChange={(event) =>
-                          updateStep(activeStepIndex, {
-                            can_be_done_ahead: event.target.checked,
-                            prep_ahead_window: event.target.checked ? currentStep.prep_ahead_window : null,
-                            prep_ahead_notes: event.target.checked ? currentStep.prep_ahead_notes : null,
-                          })
-                        }
-                      />
-                      <span>This beat can be handled ahead of service.</span>
-                    </label>
-                    {currentStep.can_be_done_ahead ? (
-                      <div className={styles.inlineFields}>
-                        <Input
-                          label="How far ahead?"
-                          value={currentStep.prep_ahead_window ?? ''}
-                          onChange={(event) =>
-                            updateStep(activeStepIndex, { prep_ahead_window: event.target.value || null })
-                          }
-                          placeholder="Up to 6 hours ahead"
-                          error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.prep_ahead_window`)}
-                        />
-                        <Input
-                          label="Recovery note"
-                          value={currentStep.prep_ahead_notes ?? ''}
-                          onChange={(event) =>
-                            updateStep(activeStepIndex, { prep_ahead_notes: event.target.value || null })
-                          }
-                          placeholder="Refresh with olive oil before plating"
-                          error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.prep_ahead_notes`)}
-                        />
+                  <div className={styles.listStack}>
+                    {currentDraft.ingredients.map((ingredient, index) => (
+                      <div key={`ingredient-${index}`} className={styles.inlineCard}>
+                        <div className={styles.inlineFieldsIngredient}>
+                          <Input label={`Ingredient ${index + 1}`} value={ingredient.name} onChange={(event) => updateIngredient(index, { name: event.target.value })} placeholder="carrots" error={fieldMessages(fieldGuidance, `ingredients.${index}.name`) || (index === 0 ? fieldMessages(fieldGuidance, 'ingredients') : undefined)} />
+                          <Input label="Quantity" value={ingredient.quantity} onChange={(event) => updateIngredient(index, { quantity: event.target.value })} placeholder="2 lb" error={fieldMessages(fieldGuidance, `ingredients.${index}.quantity`) || (index === 0 ? fieldMessages(fieldGuidance, 'ingredients') : undefined)} />
+                          <Input label="Prep note" value={ingredient.preparation} onChange={(event) => updateIngredient(index, { preparation: event.target.value })} placeholder="scrubbed, halved lengthwise" />
+                        </div>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => removeIngredient(index)}>Remove</Button>
                       </div>
-                    ) : null}
+                    ))}
                   </div>
-                  <div className={styles.dependencyPanel}>
-                    <div className={styles.listHeader}>
-                      <h4 className={styles.subTitle}>What must finish before this beat starts?</h4>
-                    </div>
-                    {dependencyOptions.length > 0 ? (
-                      <Select
-                        label="Add a dependency"
-                        options={[
-                          { value: '', label: 'Choose a prior beat' },
-                          ...dependencyOptions.map((option) => ({
-                            value: String(option.value),
-                            label: option.label,
-                          })),
-                        ]}
-                        value=""
-                        onChange={(event) => updateStepDependency(event.target.value)}
-                        error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.dependencies`) || fieldMessages(fieldGuidance, `steps.${activeStepIndex}.dependencies.0.step_id`)}
-                      />
-                    ) : (
-                      <p className={styles.helperText}>Add another beat to link the handoff.</p>
-                    )}
-                    <div className={styles.dependencyList}>
-                      {currentStep.dependencies.length > 0 ? (
-                        currentStep.dependencies.map((dependency, dependencyIndex) => {
-                          const dependencyLabel = dependencyLabelForStep(currentDraft.steps, dependency.step_id);
-                          const dependencyError = fieldMessages(
-                            fieldGuidance,
-                            `steps.${activeStepIndex}.dependencies.${dependencyIndex}.step_id`,
-                          );
+                </section>
+              </div>
+            ) : null}
 
+            {activeTab === 'steps' ? (
+              <div className={styles.sectionStack}>
+                <section className={styles.sectionCard}>
+                  <div className={styles.sectionRowHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>Working beats</h3>
+                      <p className={styles.cardText}>Keep the list scannable, then open one beat at a time for detail.</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={addStep}>Add beat</Button>
+                  </div>
+
+                  <div className={styles.stepRail}>
+                    {currentDraft.steps.map((step, index) => (
+                      <button
+                        key={`step-tab-${index}`}
+                        type="button"
+                        className={`${styles.stepTab} ${index === activeStepIndex ? styles.stepTabActive : ''} ${sectionMessages(fieldGuidance, `steps.${index}`).length > 0 ? styles.stepTabError : ''}`}
+                        onClick={() => setActiveStepIndex(index)}
+                      >
+                        <span className={styles.stepTabEyebrow}>Beat {index + 1}</span>
+                        <span className={styles.stepTabTitle}>{step.title.trim() || 'Untitled beat'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {currentStep ? (
+                  <section className={styles.sectionCard}>
+                    <div className={styles.sectionIntro}>
+                      <h3 className={styles.cardTitle}>Beat details</h3>
+                      <p className={styles.cardText}>Add only the timing and handoff detail this beat actually needs.</p>
+                    </div>
+                    <div className={styles.inlineFieldsStepTop}>
+                      <Input label="Step title" value={currentStep.title} onChange={(event) => updateStep(activeStepIndex, { title: event.target.value })} placeholder="Roast carrots" error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.title`) || fieldMessages(fieldGuidance, 'steps')} />
+                      <Select label="Where does the work happen?" options={resourceOptions} value={currentStep.resource} onChange={(event) => updateStep(activeStepIndex, { resource: event.target.value as Resource })} error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.resource`)} />
+                    </div>
+                    <Textarea label="What happens in this beat?" value={currentStep.instruction} onChange={(event) => updateStep(activeStepIndex, { instruction: event.target.value })} placeholder="Roast until deeply caramelized and tender at the core." rows={4} error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.instruction`) || fieldMessages(fieldGuidance, 'steps')} />
+                    <div className={styles.inlineFieldsThree}>
+                      <Input label="Expected minutes" type="number" min={1} value={currentStep.duration_minutes} onChange={(event) => updateStep(activeStepIndex, { duration_minutes: Number(event.target.value) || 1 })} />
+                      <Input label="Outer edge if service drifts" type="number" min={currentStep.duration_minutes} value={currentStep.duration_max ?? ''} onChange={(event) => updateStep(activeStepIndex, { duration_max: event.target.value ? Number(event.target.value) : null })} error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.duration_max`)} />
+                      <Input label="Until condition" value={currentStep.until_condition ?? ''} onChange={(event) => updateStep(activeStepIndex, { until_condition: event.target.value || null })} placeholder="Edges blistered, center yielding" />
+                    </div>
+                    <div className={styles.inlineFieldsThree}>
+                      <Input label="Equipment needed" value={currentStep.required_equipment.join(', ')} onChange={(event) => updateStep(activeStepIndex, { required_equipment: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="sheet tray, offset spatula" />
+                      <Input label="Target internal temp" type="number" min={1} max={500} value={currentStep.target_internal_temperature_f ?? ''} onChange={(event) => updateStep(activeStepIndex, { target_internal_temperature_f: event.target.value ? Number(event.target.value) : null })} />
+                      <Input label="Yield contribution" value={currentStep.yield_contribution ?? ''} onChange={(event) => updateStep(activeStepIndex, { yield_contribution: event.target.value || null })} placeholder="Main roasted component" />
+                    </div>
+                    <Textarea label="Chef note for this beat" value={currentStep.chef_notes ?? ''} onChange={(event) => updateStep(activeStepIndex, { chef_notes: event.target.value || null })} placeholder="Do not crowd the pan or you lose the char." rows={2} />
+                    <div className={styles.disclosureBlock}>
+                      <label className={styles.checkboxRow}>
+                        <input type="checkbox" checked={currentStep.can_be_done_ahead} onChange={(event) => updateStep(activeStepIndex, { can_be_done_ahead: event.target.checked, prep_ahead_window: event.target.checked ? currentStep.prep_ahead_window : null, prep_ahead_notes: event.target.checked ? currentStep.prep_ahead_notes : null })} />
+                        <span>This beat can be handled ahead of service.</span>
+                      </label>
+                      {currentStep.can_be_done_ahead ? (
+                        <div className={styles.inlineFieldsTwo}>
+                          <Input label="How far ahead?" value={currentStep.prep_ahead_window ?? ''} onChange={(event) => updateStep(activeStepIndex, { prep_ahead_window: event.target.value || null })} placeholder="Up to 6 hours ahead" error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.prep_ahead_window`)} />
+                          <Input label="Recovery note" value={currentStep.prep_ahead_notes ?? ''} onChange={(event) => updateStep(activeStepIndex, { prep_ahead_notes: event.target.value || null })} placeholder="Refresh with olive oil before plating" error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.prep_ahead_notes`)} />
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className={styles.dependencyPanel}>
+                      <div className={styles.sectionIntroCompact}>
+                        <h4 className={styles.subTitle}>Dependencies</h4>
+                        <p className={styles.cardText}>Only link the beats that truly gate this one.</p>
+                      </div>
+                      {dependencyOptions.length > 0 ? (
+                        <Select label="Add a dependency" options={[{ value: '', label: 'Choose a prior beat' }, ...dependencyOptions.map((option) => ({ value: String(option.value), label: option.label }))]} value="" onChange={(event) => updateStepDependency(event.target.value)} error={fieldMessages(fieldGuidance, `steps.${activeStepIndex}.dependencies`) || fieldMessages(fieldGuidance, `steps.${activeStepIndex}.dependencies.0.step_id`)} />
+                      ) : (
+                        <p className={styles.helperText}>Add another beat to link the handoff.</p>
+                      )}
+                      <div className={styles.dependencyList}>
+                        {currentStep.dependencies.length > 0 ? currentStep.dependencies.map((dependency, dependencyIndex) => {
+                          const dependencyLabel = dependencyLabelForStep(currentDraft.steps, dependency.step_id);
+                          const dependencyError = fieldMessages(fieldGuidance, `steps.${activeStepIndex}.dependencies.${dependencyIndex}.step_id`);
                           return (
                             <div key={`${dependency.step_id}-${dependencyIndex}`} className={styles.dependencyChipWrap}>
-                              <div
-                                className={`${styles.dependencyChip} ${dependencyError ? styles.dependencyChipError : ''}`}
-                              >
+                              <div className={`${styles.dependencyChip} ${dependencyError ? styles.dependencyChipError : ''}`}>
                                 <span>{dependencyLabel}</span>
-                                <button
-                                  type="button"
-                                  className={styles.inlineRemove}
-                                  onClick={() => removeDependency(activeStepIndex, dependency.step_id)}
-                                  aria-label={`Remove dependency ${dependencyLabel}`}
-                                >
-                                  ×
-                                </button>
+                                <button type="button" className={styles.inlineRemove} onClick={() => removeDependency(activeStepIndex, dependency.step_id)} aria-label={`Remove dependency ${dependencyLabel}`}>×</button>
                               </div>
                               {dependencyError ? <p className={styles.dependencyError}>{dependencyError}</p> : null}
                             </div>
                           );
-                        })
-                      ) : (
-                        <p className={styles.helperText}>This beat can currently open on its own.</p>
-                      )}
+                        }) : <p className={styles.helperText}>This beat can currently open on its own.</p>}
+                      </div>
                     </div>
-                  </div>
-                  <Button type="button" variant="secondary" size="sm" onClick={() => removeStep(activeStepIndex)}>
-                    Remove this step
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </AuthoringSectionCard>
 
-          <AuthoringSectionCard
-            eyebrow="Advance work"
-            title="Mark what can be made ahead without dulling the dish"
-            description="Capture holds, storage, reheating, and plating notes in layers so the page stays readable until you need the extra detail."
-            prompt='"Safe to hold if…, best refreshed by…"'
-            aside="Advance-work detail stays tucked behind a single reveal so the workspace feels like a notebook, not a raw contract dump."
-            validationMessages={sectionGuidance.advance}
-          >
-            <div className={styles.sectionBody}>
-              <label className={styles.checkboxRow}>
-                <input
-                  type="checkbox"
-                  checked={showAdvanceDetails}
-                  onChange={(event) => setShowAdvanceDetails(event.target.checked)}
-                />
-                <span>Open hold, storage, and recovery details.</span>
-              </label>
-              <Textarea
-                label="Make-ahead guidance"
-                value={currentDraft.make_ahead_guidance ?? ''}
-                onChange={(event) =>
-                  updateGuidance((current) => ({ ...current, make_ahead_guidance: event.target.value || null }))
-                }
-                placeholder="Roast the carrots in the afternoon, chill, then warm hard before service."
-                rows={3}
-                error={fieldMessages(fieldGuidance, 'make_ahead_guidance')}
-              />
-              {showAdvanceDetails ? (
-                <div className={styles.stack}>
-                  <div className={styles.cardRow}>
-                    <h3 className={styles.subTitle}>Storage</h3>
-                    <div className={styles.inlineFields}>
-                      <Input
-                        label="Method"
-                        value={currentDraft.storage?.method ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            storage: {
-                              method: event.target.value,
-                              duration: current.storage?.duration ?? '',
-                              notes: current.storage?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="Refrigerated"
-                      />
-                      <Input
-                        label="How long"
-                        value={currentDraft.storage?.duration ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            storage: {
-                              method: current.storage?.method ?? '',
-                              duration: event.target.value,
-                              notes: current.storage?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="2 days"
-                      />
+                    <div className={styles.sectionFooterRow}>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => removeStep(activeStepIndex)}>Remove this beat</Button>
                     </div>
-                    <Textarea
-                      label="Storage note"
-                      value={currentDraft.storage?.notes ?? ''}
-                      onChange={(event) =>
-                        updateGuidance((current) => ({
-                          ...current,
-                          storage: {
-                            method: current.storage?.method ?? '',
-                            duration: current.storage?.duration ?? '',
-                            notes: event.target.value || null,
-                          },
-                        }))
-                      }
-                      rows={2}
-                      placeholder="Store the yogurt separately so the garnish stays fresh."
-                    />
-                  </div>
-                  <div className={styles.cardRow}>
-                    <h3 className={styles.subTitle}>Hold at service</h3>
-                    <div className={styles.inlineFields}>
-                      <Input
-                        label="Method"
-                        value={currentDraft.hold?.method ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            hold: {
-                              method: event.target.value,
-                              max_duration: current.hold?.max_duration ?? '',
-                              notes: current.hold?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="Warming drawer"
-                      />
-                      <Input
-                        label="Longest safe hold"
-                        value={currentDraft.hold?.max_duration ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            hold: {
-                              method: current.hold?.method ?? '',
-                              max_duration: event.target.value,
-                              notes: current.hold?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="15 minutes"
-                      />
-                    </div>
-                    <Textarea
-                      label="Hold note"
-                      value={currentDraft.hold?.notes ?? ''}
-                      onChange={(event) =>
-                        updateGuidance((current) => ({
-                          ...current,
-                          hold: {
-                            method: current.hold?.method ?? '',
-                            max_duration: current.hold?.max_duration ?? '',
-                            notes: event.target.value || null,
-                          },
-                        }))
-                      }
-                      rows={2}
-                      placeholder="Do not cover tightly or the edges steam out."
-                    />
-                  </div>
-                  <div className={styles.cardRow}>
-                    <h3 className={styles.subTitle}>Recovery or reheat</h3>
-                    <div className={styles.inlineFields}>
-                      <Input
-                        label="Method"
-                        value={currentDraft.reheat?.method ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            reheat: {
-                              method: event.target.value,
-                              target: current.reheat?.target ?? null,
-                              notes: current.reheat?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="Hot oven"
-                      />
-                      <Input
-                        label="Target"
-                        value={currentDraft.reheat?.target ?? ''}
-                        onChange={(event) =>
-                          updateGuidance((current) => ({
-                            ...current,
-                            reheat: {
-                              method: current.reheat?.method ?? '',
-                              target: event.target.value || null,
-                              notes: current.reheat?.notes ?? null,
-                            },
-                          }))
-                        }
-                        placeholder="Hot through, edges re-crisped"
-                      />
-                    </div>
-                    <Textarea
-                      label="Recovery note"
-                      value={currentDraft.reheat?.notes ?? ''}
-                      onChange={(event) =>
-                        updateGuidance((current) => ({
-                          ...current,
-                          reheat: {
-                            method: current.reheat?.method ?? '',
-                            target: current.reheat?.target ?? null,
-                            notes: event.target.value || null,
-                          },
-                        }))
-                      }
-                      rows={2}
-                      placeholder="Brush with oil before reheating."
-                    />
-                  </div>
-                  <Textarea
-                    label="Plating note"
-                    value={currentDraft.plating_notes ?? ''}
-                    onChange={(event) => updateGuidance((current) => ({ ...current, plating_notes: event.target.value || null }))}
-                    placeholder="Swipe the feta first, then stack the carrots for height."
-                    rows={2}
-                  />
-                  <Textarea
-                    label="Whole-dish chef note"
-                    value={currentDraft.chef_notes ?? ''}
-                    onChange={(event) => updateGuidance((current) => ({ ...current, chef_notes: event.target.value || null }))}
-                    placeholder="Best when the yogurt stays very cold against the hot vegetables."
-                    rows={2}
-                  />
-                  <Textarea
-                    label="Equipment note"
-                    value={currentDraft.equipment_notes.join('\n')}
-                    onChange={(event) =>
-                      updateGuidance((current) => ({
-                        ...current,
-                        equipment_notes: event.target.value
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter(Boolean),
-                      }))
-                    }
-                    placeholder="Needs one full sheet tray.\nKeep a warm platter near the pass."
-                    rows={3}
-                  />
-                </div>
-              ) : (
-                <p className={styles.helperText}>Open the detail section when you want to record holds, storage, and recovery notes.</p>
-              )}
-            </div>
-          </AuthoringSectionCard>
-        </section>
+                  </section>
+                ) : null}
+              </div>
+            ) : null}
 
-        <section className={styles.footerNote} aria-labelledby="separation-heading">
-          <h2 id="separation-heading" className={styles.footerTitle}>
-            Keep authored drafting and menu planning in their own lanes.
-          </h2>
-          <p className={styles.footerText}>
-            Use <span className={styles.emphasis}>Plan a Dinner</span> when you are building service around a menu idea.
-            Use this workspace when you already have a dish in mind and want a private structured recipe draft, then move it to <span className={styles.emphasis}>Recipe Library</span> once it belongs on your shelf.
-          </p>
-          <div className={styles.footerActions}>
-            <Button type="submit" size="lg" disabled={draftStatus === 'saving' || !draftReadyToSave}>
-              {draftStatus === 'saving' ? 'Saving draft…' : 'Save private recipe draft'}
-            </Button>
-            <Link to="/recipes" className={styles.secondaryLink}>
-              Browse saved drafts in the library.
-            </Link>
-            <Link to="/sessions/new" className={styles.secondaryLink}>
-              Dinner planning stays in the separate planner.
-            </Link>
-          </div>
-        </section>
-      </form>
+            {activeTab === 'advance' ? (
+              <div className={styles.sectionStack}>
+                <section className={styles.sectionCard}>
+                  <div className={styles.sectionIntro}>
+                    <h3 className={styles.cardTitle}>Whole-dish guidance</h3>
+                    <p className={styles.cardText}>Use this only when the dish truly has make-ahead or recovery logic worth recording.</p>
+                  </div>
+                  <Textarea label="Make-ahead guidance" value={currentDraft.make_ahead_guidance ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, make_ahead_guidance: event.target.value || null }))} placeholder="Roast the carrots in the afternoon, chill, then warm hard before service." rows={3} error={fieldMessages(fieldGuidance, 'make_ahead_guidance')} />
+                  <label className={styles.checkboxRow}>
+                    <input type="checkbox" checked={showAdvanceDetails} onChange={(event) => setShowAdvanceDetails(event.target.checked)} />
+                    <span>Include detailed hold, storage, and recovery notes.</span>
+                  </label>
+                </section>
+
+                {showAdvanceDetails ? (
+                  <section className={styles.sectionCard}>
+                    <div className={styles.sectionStack}>
+                      <div className={styles.detailBlock}>
+                        <h3 className={styles.subTitle}>Storage</h3>
+                        <div className={styles.inlineFieldsTwo}>
+                          <Input label="Method" value={currentDraft.storage?.method ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, storage: { method: event.target.value, duration: current.storage?.duration ?? '', notes: current.storage?.notes ?? null } }))} placeholder="Refrigerated" />
+                          <Input label="How long" value={currentDraft.storage?.duration ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, storage: { method: current.storage?.method ?? '', duration: event.target.value, notes: current.storage?.notes ?? null } }))} placeholder="2 days" />
+                        </div>
+                        <Textarea label="Storage note" value={currentDraft.storage?.notes ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, storage: { method: current.storage?.method ?? '', duration: current.storage?.duration ?? '', notes: event.target.value || null } }))} rows={2} placeholder="Store the yogurt separately so the garnish stays fresh." />
+                      </div>
+
+                      <div className={styles.detailBlock}>
+                        <h3 className={styles.subTitle}>Hold at service</h3>
+                        <div className={styles.inlineFieldsTwo}>
+                          <Input label="Method" value={currentDraft.hold?.method ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, hold: { method: event.target.value, max_duration: current.hold?.max_duration ?? '', notes: current.hold?.notes ?? null } }))} placeholder="Warming drawer" />
+                          <Input label="Longest safe hold" value={currentDraft.hold?.max_duration ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, hold: { method: current.hold?.method ?? '', max_duration: event.target.value, notes: current.hold?.notes ?? null } }))} placeholder="15 minutes" />
+                        </div>
+                        <Textarea label="Hold note" value={currentDraft.hold?.notes ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, hold: { method: current.hold?.method ?? '', max_duration: current.hold?.max_duration ?? '', notes: event.target.value || null } }))} rows={2} placeholder="Do not cover tightly or the edges steam out." />
+                      </div>
+
+                      <div className={styles.detailBlock}>
+                        <h3 className={styles.subTitle}>Recovery or reheat</h3>
+                        <div className={styles.inlineFieldsTwo}>
+                          <Input label="Method" value={currentDraft.reheat?.method ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, reheat: { method: event.target.value, target: current.reheat?.target ?? null, notes: current.reheat?.notes ?? null } }))} placeholder="Hot oven" />
+                          <Input label="Target" value={currentDraft.reheat?.target ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, reheat: { method: current.reheat?.method ?? '', target: event.target.value || null, notes: current.reheat?.notes ?? null } }))} placeholder="Hot through, edges re-crisped" />
+                        </div>
+                        <Textarea label="Recovery note" value={currentDraft.reheat?.notes ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, reheat: { method: current.reheat?.method ?? '', target: current.reheat?.target ?? null, notes: event.target.value || null } }))} rows={2} placeholder="Brush with oil before reheating." />
+                      </div>
+
+                      <Textarea label="Plating note" value={currentDraft.plating_notes ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, plating_notes: event.target.value || null }))} placeholder="Swipe the feta first, then stack the carrots for height." rows={2} />
+                      <Textarea label="Whole-dish chef note" value={currentDraft.chef_notes ?? ''} onChange={(event) => updateGuidance((current) => ({ ...current, chef_notes: event.target.value || null }))} placeholder="Best when the yogurt stays very cold against the hot vegetables." rows={2} />
+                      <Textarea label="Equipment note" value={currentDraft.equipment_notes.join('\n')} onChange={(event) => updateGuidance((current) => ({ ...current, equipment_notes: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean) }))} placeholder="Needs one full sheet tray.\nKeep a warm platter near the pass." rows={3} />
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+
+          <footer className={styles.footerBar}>
+            <Button type="submit" size="lg" disabled={draftStatus === 'saving' || !draftReadyToSave}>{draftStatus === 'saving' ? 'Saving draft…' : 'Save private recipe draft'}</Button>
+            <Link to="/recipes" className={styles.secondaryLink}>Browse saved drafts</Link>
+            <span className={styles.footerHint}>Dinner planning stays in the separate planner.</span>
+          </footer>
+        </form>
+
+        <aside className={styles.sideRail}>
+          <section className={styles.railCard}>
+            <p className={styles.railEyebrow}>Draft status</p>
+            <h2 className={styles.railTitle}>{note.value}</h2>
+            <p className={styles.railText}>{note.text}</p>
+          </section>
+
+          <section className={styles.railCard}>
+            <p className={styles.railEyebrow}>Reopen a saved draft</p>
+            <form className={styles.loadForm} onSubmit={handleLoadDraft}>
+              <Input placeholder="Paste a recipe draft ID" value={loadRecipeId} onChange={(event) => setLoadRecipeId(event.target.value)} />
+              <Button type="submit" variant="secondary" disabled={draftStatus === 'loading' || !loadRecipeId.trim()}>{draftStatus === 'loading' ? 'Opening…' : 'Open saved draft'}</Button>
+            </form>
+          </section>
+
+          <section className={styles.railCard}>
+            <p className={styles.railEyebrow}>Current section</p>
+            <h2 className={styles.railTitle}>{activeTabMeta.title}</h2>
+            <p className={styles.railText}>{activeTabMeta.description}</p>
+          </section>
+
+          <section className={styles.railCard}>
+            <p className={styles.railEyebrow}>Where to go next</p>
+            <p className={styles.railText}>Draft the dish here first, browse <span className={styles.railEmphasis}>Recipe Library</span> when it belongs on your shelf, and use <span className={styles.railEmphasis}>Plan a Dinner</span> only when service timing becomes the main job.</p>
+            <div className={styles.railLinks}>
+              <Link to="/recipes" className={styles.secondaryLink}>Browse recipe shelf</Link>
+              <Link to="/sessions/new" className={styles.secondaryLink}>Plan a full dinner</Link>
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }
