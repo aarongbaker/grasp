@@ -1,11 +1,12 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCard } from '../SessionCard';
+import { RecipeCard } from '../RecipeCard';
 import { RecipePDF } from '../RecipePDF';
-import { getSessionConceptDisplay } from '../sessionConceptDisplay';
+import { getRecipeProvenanceDisplay, getSessionConceptDisplay } from '../sessionConceptDisplay';
 import { SessionDetailPage } from '../../../pages/SessionDetailPage';
-import type { DinnerConcept, Session, SessionResults } from '../../../types/api';
+import type { DinnerConcept, Session, SessionResults, ValidatedRecipe } from '../../../types/api';
 import * as sessionsApi from '../../../api/sessions';
 import * as sessionStatusHook from '../../../hooks/useSessionStatus';
 
@@ -24,6 +25,133 @@ vi.mock('@react-pdf/renderer', async () => {
     StyleSheet: { create: <T,>(styles: T) => styles },
   };
 });
+
+const plannerLibraryRecipe: ValidatedRecipe = {
+  source: {
+    source: {
+      name: 'Chicken Ballotine with Tarragon Jus',
+      description: 'A composed plated main with sauce and garnish.',
+      servings: 8,
+      cuisine: 'French',
+      estimated_total_minutes: 95,
+      ingredients: [
+        { name: 'Chicken', quantity: '1', preparation: 'deboned' },
+        { name: 'Tarragon', quantity: '2 tbsp', preparation: 'chopped' },
+      ],
+      steps: ['Roll and poach the ballotine.'],
+      provenance: {
+        kind: 'library_authored',
+        source_label: 'Chicken Ballotine with Tarragon Jus',
+        recipe_id: 'recipe-authored-1',
+        cookbook_id: null,
+      },
+    },
+    steps: [
+      {
+        step_id: 'step-1',
+        description: 'Roll, tie, and poach the chicken until just set.',
+        duration_minutes: 30,
+        duration_max: null,
+        depends_on: [],
+        resource: 'hands',
+        required_equipment: [],
+        can_be_done_ahead: false,
+        prep_ahead_window: null,
+        prep_ahead_notes: null,
+      },
+    ],
+    rag_sources: ['legacy-library-tag'],
+    chef_notes: 'Rest before slicing.',
+    techniques_used: ['Poaching'],
+  },
+  validated_at: '2026-03-27T00:20:00Z',
+  warnings: [],
+  passed: true,
+};
+
+const plannerGeneratedRecipe: ValidatedRecipe = {
+  source: {
+    source: {
+      name: 'Charred Leek Vinaigrette',
+      description: 'A sharp, warm accompaniment for the main course.',
+      servings: 8,
+      cuisine: 'French',
+      estimated_total_minutes: 20,
+      ingredients: [
+        { name: 'Leeks', quantity: '3', preparation: 'charred' },
+      ],
+      steps: ['Char and dress the leeks.'],
+      provenance: {
+        kind: 'generated',
+        source_label: null,
+        recipe_id: null,
+        cookbook_id: null,
+      },
+    },
+    steps: [
+      {
+        step_id: 'step-2',
+        description: 'Char the leeks and finish with vinaigrette.',
+        duration_minutes: 12,
+        duration_max: null,
+        depends_on: [],
+        resource: 'stovetop',
+        required_equipment: [],
+        can_be_done_ahead: false,
+        prep_ahead_window: null,
+        prep_ahead_notes: null,
+      },
+    ],
+    rag_sources: ['legacy-generated-noise'],
+    chef_notes: '',
+    techniques_used: [],
+  },
+  validated_at: '2026-03-27T00:20:00Z',
+  warnings: [],
+  passed: true,
+};
+
+const plannerCookbookRecipe: ValidatedRecipe = {
+  source: {
+    source: {
+      name: 'Rhubarb Galette',
+      description: 'A rustic dessert finished with vanilla cream.',
+      servings: 8,
+      cuisine: 'Seasonal pastry',
+      estimated_total_minutes: 55,
+      ingredients: [
+        { name: 'Rhubarb', quantity: '500 g', preparation: 'trimmed' },
+      ],
+      steps: ['Bake the galette.'],
+      provenance: {
+        kind: 'library_cookbook',
+        source_label: 'Spring Pastry',
+        recipe_id: null,
+        cookbook_id: 'cookbook-spring-pastry',
+      },
+    },
+    steps: [
+      {
+        step_id: 'step-3',
+        description: 'Bake until deeply golden and bubbling.',
+        duration_minutes: 40,
+        duration_max: null,
+        depends_on: [],
+        resource: 'oven',
+        required_equipment: [],
+        can_be_done_ahead: true,
+        prep_ahead_window: '2 hours',
+        prep_ahead_notes: 'Warm before serving.',
+      },
+    ],
+    rag_sources: [],
+    chef_notes: '',
+    techniques_used: ['Baking'],
+  },
+  validated_at: '2026-03-27T00:20:00Z',
+  warnings: [],
+  passed: true,
+};
 
 const menuSession: Session = {
   session_id: 'session-menu-intent',
@@ -139,7 +267,7 @@ const results: SessionResults = {
     summary: 'Dinner lands all at once.',
     error_summary: null,
   },
-  recipes: [],
+  recipes: [plannerLibraryRecipe, plannerGeneratedRecipe, plannerCookbookRecipe],
   errors: [],
 };
 
@@ -310,6 +438,23 @@ describe('session presentation', () => {
     });
   });
 
+  it('maps canonical recipe provenance without falling back to rag-source heuristics', () => {
+    expect(getRecipeProvenanceDisplay(plannerLibraryRecipe.source.source.provenance)).toEqual({
+      label: 'From your recipe library',
+      detail: 'Anchored to your saved recipe “Chicken Ballotine with Tarragon Jus”.',
+    });
+
+    expect(getRecipeProvenanceDisplay(plannerGeneratedRecipe.source.source.provenance)).toEqual({
+      label: 'Generated for this session',
+      detail: 'Composed by the planner to complete this service.',
+    });
+
+    expect(getRecipeProvenanceDisplay(plannerCookbookRecipe.source.source.provenance)).toEqual({
+      label: 'From your cookbook library',
+      detail: 'Recovered from the cookbook collection “Spring Pastry”.',
+    });
+  });
+
   it('renders generated-planner labels on dashboard cards', () => {
     render(
       <MemoryRouter>
@@ -332,6 +477,21 @@ describe('session presentation', () => {
     expect(screen.getByText('Authored recipe')).toBeInTheDocument();
     expect(screen.getByText('Chicken Ballotine with Tarragon Jus')).toBeInTheDocument();
     expect(screen.getByText('Browse Recipe Library · Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
+  });
+
+  it('renders canonical recipe provenance on cards instead of heuristic library tags', () => {
+    render(<RecipeCard recipe={plannerLibraryRecipe} />);
+
+    expect(screen.getByText('From your recipe library')).toBeInTheDocument();
+    expect(screen.getByText('Anchored to your saved recipe “Chicken Ballotine with Tarragon Jus”.')).toBeInTheDocument();
+    expect(screen.queryByText(/from library/i)).not.toBeInTheDocument();
+  });
+
+  it('renders cookbook provenance on cards from canonical provenance state', () => {
+    render(<RecipeCard recipe={plannerCookbookRecipe} />);
+
+    expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
+    expect(screen.getByText('Recovered from the cookbook collection “Spring Pastry”.')).toBeInTheDocument();
   });
 
   it('renders shared generated-planner metadata on the session detail page without changing tabs or status flow', async () => {
@@ -361,6 +521,20 @@ describe('session presentation', () => {
     await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(authoredSession.session_id));
   });
 
+  it('renders canonical per-recipe provenance in the session detail recipes tab', async () => {
+    renderDetailPage();
+
+    const recipesTab = await screen.findByRole('button', { name: 'Recipes (3)' });
+    await act(async () => {
+      recipesTab.click();
+    });
+
+    expect(await screen.findByText('From your recipe library')).toBeInTheDocument();
+    expect(screen.getByText('Anchored to your saved recipe “Chicken Ballotine with Tarragon Jus”.')).toBeInTheDocument();
+    expect(screen.getByText('Generated for this session')).toBeInTheDocument();
+    expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
+  });
+
   it('keeps the existing detail retry banner when result fetching fails while header metadata stays stable', async () => {
     vi.spyOn(sessionsApi, 'getSessionResults').mockRejectedValue(new Error('Results unavailable'));
 
@@ -373,13 +547,16 @@ describe('session presentation', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  it('uses generated-planner metadata in the PDF surface', () => {
+  it('uses generated-planner metadata and recipe provenance in the PDF surface', () => {
     render(<RecipePDF session={menuSession} results={results} />);
 
     expect(screen.getByText('Generated plan')).toBeInTheDocument();
     expect(screen.getByText('Plan a Dinner')).toBeInTheDocument();
     expect(screen.getByText('A rustic Italian dinner with handmade pasta and seasonal vegetables')).toBeInTheDocument();
     expect(screen.getByText('Built from a fresh dinner brief inside the dinner planner.')).toBeInTheDocument();
+    expect(screen.getByText('From your recipe library')).toBeInTheDocument();
+    expect(screen.getByText('Generated for this session')).toBeInTheDocument();
+    expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
   });
 
   it('uses authored metadata in the PDF surface', () => {
@@ -387,7 +564,7 @@ describe('session presentation', () => {
 
     expect(screen.getByText('Authored recipe')).toBeInTheDocument();
     expect(screen.getByText('Browse Recipe Library')).toBeInTheDocument();
-    expect(screen.getByText('Chicken Ballotine with Tarragon Jus')).toBeInTheDocument();
+    expect(screen.getAllByText('Chicken Ballotine with Tarragon Jus')).toHaveLength(2);
     expect(screen.getByText('Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
   });
 });

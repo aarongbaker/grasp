@@ -13,59 +13,57 @@ import {
   type ValidatedRecipe,
   type TimelineEntry,
 } from '../../types/api';
-import { getSessionConceptDisplay } from './sessionConceptDisplay';
+import { getSessionConceptDisplay, getValidatedRecipeProvenanceDisplay } from './sessionConceptDisplay';
 
-/* ------------------------------------------------------------------ */
-/* Font registration — react-pdf needs explicit .ttf URLs              */
-/* ------------------------------------------------------------------ */
 Font.register({
-  family: 'IBM Plex Sans',
+  family: 'Cormorant Garamond',
   fonts: [
-    { src: 'https://fonts.gstatic.com/s/ibmplexsans/v19/zYXgKVElMYYaJe8bpLHnCwDKhdHeFaxOedc.ttf', fontWeight: 400 },
-    { src: 'https://fonts.gstatic.com/s/ibmplexsans/v19/zYX9KVElMYYaJe8bpLHnCwDKjSL9AIFsdP3pBms.ttf', fontWeight: 500 },
-    { src: 'https://fonts.gstatic.com/s/ibmplexsans/v19/zYX9KVElMYYaJe8bpLHnCwDKjQ76AIFsdP3pBms.ttf', fontWeight: 600 },
-    { src: 'https://fonts.gstatic.com/s/ibmplexsans/v19/zYX9KVElMYYaJe8bpLHnCwDKjWr7AIFsdP3pBms.ttf', fontWeight: 700 },
+    { src: 'https://fonts.gstatic.com/s/cormorantgaramond/v19/co3bmX5slCNuHLi8bLeY9MK7whWMhyjYqXtKhdip.ttf', fontWeight: 400 },
+    { src: 'https://fonts.gstatic.com/s/cormorantgaramond/v19/co3ZmX5slCNuHLi8bLeY9MK7whWMhyjQAllvuQWJ5heb_w.ttf', fontWeight: 600 },
   ],
 });
 
 Font.register({
-  family: 'IBM Plex Mono',
+  family: 'DM Sans',
   fonts: [
-    { src: 'https://fonts.gstatic.com/s/ibmplexmono/v19/-F63fjptAgt5VM-kVkqdyU8n5igg1l9kn-s.ttf', fontWeight: 400 },
-    { src: 'https://fonts.gstatic.com/s/ibmplexmono/v19/-F6sfjptAgt5VM-kVkqdyU8n1ioSflV1gMoW.ttf', fontWeight: 500 },
+    { src: 'https://fonts.gstatic.com/s/dmsans/v15/rP2Hp2ywxg089UriCZOIHTWEBlw.ttf', fontWeight: 400 },
+    { src: 'https://fonts.gstatic.com/s/dmsans/v15/rP2Cp2ywxg089UriASitQKCWBl8.ttf', fontWeight: 500 },
+    { src: 'https://fonts.gstatic.com/s/dmsans/v15/rP2Cp2ywxg089UriAWCrQKCWBl8.ttf', fontWeight: 700 },
   ],
 });
 
-/* ------------------------------------------------------------------ */
-/* Color palette (matches tokens.css lab-notebook theme)               */
-/* ------------------------------------------------------------------ */
+Font.register({
+  family: 'JetBrains Mono',
+  fonts: [
+    { src: 'https://fonts.gstatic.com/s/jetbrainsmono/v23/tDbY2o-flEEny0FZhsfKuL7DqzI.ttf', fontWeight: 400 },
+    { src: 'https://fonts.gstatic.com/s/jetbrainsmono/v23/tDbf2o-flEEny0FZhsfKuL7DqzKp2LQ.ttf', fontWeight: 500 },
+  ],
+});
+
 const C = {
-  bgBase: '#0d1117',
-  bgSurface: '#161b22',
-  bgRaised: '#1c2128',
-  border: '#30363d',
-  textPrimary: '#e6edf3',
-  textSecondary: '#8b949e',
-  textMuted: '#484f58',
-  accent: '#58a6ff',
-  positive: '#56d364',
-  warning: '#d29922',
-  negative: '#f85149',
+  bgBase: '#1a1612',
+  bgSurface: '#231f1a',
+  bgRaised: '#2e2822',
+  border: '#3d3530',
+  textPrimary: '#f0e8dc',
+  textSecondary: '#9e8f80',
+  textMuted: '#5c5248',
+  accentPrimary: '#c9813a',
+  accentWarm: '#d4956a',
+  accentCool: '#6a8fa3',
+  warning: '#d4a24e',
 };
 
-/* ------------------------------------------------------------------ */
-/* PDF Styles                                                          */
-/* ------------------------------------------------------------------ */
 const s = StyleSheet.create({
   page: {
     backgroundColor: C.bgBase,
-    padding: 40,
-    fontFamily: 'IBM Plex Sans',
+    paddingTop: 36,
+    paddingHorizontal: 34,
+    paddingBottom: 40,
+    fontFamily: 'DM Sans',
     fontSize: 10,
     color: C.textPrimary,
   },
-
-  /* Header */
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -73,15 +71,14 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontFamily: 'IBM Plex Mono',
-    fontSize: 18,
+    fontFamily: 'Cormorant Garamond',
+    fontSize: 26,
     fontWeight: 600,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
     color: C.textPrimary,
+    letterSpacing: 0.4,
   },
   headerMeta: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     color: C.textMuted,
   },
@@ -89,13 +86,14 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.border,
     marginBottom: 16,
-    marginTop: 8,
+    marginTop: 6,
   },
   conceptText: {
-    fontSize: 10,
-    color: C.textSecondary,
+    fontFamily: 'Cormorant Garamond',
+    fontSize: 17,
+    color: C.textPrimary,
     marginBottom: 8,
-    lineHeight: 1.5,
+    lineHeight: 1.35,
   },
   conceptMetaRow: {
     flexDirection: 'row',
@@ -105,30 +103,34 @@ const s = StyleSheet.create({
     flexWrap: 'wrap',
   },
   conceptLabel: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 7,
-    color: C.accent,
+    color: C.accentWarm,
     backgroundColor: C.bgRaised,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#57483f',
     paddingHorizontal: 6,
     paddingVertical: 3,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 0.9,
   },
   conceptPathway: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     color: C.textMuted,
   },
   conceptSourceDetail: {
     fontSize: 9,
-    color: C.textMuted,
+    color: C.textSecondary,
     marginBottom: 16,
-    lineHeight: 1.5,
+    lineHeight: 1.55,
   },
   summaryBlock: {
     backgroundColor: C.bgSurface,
-    borderRadius: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
     padding: 12,
     marginBottom: 20,
   },
@@ -137,10 +139,8 @@ const s = StyleSheet.create({
     color: C.textPrimary,
     lineHeight: 1.6,
   },
-
-  /* Section */
   sectionLabel: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     fontWeight: 500,
     color: C.textMuted,
@@ -149,55 +149,77 @@ const s = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
-
-  /* Timeline */
   timelineRow: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
     borderBottomColor: C.border,
-    paddingVertical: 4,
+    paddingVertical: 5,
     alignItems: 'flex-start',
   },
   timelineTime: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 9,
-    color: C.accent,
+    color: C.accentWarm,
     width: 50,
   },
   timelineRecipe: {
     fontSize: 8,
-    fontWeight: 600,
+    fontWeight: 700,
     color: C.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    width: 100,
+    width: 104,
   },
   timelineAction: {
     fontSize: 9,
     color: C.textPrimary,
     flex: 1,
+    lineHeight: 1.45,
   },
   timelineResource: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 7,
     color: C.textMuted,
     width: 60,
     textAlign: 'right',
   },
   timelineDuration: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     color: C.textMuted,
     width: 45,
     textAlign: 'right',
   },
-
-  /* Recipe */
   recipeName: {
-    fontSize: 16,
+    fontFamily: 'Cormorant Garamond',
+    fontSize: 20,
     fontWeight: 600,
     color: C.textPrimary,
     marginBottom: 4,
+  },
+  provenanceRow: {
+    flexDirection: 'column',
+    gap: 4,
+    marginBottom: 8,
+  },
+  provenanceLabel: {
+    alignSelf: 'flex-start',
+    fontFamily: 'JetBrains Mono',
+    fontSize: 7,
+    color: C.accentWarm,
+    backgroundColor: C.bgRaised,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#57483f',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+  },
+  provenanceDetail: {
+    fontSize: 8,
+    color: C.textMuted,
+    lineHeight: 1.45,
   },
   recipeDescription: {
     fontSize: 9,
@@ -209,14 +231,13 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     marginBottom: 12,
+    flexWrap: 'wrap',
   },
   recipeMetaItem: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     color: C.textMuted,
   },
-
-  /* Ingredients */
   ingredientGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -227,9 +248,9 @@ const s = StyleSheet.create({
     paddingVertical: 2,
   },
   ingredientQty: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
-    color: C.accent,
+    color: C.accentWarm,
     width: 70,
   },
   ingredientName: {
@@ -237,8 +258,6 @@ const s = StyleSheet.create({
     color: C.textPrimary,
     flex: 1,
   },
-
-  /* Steps */
   stepRow: {
     flexDirection: 'row',
     paddingVertical: 4,
@@ -247,7 +266,7 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
   },
   stepNum: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 8,
     color: C.textMuted,
     width: 20,
@@ -259,18 +278,16 @@ const s = StyleSheet.create({
     lineHeight: 1.5,
   },
   stepMeta: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 7,
     color: C.textMuted,
     width: 80,
     textAlign: 'right',
   },
-
-  /* Chef notes */
   chefNotes: {
     backgroundColor: C.bgSurface,
     borderLeftWidth: 2,
-    borderLeftColor: C.accent,
+    borderLeftColor: C.accentPrimary,
     borderRadius: 4,
     padding: 10,
     marginTop: 8,
@@ -280,8 +297,6 @@ const s = StyleSheet.create({
     color: C.textSecondary,
     lineHeight: 1.6,
   },
-
-  /* Techniques */
   techniqueRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -289,41 +304,34 @@ const s = StyleSheet.create({
     marginTop: 6,
   },
   techniquePill: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 7,
-    color: C.accent,
+    color: C.accentWarm,
     backgroundColor: C.bgRaised,
-    borderRadius: 2,
+    borderRadius: 999,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-
-  /* Warnings */
   warningText: {
     fontSize: 8,
     color: C.warning,
     paddingVertical: 2,
   },
-
-  /* Footer */
   footer: {
     position: 'absolute',
-    bottom: 24,
-    left: 40,
-    right: 40,
+    bottom: 22,
+    left: 34,
+    right: 34,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   footerText: {
-    fontFamily: 'IBM Plex Mono',
+    fontFamily: 'JetBrains Mono',
     fontSize: 7,
     color: C.textMuted,
   },
 });
 
-/* ------------------------------------------------------------------ */
-/* Helper: format duration                                             */
-/* ------------------------------------------------------------------ */
 function fmtDuration(min: number, max: number | null): string {
   if (max && max !== min) return `${min}–${max}m`;
   return `${min}m`;
@@ -337,9 +345,6 @@ function fmtTotalDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-/* ------------------------------------------------------------------ */
-/* Timeline Section                                                    */
-/* ------------------------------------------------------------------ */
 function TimelineSection({ label, entries }: { label: string; entries: TimelineEntry[] }) {
   if (entries.length === 0) return null;
   return (
@@ -358,15 +363,17 @@ function TimelineSection({ label, entries }: { label: string; entries: TimelineE
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Recipe Section                                                      */
-/* ------------------------------------------------------------------ */
 function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
   const raw = recipe.source.source;
   const enriched = recipe.source;
+  const provenance = getValidatedRecipeProvenanceDisplay(recipe);
 
   return (
     <View break>
+      <View style={s.provenanceRow}>
+        <Text style={s.provenanceLabel}>{provenance.label}</Text>
+        <Text style={s.provenanceDetail}>{provenance.detail}</Text>
+      </View>
       <Text style={s.recipeName}>{raw.name}</Text>
       <Text style={s.recipeDescription}>{raw.description}</Text>
 
@@ -377,7 +384,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
         <Text style={s.recipeMetaItem}>{raw.ingredients.length} ingredients</Text>
       </View>
 
-      {/* Ingredients */}
       <Text style={s.sectionLabel}>Ingredients</Text>
       <View style={s.ingredientGrid}>
         {raw.ingredients.map((ing, i) => (
@@ -390,7 +396,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
         ))}
       </View>
 
-      {/* Steps */}
       <Text style={s.sectionLabel}>Steps</Text>
       {enriched.steps.map((step, i) => (
         <View key={step.step_id} style={s.stepRow} wrap={false}>
@@ -402,7 +407,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
         </View>
       ))}
 
-      {/* Chef Notes */}
       {enriched.chef_notes ? (
         <View style={s.chefNotes} wrap={false}>
           <Text style={s.sectionLabel}>Chef Notes</Text>
@@ -410,7 +414,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
         </View>
       ) : null}
 
-      {/* Techniques */}
       {enriched.techniques_used.length > 0 ? (
         <View wrap={false}>
           <Text style={s.sectionLabel}>Techniques</Text>
@@ -422,7 +425,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
         </View>
       ) : null}
 
-      {/* Warnings */}
       {recipe.warnings.length > 0 ? (
         <View wrap={false}>
           <Text style={s.sectionLabel}>Validation Notes</Text>
@@ -435,9 +437,6 @@ function RecipeSection({ recipe }: { recipe: ValidatedRecipe }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Main PDF Document                                                   */
-/* ------------------------------------------------------------------ */
 export interface RecipePDFProps {
   session: Session;
   results: SessionResults;
@@ -446,7 +445,6 @@ export interface RecipePDFProps {
 export function RecipePDF({ session, results }: RecipePDFProps) {
   const schedule = results.schedule;
   const conceptDisplay = getSessionConceptDisplay(session.concept_json);
-  // Combine timeline with any legacy prep_ahead_entries (backwards compat with old session data)
   const allEntries = (() => {
     const legacyPrepAhead = schedule.prep_ahead_entries ?? [];
     if (legacyPrepAhead.length > 0) {
@@ -461,10 +459,9 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
 
   return (
     <Document>
-      {/* Page 1: Header + Schedule */}
       <Page size="A4" style={s.page}>
         <View style={s.headerRow}>
-          <Text style={s.title}>GRASP</Text>
+          <Text style={s.title}>grasp</Text>
           <Text style={s.headerMeta}>
             {date} · {fmtTotalDuration(schedule.total_duration_minutes)} · {results.recipes.length} recipes
           </Text>
@@ -487,12 +484,11 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
         <TimelineSection label="Timeline" entries={allEntries} />
 
         <View style={s.footer} fixed>
-          <Text style={s.footerText}>Generated by GRASP</Text>
+          <Text style={s.footerText}>Generated by grasp</Text>
           <Text style={s.footerText} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
         </View>
       </Page>
 
-      {/* Recipe Pages */}
       <Page size="A4" style={s.page} wrap>
         <Text style={s.sectionLabel}>Recipes</Text>
         <View style={s.divider} />
@@ -501,7 +497,7 @@ export function RecipePDF({ session, results }: RecipePDFProps) {
         ))}
 
         <View style={s.footer} fixed>
-          <Text style={s.footerText}>Generated by GRASP</Text>
+          <Text style={s.footerText}>Generated by grasp</Text>
           <Text style={s.footerText} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
         </View>
       </Page>

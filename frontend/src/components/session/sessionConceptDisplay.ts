@@ -1,5 +1,5 @@
 import { pathwayByKey } from '../layout/pathways';
-import type { DinnerConcept } from '../../types/api';
+import type { DinnerConcept, RecipeProvenance, ValidatedRecipe } from '../../types/api';
 
 export interface SessionConceptDisplayModel {
   title: string;
@@ -7,6 +7,11 @@ export interface SessionConceptDisplayModel {
   pathwayLabel: string;
   sourceLabel: string;
   sourceDetail: string;
+}
+
+export interface RecipeProvenanceDisplayModel {
+  label: string;
+  detail: string;
 }
 
 function cleanText(value: string | null | undefined): string | null {
@@ -25,6 +30,49 @@ function getPlannerAuthoredAnchorTitle(concept: DinnerConcept): string | null {
 
 function getPlannerCookbookTargetTitle(concept: DinnerConcept): string | null {
   return cleanText(concept.planner_cookbook_target?.name);
+}
+
+function getProvenanceLabel(kind: RecipeProvenance['kind']): string {
+  switch (kind) {
+    case 'library_authored':
+      return 'From your recipe library';
+    case 'library_cookbook':
+      return 'From your cookbook library';
+    case 'generated':
+    default:
+      return 'Generated for this session';
+  }
+}
+
+export function getRecipeProvenanceDisplay(provenance: RecipeProvenance): RecipeProvenanceDisplayModel {
+  const sourceLabel = cleanText(provenance.source_label);
+
+  if (provenance.kind === 'library_authored') {
+    return {
+      label: getProvenanceLabel(provenance.kind),
+      detail: sourceLabel
+        ? `Anchored to your saved recipe “${sourceLabel}”.`
+        : 'Anchored to a saved recipe from your private library.',
+    };
+  }
+
+  if (provenance.kind === 'library_cookbook') {
+    return {
+      label: getProvenanceLabel(provenance.kind),
+      detail: sourceLabel
+        ? `Recovered from the cookbook collection “${sourceLabel}”.`
+        : 'Recovered from one of your cookbook collections.',
+    };
+  }
+
+  return {
+    label: getProvenanceLabel(provenance.kind),
+    detail: 'Composed by the planner to complete this service.',
+  };
+}
+
+export function getValidatedRecipeProvenanceDisplay(recipe: ValidatedRecipe): RecipeProvenanceDisplayModel {
+  return getRecipeProvenanceDisplay(recipe.source.source.provenance);
 }
 
 export function getSessionConceptDisplay(concept: DinnerConcept): SessionConceptDisplayModel {

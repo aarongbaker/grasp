@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ChevronDownIcon, ChevronUpIcon, BookOpenIcon, AlertTriangleIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronUpIcon, AlertTriangleIcon } from 'lucide-react';
 import { RESOURCE_LABELS, type Resource, type ValidatedRecipe } from '../../types/api';
+import { getValidatedRecipeProvenanceDisplay } from './sessionConceptDisplay';
 import styles from './RecipeCard.module.css';
 
 const RESOURCE_STYLE: Record<Resource, string> = {
@@ -14,6 +15,7 @@ export function RecipeCard({ recipe }: { recipe: ValidatedRecipe }) {
   const [expanded, setExpanded] = useState(false);
   const raw = recipe.source.source;
   const enriched = recipe.source;
+  const provenance = getValidatedRecipeProvenanceDisplay(recipe);
 
   return (
     <div className={styles.card}>
@@ -23,6 +25,10 @@ export function RecipeCard({ recipe }: { recipe: ValidatedRecipe }) {
       >
         <div className={styles.headerTop}>
           <div className={styles.headerContent}>
+            <div className={styles.provenanceBlock}>
+              <span className={styles.provenanceLabel}>{provenance.label}</span>
+              <span className={styles.provenanceDetail}>{provenance.detail}</span>
+            </div>
             <h3 className={styles.recipeName}>{raw.name}</h3>
             <p className={styles.description}>{raw.description}</p>
             <div className={styles.headerMeta}>
@@ -30,11 +36,6 @@ export function RecipeCard({ recipe }: { recipe: ValidatedRecipe }) {
               <span className={styles.metaPill}>{raw.servings} servings</span>
               <span className={styles.metaPill}>{raw.ingredients.length} ingredients</span>
               <span className={styles.metaPill}>{enriched.steps.length} steps</span>
-              {enriched.rag_sources.length > 0 && (
-                <span className={styles.ragTag}>
-                  <BookOpenIcon size={10} /> from library
-                </span>
-              )}
             </div>
           </div>
           {expanded
