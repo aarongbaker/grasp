@@ -28,7 +28,7 @@ from app.models.authored_recipe import (
     build_authored_step_id,
 )
 from app.models.enums import Resource
-from app.models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeStep
+from app.models.recipe import EnrichedRecipe, Ingredient, RawRecipe, RecipeProvenance, RecipeStep
 
 # ── Step IDs ─────────────────────────────────────────────────────────────────
 # Defined as constants so schedules.py can import them instead of using magic strings.

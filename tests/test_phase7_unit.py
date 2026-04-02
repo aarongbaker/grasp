@@ -37,6 +37,7 @@ from app.graph.nodes.renderer import (
     schedule_renderer_node,
 )
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
+from app.models.recipe import RecipeProvenance
 from app.models.enums import ErrorType, MealType, Occasion, Resource
 from app.models.pipeline import (
     DinnerConcept,
@@ -254,6 +255,12 @@ class TestCookbookGeneratorSeeding:
         assert raw_recipe["name"] == "Roast Chicken with Bread Salad"
         assert raw_recipe["servings"] == 4
         assert raw_recipe["cuisine"] == "Cookbook: The French Laundry Cookbook"
+        assert raw_recipe["provenance"] == {
+            "kind": "library_cookbook",
+            "source_label": "The French Laundry Cookbook",
+            "recipe_id": None,
+            "cookbook_id": str(COOKBOOK_CONCEPT_DICT["selected_recipes"][0]["book_id"]),
+        }
         assert len(raw_recipe["ingredients"]) == 3
         assert len(raw_recipe["steps"]) == 3
         assert raw_recipe["steps"][0].startswith("Season the chicken")
@@ -342,6 +349,12 @@ class TestAuthoredGeneratorSeeding:
         assert raw_recipe["name"] == AUTHORED_BRAISED_CHICKEN.title
         assert raw_recipe["servings"] == 4
         assert raw_recipe["cuisine"] == AUTHORED_BRAISED_CHICKEN.cuisine
+        assert raw_recipe["provenance"] == {
+            "kind": "library_authored",
+            "source_label": AUTHORED_BRAISED_CHICKEN.title,
+            "recipe_id": str(_AUTHORED_RECIPE_ID),
+            "cookbook_id": None,
+        }
         assert raw_recipe["estimated_total_minutes"] == 72
         assert raw_recipe["ingredients"][0]["name"] == "chicken leg quarters"
         assert raw_recipe["steps"][0].startswith("Brown the chicken. Sear skin-side down")
@@ -389,6 +402,12 @@ class TestAuthoredGeneratorSeeding:
 
         assert len(recipes) == 1
         assert recipes[0].name == AUTHORED_BRAISED_CHICKEN.title
+        assert recipes[0].provenance == RecipeProvenance(
+            kind="library_authored",
+            source_label=AUTHORED_BRAISED_CHICKEN.title,
+            recipe_id=str(_AUTHORED_RECIPE_ID),
+            cookbook_id=None,
+        )
         assert recipes[0].estimated_total_minutes == 72
 
 
@@ -402,6 +421,12 @@ class TestPlannerAuthoredGeneratorSeeding:
 
         assert len(recipes) == 1
         assert recipes[0].name == AUTHORED_BRAISED_CHICKEN.title
+        assert recipes[0].provenance == RecipeProvenance(
+            kind="library_authored",
+            source_label=AUTHORED_BRAISED_CHICKEN.title,
+            recipe_id=str(_AUTHORED_RECIPE_ID),
+            cookbook_id=None,
+        )
         assert recipes[0].estimated_total_minutes == 72
 
     @pytest.mark.asyncio
@@ -441,7 +466,14 @@ class TestPlannerAuthoredGeneratorSeeding:
         assert len(result["raw_recipes"]) == expected_complements + 1
         anchor_recipe = result["raw_recipes"][0]
         assert anchor_recipe["name"] == AUTHORED_BRAISED_CHICKEN.title
+        assert anchor_recipe["provenance"] == {
+            "kind": "library_authored",
+            "source_label": AUTHORED_BRAISED_CHICKEN.title,
+            "recipe_id": str(_AUTHORED_RECIPE_ID),
+            "cookbook_id": None,
+        }
         assert all(recipe["name"] == "Charred Chicory Salad" for recipe in result["raw_recipes"][1:])
+        assert all(recipe["provenance"]["kind"] == "generated" for recipe in result["raw_recipes"][1:])
         assert result["token_usage"] == [{"node_name": "recipe_generator", "input_tokens": 101, "output_tokens": 202}]
 
         mock_llm.with_structured_output.assert_called_once_with(RecipeGenerationOutput)
@@ -525,6 +557,20 @@ class TestPlannerCookbookGeneratorSeeding:
         create_llm.assert_not_called()
         assert "errors" not in result
         assert [recipe["name"] for recipe in result["raw_recipes"]] == ["Olive Oil Cake", "Braised Fennel"]
+        assert [recipe["provenance"] for recipe in result["raw_recipes"]] == [
+            {
+                "kind": "library_authored",
+                "source_label": "Olive Oil Cake",
+                "recipe_id": str(older_id),
+                "cookbook_id": str(_PLANNER_COOKBOOK_ID),
+            },
+            {
+                "kind": "library_authored",
+                "source_label": "Braised Fennel",
+                "recipe_id": str(newer_id),
+                "cookbook_id": str(_PLANNER_COOKBOOK_ID),
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_planner_cookbook_biased_seeds_cookbook_recipes_then_generates_missing_complements(self):
@@ -578,7 +624,22 @@ class TestPlannerCookbookGeneratorSeeding:
 
         assert "errors" not in result
         assert [recipe["name"] for recipe in result["raw_recipes"][:2]] == ["Braised Fennel", "Olive Oil Cake"]
+        assert [recipe["provenance"] for recipe in result["raw_recipes"][:2]] == [
+            {
+                "kind": "library_authored",
+                "source_label": "Braised Fennel",
+                "recipe_id": str(seeded_records[0].recipe_id),
+                "cookbook_id": str(_PLANNER_COOKBOOK_ID),
+            },
+            {
+                "kind": "library_authored",
+                "source_label": "Olive Oil Cake",
+                "recipe_id": str(seeded_records[1].recipe_id),
+                "cookbook_id": str(_PLANNER_COOKBOOK_ID),
+            },
+        ]
         assert all(recipe["name"] == "Charred Chicory Salad" for recipe in result["raw_recipes"][2:])
+        assert all(recipe["provenance"]["kind"] == "generated" for recipe in result["raw_recipes"][2:])
         assert len(result["raw_recipes"]) == len(seeded_records) + expected_complements
         assert result["token_usage"] == [{"node_name": "recipe_generator", "input_tokens": 111, "output_tokens": 222}]
         mock_llm.with_structured_output.assert_called_once_with(RecipeGenerationOutput)

@@ -292,6 +292,13 @@ export interface RecipeStep {
   prep_ahead_notes: string | null;
 }
 
+export interface RecipeProvenance {
+  kind: 'generated' | 'library_authored' | 'library_cookbook';
+  source_label: string | null;
+  recipe_id: string | null;
+  cookbook_id: string | null;
+}
+
 export interface RawRecipe {
   name: string;
   description: string;
@@ -300,6 +307,7 @@ export interface RawRecipe {
   estimated_total_minutes: number;
   ingredients: Ingredient[];
   steps: string[];
+  provenance: RecipeProvenance;
 }
 
 export interface EnrichedRecipe {

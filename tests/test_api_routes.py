@@ -22,10 +22,12 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
+from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
 from app.models.user import KitchenConfig, UserProfile
+from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test app + fixtures
@@ -1033,6 +1035,95 @@ async def test_get_session_status_requires_ownership(app_with_overrides, mock_db
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Access denied"
+
+
+async def test_get_session_results_fast_path_returns_persisted_provenance(app_with_overrides, mock_db, test_user):
+    validated_recipe = {
+        "source": {
+            **ENRICHED_SHORT_RIBS.model_dump(mode="json"),
+            "source": {
+                **ENRICHED_SHORT_RIBS.source.model_dump(mode="json"),
+                "provenance": {
+                    "kind": "library_authored",
+                    "source_label": "Sunday Braise",
+                    "recipe_id": str(uuid.uuid4()),
+                    "cookbook_id": str(uuid.uuid4()),
+                },
+            },
+            "rag_sources": ["chunk_001"],
+        },
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+        "passed": True,
+    }
+    session = Session(
+        user_id=test_user.user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={},
+        result_schedule={"summary": "Ready", "timeline": [], "total_duration_minutes": 10, "error_summary": None},
+        result_recipes=[validated_recipe],
+    )
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/sessions/{session.session_id}/results")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["errors"] == []
+    assert data["recipes"][0]["source"]["source"]["provenance"] == validated_recipe["source"]["source"]["provenance"]
+    assert data["recipes"][0]["source"]["rag_sources"] == ["chunk_001"]
+
+
+async def test_get_session_results_fallback_returns_checkpoint_provenance(app_with_overrides, mock_db, test_user):
+    generated_recipe_id = str(uuid.uuid4())
+    session = Session(
+        user_id=test_user.user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={},
+        result_schedule=None,
+        result_recipes=None,
+    )
+    mock_db.seed(Session, session.session_id, session)
+
+    checkpoint_recipe = {
+        "source": {
+            **ENRICHED_SHORT_RIBS.model_dump(mode="json"),
+            "source": {
+                **ENRICHED_SHORT_RIBS.source.model_dump(mode="json"),
+                "provenance": {
+                    "kind": "library_cookbook",
+                    "source_label": "Market Suppers",
+                    "recipe_id": None,
+                    "cookbook_id": generated_recipe_id,
+                },
+            },
+            "rag_sources": [],
+        },
+        "validated_at": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+        "passed": True,
+    }
+    mock_snapshot = MagicMock()
+    mock_snapshot.values = {
+        "schedule": {"summary": "Ready", "timeline": [], "total_duration_minutes": 10, "error_summary": None},
+        "validated_recipes": [checkpoint_recipe],
+        "errors": [{"node_name": "validator", "message": "kept for parity", "recoverable": True}],
+    }
+    mock_graph = AsyncMock()
+    mock_graph.aget_state.return_value = mock_snapshot
+
+    with patch("app.main.get_graph", new=AsyncMock(return_value=mock_graph)):
+        transport = ASGITransport(app=app_with_overrides)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.get(f"/api/v1/sessions/{session.session_id}/results")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["recipes"][0]["source"]["source"]["provenance"] == checkpoint_recipe["source"]["source"]["provenance"]
+    assert data["recipes"][0]["source"]["rag_sources"] == []
+    assert data["errors"] == [{"node_name": "validator", "message": "kept for parity", "recoverable": True}]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

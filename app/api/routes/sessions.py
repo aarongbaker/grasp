@@ -39,7 +39,9 @@ from app.models.pipeline import (
     PlannerReferenceResolutionResponse,
     PlannerResolutionMatchStatus,
 )
+from app.models.recipe import ValidatedRecipe
 from app.models.session import Session
+from app.models.scheduling import NaturalLanguageSchedule
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
@@ -373,9 +375,11 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
 
     # Fast path: read from persisted columns (populated by finalise_session)
     if session.result_schedule and session.result_recipes is not None:
+        persisted_schedule = NaturalLanguageSchedule.model_validate(session.result_schedule)
+        persisted_recipes = [ValidatedRecipe.model_validate(recipe) for recipe in session.result_recipes]
         return {
-            "schedule": session.result_schedule,
-            "recipes": session.result_recipes,
+            "schedule": persisted_schedule.model_dump(mode="json"),
+            "recipes": [recipe.model_dump(mode="json") for recipe in persisted_recipes],
             "errors": [],
         }
 
@@ -393,9 +397,6 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
 
     if not state:
         raise HTTPException(status_code=502, detail="Checkpoint state is empty")
-
-    from app.models.recipe import ValidatedRecipe
-    from app.models.scheduling import NaturalLanguageSchedule
 
     schedule_dict = state.get("schedule")
     if not schedule_dict:

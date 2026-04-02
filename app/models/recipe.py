@@ -17,7 +17,7 @@ heads_up cues use duration_max as the buffer ceiling.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -65,6 +65,15 @@ class RecipeStep(BaseModel):
         return v
 
 
+class RecipeProvenance(BaseModel):
+    """Canonical per-recipe origin carried through runtime, persistence, and result reads."""
+
+    kind: Literal["generated", "library_authored", "library_cookbook"]
+    source_label: Optional[str] = None
+    recipe_id: Optional[str] = None
+    cookbook_id: Optional[str] = None
+
+
 class RawRecipe(BaseModel):
     """Generator output. Steps are flat strings — no timing or resource tags yet."""
 
@@ -75,6 +84,7 @@ class RawRecipe(BaseModel):
     estimated_total_minutes: int
     ingredients: list[Ingredient]
     steps: list[str]  # flat strings — EnrichedRecipe converts to RecipeStep
+    provenance: RecipeProvenance = RecipeProvenance(kind="generated")
 
 
 class EnrichedRecipe(BaseModel):

@@ -54,7 +54,7 @@ from app.models.pipeline import (
     SelectedAuthoredRecipe,
     SelectedCookbookRecipe,
 )
-from app.models.recipe import Ingredient, RawRecipe
+from app.models.recipe import Ingredient, RawRecipe, RecipeProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +364,11 @@ def _build_cookbook_raw_recipe(selection: SelectedCookbookRecipe, guest_count: i
         estimated_total_minutes=_estimate_minutes(len(steps)),
         ingredients=ingredients,
         steps=steps,
+        provenance=RecipeProvenance(
+            kind="library_cookbook",
+            source_label=selection.book_title,
+            cookbook_id=str(selection.book_id),
+        ),
     )
 
 
@@ -430,6 +435,12 @@ async def _compile_authored_raw_recipe_from_record(
         ) from exc
 
     raw_recipe = authored.compile_raw_recipe()
+    raw_recipe.provenance = RecipeProvenance(
+        kind="library_authored",
+        source_label=record.title,
+        recipe_id=str(record.recipe_id),
+        cookbook_id=str(record.cookbook_id) if record.cookbook_id else None,
+    )
     if raw_recipe.name != selection.title:
         logger.warning(
             "Authored selection title drift detected for recipe %s: session title=%r db title=%r compiled title=%r",
