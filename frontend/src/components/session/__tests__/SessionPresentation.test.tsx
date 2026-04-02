@@ -437,7 +437,6 @@ describe('session presentation', () => {
       sourceDetail: 'Built from the authored-recipe path. The saved title was missing, so the planning note is shown instead.',
     });
   });
-
   it('maps canonical recipe provenance without falling back to rag-source heuristics', () => {
     expect(getRecipeProvenanceDisplay(plannerLibraryRecipe.source.source.provenance)).toEqual({
       label: 'From your recipe library',
@@ -455,6 +454,25 @@ describe('session presentation', () => {
     });
   });
 
+  it('keeps planner session labeling separate from per-dish provenance in the assembled authored-anchor story', () => {
+    expect(getSessionConceptDisplay(plannerAuthoredAnchorSession.concept_json)).toEqual({
+      title: 'Chicken Ballotine with Tarragon Jus',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner recipe anchor',
+      sourceDetail: 'Built from the dinner planner using one saved recipe as the anchor for a broader service plan.',
+    });
+
+    expect(getRecipeProvenanceDisplay(plannerLibraryRecipe.source.source.provenance)).toEqual({
+      label: 'From your recipe library',
+      detail: 'Anchored to your saved recipe “Chicken Ballotine with Tarragon Jus”.',
+    });
+
+    expect(getRecipeProvenanceDisplay(plannerGeneratedRecipe.source.source.provenance)).toEqual({
+      label: 'Generated for this session',
+      detail: 'Composed by the planner to complete this service.',
+    });
+  });
   it('renders generated-planner labels on dashboard cards', () => {
     render(
       <MemoryRouter>

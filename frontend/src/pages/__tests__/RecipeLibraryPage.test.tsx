@@ -230,15 +230,15 @@ describe('RecipeLibraryPage', () => {
     expect(screen.getByText('Marinated peppers')).toBeInTheDocument();
   });
 
-  it('creates and runs an authored session before navigating to the session detail', async () => {
+  it('keeps direct shelf scheduling on the legacy authored payload shape for the chicken piccata story', async () => {
     const user = userEvent.setup();
     vi.spyOn(recipeCookbooksApi, 'listRecipeCookbooks').mockResolvedValue([]);
     vi.spyOn(authoredRecipesApi, 'listAuthoredRecipes').mockResolvedValue([
       {
-        recipe_id: 'recipe-2',
+        recipe_id: 'recipe-piccata',
         user_id: 'user-1',
-        title: 'Marinated peppers',
-        cuisine: 'Spanish',
+        title: 'Chicken Piccata',
+        cuisine: 'Italian-American',
         cookbook_id: null,
         cookbook: null,
         created_at: '2026-04-01T00:00:00Z',
@@ -250,7 +250,7 @@ describe('RecipeLibraryPage', () => {
       user_id: 'user-1',
       status: 'pending',
       concept_json: {
-        free_text: 'Schedule authored recipe: Marinated peppers',
+        free_text: 'Schedule authored recipe: Chicken Piccata',
         guest_count: 4,
         meal_type: 'dinner',
         occasion: 'dinner_party',
@@ -281,10 +281,10 @@ describe('RecipeLibraryPage', () => {
     const request = createSessionSpy.mock.calls[0]?.[0];
     expect(request).toEqual({
       concept_source: 'authored',
-      free_text: 'Schedule authored recipe: Marinated peppers',
+      free_text: 'Schedule authored recipe: Chicken Piccata',
       selected_authored_recipe: {
-        recipe_id: 'recipe-2',
-        title: 'Marinated peppers',
+        recipe_id: 'recipe-piccata',
+        title: 'Chicken Piccata',
       },
       guest_count: 4,
       meal_type: 'dinner',

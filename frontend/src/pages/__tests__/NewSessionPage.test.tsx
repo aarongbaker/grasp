@@ -52,21 +52,6 @@ function renderPage() {
   );
 }
 
-function resolvedAuthoredResponse(): PlannerReferenceResolutionResponse {
-  return {
-    kind: 'authored',
-    reference: 'sunday braise',
-    status: 'resolved',
-    matches: [
-      {
-        kind: 'authored',
-        recipe_id: 'recipe-1',
-        title: 'Sunday Braise',
-      },
-    ],
-  };
-}
-
 function ambiguousCookbookResponse(): PlannerReferenceResolutionResponse {
   return {
     kind: 'cookbook',
@@ -127,7 +112,7 @@ describe('NewSessionPage', () => {
     expect(screen.getByText(/Resolve one owned recipe title inline so no-match, ambiguity, and retry states stay visible/i)).toBeInTheDocument();
   });
 
-  it('submits a free-text planner request and navigates to the session detail page', async () => {
+  it('keeps the literal free-text planner story on the plain planner payload lane', async () => {
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
     const runPipelineSpy = vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
       session_id: 'session-123',
@@ -137,13 +122,13 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
-    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Around my chicken piccata');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     await waitFor(() =>
       expect(createSessionSpy).toHaveBeenCalledWith({
         concept_source: 'free_text',
-        free_text: 'A bright spring dinner',
+        free_text: 'Around my chicken piccata',
         guest_count: 4,
         meal_type: 'dinner',
         occasion: 'dinner_party',
@@ -151,6 +136,8 @@ describe('NewSessionPage', () => {
         serving_time: undefined,
       }),
     );
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_authored_recipe_anchor');
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_cookbook_target');
     expect(runPipelineSpy).toHaveBeenCalledWith('session-123');
     expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123');
   });
@@ -204,7 +191,109 @@ describe('NewSessionPage', () => {
     expect(createSessionSpy).not.toHaveBeenCalled();
   });
 
-  it('blocks ambiguous cookbook matches until an explicit choice and mode are selected, then posts canonical ids', async () => {
+  it('keeps the literal cookbook-target planner story on the cookbook-target payload lane', async () => {
+    vi.spyOn(sessionsApi, 'resolvePlannerReference').mockResolvedValue({
+      kind: 'cookbook',
+      reference: 'vegetarian cookbook',
+      status: 'resolved',
+      matches: [
+        {
+          kind: 'cookbook',
+          cookbook_id: 'cookbook-vegetarian',
+          name: 'Vegetarian Cookbook',
+          description: 'Lunches, mains, and sides built from vegetables.',
+        },
+      ],
+    });
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Vegetarian lunch from my vegetarian cookbook');
+    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'cookbook');
+    await userEvent.type(screen.getByLabelText('Cookbook reference'), 'Vegetarian Cookbook');
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByText('Vegetarian Cookbook')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Cookbook planning mode'), 'cookbook_biased');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'planner_cookbook_target',
+        free_text: 'Vegetarian lunch from my vegetarian cookbook',
+        planner_cookbook_target: {
+          cookbook_id: 'cookbook-vegetarian',
+          name: 'Vegetarian Cookbook',
+          mode: 'cookbook_biased',
+        },
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: undefined,
+      }),
+    );
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('selected_authored_recipe');
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_authored_recipe_anchor');
+  });
+
+  it('keeps the literal authored-anchor planner story on the planner-authored payload lane', async () => {
+    vi.spyOn(sessionsApi, 'resolvePlannerReference').mockResolvedValue({
+      kind: 'authored',
+      reference: 'chicken piccata',
+      status: 'resolved',
+      matches: [
+        {
+          kind: 'authored',
+          recipe_id: 'recipe-piccata',
+          title: 'Chicken Piccata',
+        },
+      ],
+    });
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Around my chicken piccata');
+    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
+    await userEvent.type(screen.getByLabelText('Saved recipe reference'), 'Chicken Piccata');
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByText('Chicken Piccata')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith({
+        concept_source: 'planner_authored_anchor',
+        free_text: 'Around my chicken piccata',
+        planner_authored_recipe_anchor: {
+          recipe_id: 'recipe-piccata',
+          title: 'Chicken Piccata',
+        },
+        guest_count: 4,
+        meal_type: 'dinner',
+        occasion: 'dinner_party',
+        dietary_restrictions: [],
+        serving_time: undefined,
+      }),
+    );
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('selected_authored_recipe');
+  });
+
+
+  it('still blocks ambiguous cookbook matches before any planner-created cookbook session can post', async () => {
     vi.spyOn(sessionsApi, 'resolvePlannerReference').mockResolvedValue(ambiguousCookbookResponse());
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
     vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
@@ -241,63 +330,6 @@ describe('NewSessionPage', () => {
       screen.getByText(/The planner remains blocked until you pick one mode, so the target cookbook guidance is explicit before session creation\./i),
     ).toBeInTheDocument();
     expect(createSessionSpy).not.toHaveBeenCalled();
-
-    await userEvent.selectOptions(screen.getByLabelText('Cookbook planning mode'), 'cookbook_biased');
-    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
-
-    await waitFor(() =>
-      expect(createSessionSpy).toHaveBeenCalledWith({
-        concept_source: 'planner_cookbook_target',
-        free_text: 'A plated dessert tasting',
-        planner_cookbook_target: {
-          cookbook_id: 'cookbook-1',
-          name: 'Desserts',
-          mode: 'cookbook_biased',
-        },
-        guest_count: 4,
-        meal_type: 'dinner',
-        occasion: 'dinner_party',
-        dietary_restrictions: [],
-        serving_time: undefined,
-      }),
-    );
-  });
-
-  it('submits a resolved authored anchor with the canonical owned recipe match', async () => {
-    vi.spyOn(sessionsApi, 'resolvePlannerReference').mockResolvedValue(resolvedAuthoredResponse());
-    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
-    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
-      session_id: 'session-123',
-      status: 'generating',
-      message: 'Pipeline enqueued',
-    });
-
-    renderPage();
-
-    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build service around a braise');
-    await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
-    await userEvent.type(screen.getByLabelText('Saved recipe reference'), 'Sunday Braise');
-    await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
-
-    expect(await screen.findByText('Sunday Braise')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
-
-    await waitFor(() =>
-      expect(createSessionSpy).toHaveBeenCalledWith({
-        concept_source: 'planner_authored_anchor',
-        free_text: 'Build service around a braise',
-        planner_authored_recipe_anchor: {
-          recipe_id: 'recipe-1',
-          title: 'Sunday Braise',
-        },
-        guest_count: 4,
-        meal_type: 'dinner',
-        occasion: 'dinner_party',
-        dietary_restrictions: [],
-        serving_time: undefined,
-      }),
-    );
   });
 
   it('surfaces planner resolution API failures inline while preserving the form', async () => {
