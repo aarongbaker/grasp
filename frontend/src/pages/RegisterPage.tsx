@@ -11,6 +11,7 @@ export function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [maxBurners, setMaxBurners] = useState(4);
   const [maxOvenRacks, setMaxOvenRacks] = useState(2);
   const [error, setError] = useState('');
@@ -35,6 +36,7 @@ export function RegisterPage() {
         password,
         max_burners: maxBurners,
         max_oven_racks: maxOvenRacks,
+        ...(inviteCode.trim() && { invite_code: inviteCode.trim() }),
       });
       const res = await login(email, password);
       const payload = JSON.parse(atob(res.access_token.split('.')[1]));
@@ -84,6 +86,12 @@ export function RegisterPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={8}
+          />
+          <Input
+            label="Invite code"
+            placeholder="Invite code (if required)"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
           />
           <Input
             label="Stovetop burners"

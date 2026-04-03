@@ -72,6 +72,7 @@ export interface CreateUserRequest {
   max_oven_racks?: number;
   has_second_oven?: boolean;
   dietary_defaults?: string[];
+  invite_code?: string;
 }
 
 export interface KitchenConfig {
