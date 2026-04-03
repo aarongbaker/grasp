@@ -13,7 +13,7 @@ import uuid
 from typing import Optional
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -76,4 +76,21 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    return user
+
+
+def is_admin_user(user: UserProfile) -> bool:
+    """Return whether the authenticated user matches the configured admin identity."""
+    settings = get_settings()
+    admin_email = settings.admin_email.strip().lower()
+    return bool(admin_email) and user.email.strip().lower() == admin_email
+
+
+def ensure_admin_user(user: UserProfile) -> UserProfile:
+    """Require the authenticated caller to match the configured admin email."""
+    if not is_admin_user(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
     return user

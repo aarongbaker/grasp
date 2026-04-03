@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # Phase 3 test flag
     simulate_interrupt: str = ""
 
+    # Invite-gated registration
+    invite_codes_enabled: bool = False
+    admin_email: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

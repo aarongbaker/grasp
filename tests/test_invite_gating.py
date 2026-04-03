@@ -1,0 +1,245 @@
+"""tests/test_invite_gating.py
+Tests for invite-gated registration and admin-issued invite consumption.
+"""
+
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from httpx import ASGITransport, AsyncClient
+from slowapi.errors import RateLimitExceeded
+from sqlmodel import select
+
+from app.api.routes.admin import router as admin_router
+from app.api.routes.auth import _build_access_token
+from app.api.routes.users import router as users_router
+from app.core.settings import Settings
+from app.db.session import get_session
+from app.models.invite import Invite
+from app.models.user import UserProfile
+
+
+@pytest.fixture
+def invite_contract_settings(admin_user):
+    return Settings(invite_codes_enabled=True, admin_email=admin_user.email)
+
+
+def _create_invite_app(test_db_session, include_admin: bool = True) -> FastAPI:
+    app = FastAPI()
+    app.include_router(users_router, prefix="/api/v1")
+    if include_admin:
+        app.include_router(admin_router, prefix="/api/v1")
+    app.state.limiter = MagicMock()
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(status_code=429, content={"detail": f"Rate limit exceeded: {exc.detail}"})
+
+    async def override_db():
+        yield test_db_session
+
+    app.dependency_overrides[get_session] = override_db
+    return app
+
+
+@pytest_asyncio.fixture
+async def admin_user(test_db_session):
+    email = f"admin-{uuid.uuid4()}@example.com"
+    user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Admin User",
+        email=email,
+        rag_owner_key=UserProfile.build_rag_owner_key(email),
+        password_hash="admin-hash",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+    return user
+
+
+@pytest.fixture
+def invite_app(test_db_session):
+    return _create_invite_app(test_db_session)
+
+
+@pytest_asyncio.fixture
+async def valid_invite(test_db_session):
+    invite = Invite(code="VALID-CODE-123", email="invited@example.com")
+    test_db_session.add(invite)
+    await test_db_session.commit()
+    await test_db_session.refresh(invite)
+    return invite
+
+
+@pytest_asyncio.fixture
+async def claimed_invite(test_db_session):
+    invite = Invite(
+        code="CLAIMED-CODE-123",
+        email="claimed@example.com",
+        claimed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    test_db_session.add(invite)
+    await test_db_session.commit()
+    await test_db_session.refresh(invite)
+    return invite
+
+
+@pytest_asyncio.fixture
+async def client(invite_app, invite_contract_settings):
+    transport = ASGITransport(app=invite_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        with patch("app.api.routes.users.get_settings", return_value=invite_contract_settings), patch(
+            "app.core.auth.get_settings", return_value=invite_contract_settings
+        ):
+            yield async_client
+    invite_app.dependency_overrides.clear()
+
+
+def _access_token_for(user: UserProfile, settings: Settings) -> str:
+    token, _expires_in = _build_access_token(str(user.user_id), user.email, settings)
+    return token
+
+
+@pytest.mark.asyncio
+async def test_valid_invite_flow(client, test_db_session, valid_invite):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Invited User",
+            "email": valid_invite.email,
+            "password": "strongpassword123",
+            "invite_code": valid_invite.code,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["email"] == valid_invite.email
+
+    result = await test_db_session.exec(select(UserProfile).where(UserProfile.email == valid_invite.email))
+    assert result.first() is not None
+
+    result = await test_db_session.exec(select(Invite).where(Invite.code == valid_invite.code))
+    invite = result.first()
+    assert invite.claimed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_issued_invite_can_be_consumed_by_registration(client, test_db_session, admin_user, invite_contract_settings):
+    issue_response = await client.post(
+        "/api/v1/admin/invites",
+        headers={"Authorization": f"Bearer {_access_token_for(admin_user, invite_contract_settings)}"},
+        json={"email": "issued@example.com"},
+    )
+
+    assert issue_response.status_code == 201, issue_response.text
+    invite_payload = issue_response.json()
+    invite_code = invite_payload["code"]
+    assert invite_payload["email"] == "issued@example.com"
+
+    register_response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Issued User",
+            "email": "issued@example.com",
+            "password": "strongpassword123",
+            "invite_code": invite_code,
+        },
+    )
+
+    assert register_response.status_code == 201, register_response.text
+    data = register_response.json()
+    assert data["email"] == "issued@example.com"
+
+    invite_result = await test_db_session.exec(select(Invite).where(Invite.code == invite_code))
+    invite = invite_result.first()
+    assert invite is not None
+    assert invite.email == "issued@example.com"
+    assert invite.claimed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_missing_invite_code_when_gating_enabled(client):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "No Invite",
+            "email": "noinvite@example.com",
+            "password": "strongpassword123",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invite code is required"
+
+
+@pytest.mark.asyncio
+async def test_invalid_invite_code(client):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Bad Invite",
+            "email": "badinvite@example.com",
+            "password": "strongpassword123",
+            "invite_code": "NONEXISTENT-CODE",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid invite code" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_already_claimed_invite(client, claimed_invite):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Claimed Invite",
+            "email": claimed_invite.email,
+            "password": "strongpassword123",
+            "invite_code": claimed_invite.code,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invite code has already been used"
+
+
+@pytest.mark.asyncio
+async def test_email_mismatch(client, valid_invite):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Mismatch",
+            "email": "different@example.com",
+            "password": "strongpassword123",
+            "invite_code": valid_invite.code,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invite code does not match email address"
+
+
+@pytest.mark.asyncio
+async def test_invite_gating_disabled(test_db_session):
+    app = _create_invite_app(test_db_session, include_admin=False)
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("app.api.routes.users.get_settings", return_value=Settings(invite_codes_enabled=False)):
+            response = await client.post(
+                "/api/v1/users",
+                json={
+                    "name": "No Gate",
+                    "email": "nogate@example.com",
+                    "password": "strongpassword123",
+                },
+            )
+
+    assert response.status_code == 201, response.text
+    app.dependency_overrides.clear()

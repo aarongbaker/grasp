@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import bcrypt
 from fastapi import APIRouter, HTTPException
@@ -11,7 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.core.settings import get_settings
 from app.models.enums import EquipmentCategory
+from app.models.invite import Invite
 from app.models.user import Equipment, KitchenConfig, UserProfile
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class CreateUserRequest(BaseModel):
     max_oven_racks: int = Field(default=2, ge=1, le=6)
     has_second_oven: bool = False
     dietary_defaults: list[str] = []
+    invite_code: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -64,6 +67,27 @@ class EquipmentRequest(BaseModel):
 @router.post("", status_code=201, response_model=UserResponse)
 async def create_user(body: CreateUserRequest, db: DBSession):
     email = body.email.strip().lower()
+    settings = get_settings()
+
+    # Invite validation if invite gating is enabled
+    if settings.invite_codes_enabled:
+        if not body.invite_code:
+            raise HTTPException(status_code=400, detail="Invite code is required")
+
+        invite_result = await db.exec(select(Invite).where(Invite.code == body.invite_code))
+        invite = invite_result.first()
+
+        if not invite:
+            raise HTTPException(status_code=400, detail="Invalid invite code")
+
+        if invite.claimed_at is not None:
+            raise HTTPException(status_code=400, detail="Invite code has already been used")
+
+        if invite.email.strip().lower() != email:
+            raise HTTPException(status_code=400, detail="Invite code does not match email address")
+
+        invite.claimed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.add(invite)
 
     # Check for duplicate email before attempting insert
     existing = await db.exec(select(UserProfile).where(UserProfile.email == email))
