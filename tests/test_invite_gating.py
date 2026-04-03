@@ -3,7 +3,7 @@ Tests for invite-gated registration and admin-issued invite consumption.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -89,6 +89,19 @@ async def claimed_invite(test_db_session):
 
 
 @pytest_asyncio.fixture
+async def expired_invite(test_db_session):
+    invite = Invite(
+        code="EXPIRED-CODE-123",
+        email="expired@example.com",
+        expires_at=(datetime.now(timezone.utc) - timedelta(days=1)).replace(tzinfo=None),
+    )
+    test_db_session.add(invite)
+    await test_db_session.commit()
+    await test_db_session.refresh(invite)
+    return invite
+
+
+@pytest_asyncio.fixture
 async def client(invite_app, invite_contract_settings):
     transport = ASGITransport(app=invite_app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
@@ -140,6 +153,7 @@ async def test_admin_issued_invite_can_be_consumed_by_registration(client, test_
     invite_payload = issue_response.json()
     invite_code = invite_payload["code"]
     assert invite_payload["email"] == "issued@example.com"
+    assert invite_payload["expires_at"]
 
     register_response = await client.post(
         "/api/v1/users",
@@ -207,6 +221,22 @@ async def test_already_claimed_invite(client, claimed_invite):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invite code has already been used"
+
+
+@pytest.mark.asyncio
+async def test_expired_invite(client, expired_invite):
+    response = await client.post(
+        "/api/v1/users",
+        json={
+            "name": "Expired Invite",
+            "email": expired_invite.email,
+            "password": "strongpassword123",
+            "invite_code": expired_invite.code,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invite code has expired"
 
 
 @pytest.mark.asyncio

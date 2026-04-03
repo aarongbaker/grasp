@@ -99,12 +99,14 @@ async def test_admin_can_issue_invite_and_persist_email(admin_invite_app, admin_
     assert payload["code"]
     assert payload["claimed_at"] is None
     assert payload["created_at"]
+    assert payload["expires_at"]
 
     result = await test_db_session.exec(select(Invite).where(Invite.code == payload["code"]))
     invite = result.first()
     assert invite is not None
     assert invite.email == "guest@example.com"
     assert invite.claimed_at is None
+    assert invite.expires_at > invite.created_at
 
 
 @pytest.mark.asyncio

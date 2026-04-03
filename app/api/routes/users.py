@@ -83,10 +83,14 @@ async def create_user(body: CreateUserRequest, db: DBSession):
         if invite.claimed_at is not None:
             raise HTTPException(status_code=400, detail="Invite code has already been used")
 
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if invite.expires_at <= now:
+            raise HTTPException(status_code=400, detail="Invite code has expired")
+
         if invite.email.strip().lower() != email:
             raise HTTPException(status_code=400, detail="Invite code does not match email address")
 
-        invite.claimed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        invite.claimed_at = now
         db.add(invite)
 
     # Check for duplicate email before attempting insert

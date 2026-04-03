@@ -2,7 +2,7 @@
 
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 from pydantic import BaseModel, EmailStr
@@ -24,6 +24,7 @@ class InviteResponse(BaseModel):
     email: str
     claimed_at: datetime | None = None
     created_at: datetime
+    expires_at: datetime
 
 
 def _generate_invite_code() -> str:
@@ -40,6 +41,7 @@ async def create_invite(body: CreateInviteRequest, db: DBSession, current_user: 
         code=_generate_invite_code(),
         email=body.email,
         created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).replace(tzinfo=None),
     )
     db.add(invite)
     await db.commit()
