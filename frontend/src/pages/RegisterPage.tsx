@@ -89,7 +89,7 @@ export function RegisterPage() {
           />
           <Input
             label="Invite code"
-            placeholder="Invite code (if required)"
+            placeholder="Invite code"
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
           />
