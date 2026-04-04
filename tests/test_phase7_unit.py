@@ -868,6 +868,81 @@ class TestBuildTimeline:
             assert built.recipe_name == fixture.recipe_name
 
 
+class TestMergedPrepRendering:
+    def test_merged_prep_rendering(self):
+        """Merged prep step shows allocation breakdown in action text."""
+        merged_step = ScheduledStep(
+            step_id="merged_celery_diced_1",
+            recipe_name="[merged]",
+            description="Prep 4 cups diced celery",
+            resource=Resource.HANDS,
+            duration_minutes=8,
+            start_at_minute=0,
+            end_at_minute=8,
+            merged_from=["short_ribs_prep_celery", "risotto_prep_celery"],
+            allocation={
+                "Braised Short Ribs": "3 cups",
+                "Risotto": "1 cup",
+            },
+        )
+        entry = _build_timeline_entry(merged_step)
+        assert entry.action == "Prep 4 cups diced celery (3 cups for Braised Short Ribs, 1 cup for Risotto)"
+        assert entry.step_id == "merged_celery_diced_1"
+        assert entry.recipe_name == "[merged]"
+
+    def test_non_merged_step_unchanged(self):
+        """Non-merged step description remains unchanged."""
+        regular_step = ScheduledStep(
+            step_id="short_ribs_sear_1",
+            recipe_name="Braised Short Ribs",
+            description="Sear the short ribs until deeply browned",
+            resource=Resource.STOVETOP,
+            duration_minutes=12,
+            start_at_minute=10,
+            end_at_minute=22,
+        )
+        entry = _build_timeline_entry(regular_step)
+        assert entry.action == "Sear the short ribs until deeply browned"
+        assert entry.step_id == "short_ribs_sear_1"
+
+    def test_merged_step_without_allocation_unchanged(self):
+        """Merged step without allocation dict falls back to plain description."""
+        merged_step_no_allocation = ScheduledStep(
+            step_id="merged_onions_sliced_1",
+            recipe_name="[merged]",
+            description="Prep 2 cups sliced onions",
+            resource=Resource.HANDS,
+            duration_minutes=5,
+            start_at_minute=0,
+            end_at_minute=5,
+            merged_from=["recipe_a_prep_onions", "recipe_b_prep_onions"],
+            allocation={},  # empty allocation dict
+        )
+        entry = _build_timeline_entry(merged_step_no_allocation)
+        assert entry.action == "Prep 2 cups sliced onions"
+
+    def test_allocation_sorting_deterministic(self):
+        """Allocation breakdown is sorted alphabetically by recipe name."""
+        merged_step = ScheduledStep(
+            step_id="merged_garlic_minced_1",
+            recipe_name="[merged]",
+            description="Prep 6 cloves minced garlic",
+            resource=Resource.HANDS,
+            duration_minutes=3,
+            start_at_minute=0,
+            end_at_minute=3,
+            merged_from=["z_recipe_garlic", "a_recipe_garlic", "m_recipe_garlic"],
+            allocation={
+                "Z Recipe": "3 cloves",
+                "A Recipe": "2 cloves",
+                "M Recipe": "1 clove",
+            },
+        )
+        entry = _build_timeline_entry(merged_step)
+        # Should be sorted: A, M, Z
+        assert entry.action == "Prep 6 cloves minced garlic (2 cloves for A Recipe, 1 clove for M Recipe, 3 cloves for Z Recipe)"
+
+
 # ── Fallback Summary ────────────────────────────────────────────────────────
 
 
