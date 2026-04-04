@@ -30,6 +30,9 @@ pinecone==4.1.0                 # pinecone v4 client — upsert API changed from
 # ── Graph / Scheduling ────────────────────────────────────────────────────────
 networkx==3.3                   # DAG construction and cycle detection
 
+# ── Ingredient Parsing ────────────────────────────────────────────────────────
+ingredient-parser-nlp==2.6.0    # NLP ingredient parsing with Pint for unit conversion
+
 # ── PDF / OCR ─────────────────────────────────────────────────────────────────
 pymupdf==1.24.5                 # PDF rasterisation — fitz. 300 DPI page images.
 Pillow==10.3.0                  # image handling for Vision pipeline
