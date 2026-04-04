@@ -61,6 +61,8 @@ class _StepInfo:
     prep_ahead_notes: Optional[str] = None
     depends_on: list[str] = field(default_factory=list)
     critical_path_length: int = 0
+    merged_from: list[str] = field(default_factory=list)  # step_ids consolidated into this merged node
+    allocation: dict[str, str] = field(default_factory=dict)  # recipe_name → quantity breakdown
 
 
 def _compute_critical_paths(
@@ -357,6 +359,144 @@ def _find_earliest_start(
     raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
 
 
+def _detect_merge_candidates(
+    validated_recipes: list[ValidatedRecipe],
+) -> dict[tuple[str, str], list[tuple[str, str, float, str]]]:
+    """
+    Detect steps that can be merged based on exact ingredient+prep match.
+
+    Returns a dict mapping (ingredient_name, prep_method) → list of (step_id, recipe_name, quantity, unit).
+    Only includes tuples with 2+ steps (mergeable).
+    """
+    # Build index: (ingredient, prep_method) → list of (step_id, recipe_name, quantity, unit)
+    candidates: dict[tuple[str, str], list[tuple[str, str, float, str]]] = {}
+
+    for vr in validated_recipes:
+        recipe_name = vr.source.source.name
+        for step in vr.source.steps:
+            # Only consider steps with ingredient_uses metadata
+            if not step.ingredient_uses:
+                continue
+
+            for ing_use in step.ingredient_uses:
+                # Only merge if we have canonical quantity (successful normalization)
+                if ing_use.quantity_canonical is None or ing_use.unit_canonical is None:
+                    continue
+
+                key = (ing_use.ingredient_name, ing_use.prep_method)
+                if key not in candidates:
+                    candidates[key] = []
+
+                candidates[key].append((
+                    step.step_id,
+                    recipe_name,
+                    ing_use.quantity_canonical,
+                    ing_use.unit_canonical,
+                ))
+
+    # Filter to only mergeable groups (2+ steps)
+    return {k: v for k, v in candidates.items() if len(v) >= 2}
+
+
+def _create_merged_steps(
+    merge_candidates: dict[tuple[str, str], list[tuple[str, str, float, str]]],
+    all_steps: list[_StepInfo],
+) -> tuple[list[_StepInfo], dict[str, str]]:
+    """
+    Create synthetic merged prep nodes for detected candidates.
+
+    Returns:
+        - Updated step list with merged steps added and original steps removed
+        - step_id_rewiring dict: original_step_id → merged_step_id
+    """
+    step_id_rewiring: dict[str, str] = {}
+    steps_to_remove: set[str] = set()
+    merged_steps: list[_StepInfo] = []
+
+    merge_counter = 1
+
+    for (ingredient, prep_method), matches in merge_candidates.items():
+        # Create synthetic merged step
+        merged_step_id = f"merged_{ingredient}_{prep_method}_{merge_counter}".replace(" ", "_").lower()
+        merge_counter += 1
+
+        # Aggregate total quantity
+        total_quantity = sum(qty for _, _, qty, _ in matches)
+        unit = matches[0][3]  # All should have same unit (same canonical unit)
+
+        # Build allocation dict: recipe_name → quantity string
+        allocation: dict[str, str] = {}
+        for step_id, recipe_name, qty, unit_str in matches:
+            allocation[recipe_name] = f"{qty} {unit_str}"
+            step_id_rewiring[step_id] = merged_step_id
+            steps_to_remove.add(step_id)
+
+        # Find one of the original steps to copy metadata from (use first match)
+        original_step_id = matches[0][0]
+        original_step = next((s for s in all_steps if s.step_id == original_step_id), None)
+
+        if original_step is None:
+            continue
+
+        # Create merged step with aggregated description
+        merged_description = f"Prep {total_quantity} {unit} {prep_method} {ingredient}"
+
+        merged_step = _StepInfo(
+            step_id=merged_step_id,
+            recipe_name="[merged]",  # Synthetic recipe name
+            recipe_slug="merged",
+            description=merged_description,
+            resource=original_step.resource,
+            duration_minutes=original_step.duration_minutes,
+            duration_max=original_step.duration_max,
+            required_equipment=original_step.required_equipment.copy(),
+            can_be_done_ahead=original_step.can_be_done_ahead,
+            prep_ahead_window=original_step.prep_ahead_window,
+            prep_ahead_notes=original_step.prep_ahead_notes,
+            depends_on=[],  # Merged step has no dependencies (earliest prep)
+        )
+
+        # Store merge metadata in the step for later use
+        # We'll attach this as extra attributes for the scheduler to preserve
+        merged_step.merged_from = [step_id for step_id, _, _, _ in matches]
+        merged_step.allocation = allocation
+
+        merged_steps.append(merged_step)
+
+    # Remove original steps and add merged steps
+    updated_steps = [s for s in all_steps if s.step_id not in steps_to_remove]
+    updated_steps.extend(merged_steps)
+
+    return updated_steps, step_id_rewiring
+
+
+def _rewire_dependencies(
+    all_edges: list[tuple[str, str]],
+    step_id_rewiring: dict[str, str],
+) -> list[tuple[str, str]]:
+    """
+    Rewire edges to point to merged step IDs where applicable.
+
+    Rules:
+    - If source step was merged, outgoing edges become edges from merged step
+    - If target step was merged, incoming edges become edges to merged step
+    - Deduplicate edges after rewiring
+    """
+    rewired_edges: set[tuple[str, str]] = set()
+
+    for src, dst in all_edges:
+        # Rewire source
+        new_src = step_id_rewiring.get(src, src)
+        # Rewire destination
+        new_dst = step_id_rewiring.get(dst, dst)
+
+        # Skip self-loops (can happen if both endpoints were merged to same node)
+        if new_src != new_dst:
+            rewired_edges.add((new_src, new_dst))
+
+    return list(rewired_edges)
+
+
 def _merge_dags(
     recipe_dags: list[RecipeDAG],
     validated_recipes: list[ValidatedRecipe],
@@ -367,6 +507,7 @@ def _merge_dags(
     Pure algorithmic greedy list scheduler.
 
     Joins recipe_dags (edges) with validated_recipes (step details),
+    detects shared prep opportunities, merges exact ingredient+prep matches,
     computes critical paths, and schedules steps one at a time in
     priority order at the earliest feasible time.
 
@@ -414,6 +555,14 @@ def _merge_dags(
             all_steps.append(info)
 
         all_edges.extend(dag.edges)
+
+    # Detect merge candidates and create merged steps
+    merge_candidates = _detect_merge_candidates(validated_recipes)
+    if merge_candidates:
+        all_steps, step_id_rewiring = _create_merged_steps(merge_candidates, all_steps)
+        all_edges = _rewire_dependencies(all_edges, step_id_rewiring)
+    else:
+        step_id_rewiring = {}
 
     if not all_steps:
         raise ResourceConflictError("No steps to schedule")
@@ -528,6 +677,8 @@ def _merge_dags(
                 prep_ahead_window=step.prep_ahead_window,
                 prep_ahead_notes=step.prep_ahead_notes,
                 depends_on=step.depends_on,
+                merged_from=step.merged_from,
+                allocation=step.allocation,
             )
         )
 

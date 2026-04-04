@@ -763,3 +763,103 @@ async def test_enricher_node_produces_valid_enriched_recipes(sample_state):
     print(f"\nEnriched '{enriched.source.name}' into {len(enriched.steps)} structured steps:")
     for s in enriched.steps:
         print(f"  {s.step_id}: {s.resource.value} {s.duration_minutes}min — {s.description[:60]}")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enricher_ingredient_metadata_end_to_end():
+    """
+    Integration test: enricher extracts and normalizes ingredient metadata,
+    links it to steps, and populates RecipeStep.ingredient_uses correctly.
+    
+    Tests diverse ingredient strings: metric, imperial, 'to taste', fractions.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        pytest.skip(SKIP_REASON)
+
+    # Fixture recipe with diverse ingredients
+    raw_recipe = RawRecipe(
+        name="Test Recipe with Diverse Ingredients",
+        cuisine="test",
+        description="A test recipe with metric, imperial, and unconvertible ingredients",
+        servings=4,
+        estimated_total_minutes=30,
+        ingredients=[
+            RawIngredient(name="celery", quantity="2 cups diced", preparation="diced"),
+            RawIngredient(name="butter", quantity="50g", preparation=""),
+            RawIngredient(name="lemon", quantity="1", preparation="juiced"),
+            RawIngredient(name="salt", quantity="to taste", preparation=""),
+        ],
+        steps=[
+            "Melt butter in a pan over medium heat. Uses: butter",
+            "Add celery and cook until softened, about 5 minutes. Uses: celery",
+            "Add lemon juice and season with salt. Uses: lemon, salt",
+            "Serve immediately.",
+        ],
+    )
+
+    state = {
+        "user_id": "test-user",
+        "rag_owner_key": "test-owner",
+        "raw_recipes": [raw_recipe.model_dump()],
+    }
+
+    # Mock RAG to bypass external API
+    with patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+        result = await rag_enricher_node(state)
+
+    # Should not have errors
+    assert "errors" not in result or len(result.get("errors", [])) == 0, (
+        f"Enricher returned errors: {result.get('errors')}"
+    )
+
+    enriched_recipes = result["enriched_recipes"]
+    assert len(enriched_recipes) == 1
+
+    enriched = EnrichedRecipe.model_validate(enriched_recipes[0])
+    assert len(enriched.steps) == 4, f"Expected 4 steps, got {len(enriched.steps)}"
+
+    # Verify ingredient_uses populated correctly
+    # Step 1: Uses butter (50g → ~3.5 tbsp)
+    step1 = enriched.steps[0]
+    assert len(step1.ingredient_uses) >= 1, "Step 1 should have at least 1 ingredient"
+    butter_use = next((iu for iu in step1.ingredient_uses if "butter" in iu.ingredient_name.lower()), None)
+    assert butter_use is not None, "Step 1 should use butter"
+    assert butter_use.quantity_canonical is not None, "Butter should have canonical quantity"
+    assert butter_use.unit_canonical in ["tablespoon", "teaspoon", "cup"], f"Butter unit should be volume, got {butter_use.unit_canonical}"
+
+    # Step 2: Uses celery (2 cups)
+    step2 = enriched.steps[1]
+    assert len(step2.ingredient_uses) >= 1, "Step 2 should have at least 1 ingredient"
+    celery_use = next((iu for iu in step2.ingredient_uses if "celery" in iu.ingredient_name.lower()), None)
+    assert celery_use is not None, "Step 2 should use celery"
+    assert celery_use.quantity_canonical == 2.0, f"Celery should be 2 cups, got {celery_use.quantity_canonical}"
+    assert celery_use.unit_canonical == "cup", f"Celery unit should be cup, got {celery_use.unit_canonical}"
+
+    # Step 3: Uses lemon (dimensionless) and salt ('to taste')
+    step3 = enriched.steps[2]
+    assert len(step3.ingredient_uses) >= 1, "Step 3 should have at least 1 ingredient"
+    
+    lemon_use = next((iu for iu in step3.ingredient_uses if "lemon" in iu.ingredient_name.lower()), None)
+    if lemon_use:  # LLM may or may not tag lemon depending on how it interprets "lemon juice"
+        # Lemon is dimensionless ("1 lemon") — should have fallback
+        assert lemon_use.quantity_canonical is None, "Lemon should have no canonical quantity (dimensionless)"
+        assert lemon_use.fallback_reason and "dimensionless" in lemon_use.fallback_reason.lower(), (
+            f"Lemon should have dimensionless fallback, got {lemon_use.fallback_reason}"
+        )
+
+    salt_use = next((iu for iu in step3.ingredient_uses if "salt" in iu.ingredient_name.lower()), None)
+    if salt_use:  # LLM may or may not tag salt depending on interpretation
+        # Salt is 'to taste' — unconvertible
+        assert salt_use.quantity_canonical is None, "Salt 'to taste' should have no canonical quantity"
+        assert salt_use.fallback_reason is not None, "Salt should have fallback reason"
+
+    # Step 4: No ingredients (serve)
+    step4 = enriched.steps[3]
+    assert len(step4.ingredient_uses) == 0, "Step 4 (serve) should have no ingredients"
+
+    print("\n✅ Integration test passed: ingredient metadata extraction and linking work end-to-end")
+    print(f"Step 1: {len(step1.ingredient_uses)} ingredients")
+    print(f"Step 2: {len(step2.ingredient_uses)} ingredients")
+    print(f"Step 3: {len(step3.ingredient_uses)} ingredients")
+    print(f"Step 4: {len(step4.ingredient_uses)} ingredients")

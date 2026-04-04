@@ -214,6 +214,73 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
     
     return results
 
+
+
+def _link_steps_to_ingredients(
+    steps: list[RecipeStep],
+    normalized_ingredients: list[dict],
+    raw_recipe: RawRecipe,
+) -> list[RecipeStep]:
+    """
+    Parse ingredient tags from LLM output ("Uses: ingredient1, ingredient2")
+    and link to normalized_ingredients, populating RecipeStep.ingredient_uses.
+    
+    Returns new list of RecipeStep objects with ingredient_uses populated.
+    Exact name matching only — no fuzzy matching per Q2 research decision.
+    """
+    from app.models.recipe import IngredientUse
+    
+    # Build lookup from ingredient name to normalized metadata
+    ingredient_lookup = {
+        ing_dict["ingredient_name"].lower().strip(): ing_dict
+        for ing_dict in normalized_ingredients
+    }
+    
+    updated_steps = []
+    for step in steps:
+        # Parse "Uses: X, Y, Z" from description
+        uses_pattern = r"Uses:\s*([^\n]+)"
+        match = re.search(uses_pattern, step.description, re.IGNORECASE)
+        
+        ingredient_uses = []
+        if match:
+            # Extract ingredient names from match
+            ing_names_str = match.group(1).strip()
+            # Split on commas and clean up whitespace
+            ing_names = [name.strip().lower() for name in ing_names_str.split(",")]
+            
+            # Match each ingredient name to normalized data
+            for ing_name in ing_names:
+                if ing_name in ingredient_lookup:
+                    ing_data = ingredient_lookup[ing_name]
+                    ingredient_uses.append(
+                        IngredientUse(
+                            ingredient_name=ing_data["ingredient_name"],
+                            prep_method=ing_data["prep_method"],
+                            quantity_canonical=ing_data["quantity_canonical"],
+                            unit_canonical=ing_data["unit_canonical"],
+                            quantity_original=ing_data["quantity_original"],
+                            fallback_reason=ing_data["fallback_reason"],
+                        )
+                    )
+        
+        # Create new RecipeStep with populated ingredient_uses
+        updated_step = RecipeStep(
+            step_id=step.step_id,
+            description=step.description,
+            duration_minutes=step.duration_minutes,
+            duration_max=step.duration_max,
+            resource=step.resource,
+            depends_on=step.depends_on,
+            can_be_done_ahead=step.can_be_done_ahead,
+            prep_ahead_window=step.prep_ahead_window,
+            prep_ahead_notes=step.prep_ahead_notes,
+            ingredient_uses=ingredient_uses,
+        )
+        updated_steps.append(updated_step)
+    
+    return updated_steps
+
 # ── Structured output wrapper ────────────────────────────────────────────────
 
 
@@ -478,11 +545,14 @@ async def _enrich_single_recipe(
     rag_owner_key: str,
 ) -> tuple[EnrichedRecipe, dict]:
     """
-    Enrich a single RawRecipe: RAG retrieval + LLM structured output.
+    Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient metadata extraction.
     Raises on failure — caller handles per-recipe error isolation.
     Returns (EnrichedRecipe, token_usage_dict).
     """
     slug = _generate_recipe_slug(raw_recipe.name)
+
+    # Parse and normalize ingredients (deterministic, no LLM)
+    normalized_ingredients = _parse_and_normalize_ingredients(raw_recipe)
 
     # RAG retrieval (graceful degradation — returns [] on failure)
     rag_query = f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
@@ -509,12 +579,15 @@ async def _enrich_single_recipe(
     result = await _invoke_llm()
     usage = extract_token_usage(result, "rag_enricher")
 
+    # Link LLM-tagged ingredients to normalized metadata
+    linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
+
     # Build EnrichedRecipe
     rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
 
     enriched = EnrichedRecipe(
         source=raw_recipe,
-        steps=result.steps,
+        steps=linked_steps,  # Use linked steps instead of raw LLM output
         rag_sources=rag_source_ids,
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,

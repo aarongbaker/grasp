@@ -7,6 +7,7 @@ no mocks. They verify:
   - DAG builder: edge extraction, cycle detection, slug generation
   - DAG merger: critical path computation, greedy scheduling, resource
     contention, exact fixture match
+  - Merge detection: exact ingredient+prep match consolidation
 """
 
 from datetime import datetime
@@ -27,6 +28,7 @@ from app.models.enums import Resource
 from app.models.recipe import (
     EnrichedRecipe,
     Ingredient,
+    IngredientUse,
     RawRecipe,
     RecipeStep,
     ValidatedRecipe,
@@ -165,6 +167,280 @@ class TestCriticalPath:
         # Pommes: 30+10+15 = 55
         assert cp["pommes_puree_step_1"] == 55
         assert cp["pommes_puree_step_3"] == 15
+
+
+class TestMergeDetection:
+    """Tests for shared prep detection and DAG merge consolidation."""
+
+    def _make_recipe_with_prep(
+        self, name: str, slug: str, step_id: str, ingredient: str, prep_method: str, quantity: float, unit: str
+    ) -> tuple[RecipeDAG, ValidatedRecipe]:
+        """Helper to build a recipe with one prep step with structured ingredient metadata."""
+        raw = RawRecipe(
+            name=name,
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=30,
+            ingredients=[Ingredient(name=ingredient, quantity=f"{quantity} {unit}")],
+            steps=[f"prep {ingredient}"],
+        )
+
+        ingredient_use = IngredientUse(
+            ingredient_name=ingredient,
+            prep_method=prep_method,
+            quantity_canonical=quantity,
+            unit_canonical=unit,
+            quantity_original=f"{quantity} {unit}",
+        )
+
+        enriched = EnrichedRecipe(
+            source=raw,
+            steps=[
+                RecipeStep(
+                    step_id=step_id,
+                    description=f"Prep {ingredient} ({prep_method})",
+                    duration_minutes=10,
+                    resource=Resource.HANDS,
+                    ingredient_uses=[ingredient_use],
+                )
+            ],
+        )
+
+        dag = RecipeDAG(recipe_name=name, recipe_slug=slug, steps=[], edges=[])
+        validated = ValidatedRecipe(source=enriched, validated_at=datetime.now())
+        return dag, validated
+
+    def test_exact_match_creates_merged_node(self):
+        """
+        Two recipes with exact ingredient+prep match produce a merged prep node.
+
+        Recipe A: prep 2 cups diced celery
+        Recipe B: prep 1 cup diced celery
+        Result: merged prep node with 3 cups total, allocation dict showing breakdown
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "celery", "diced", 1.0, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        # Should have 1 merged step instead of 2 separate steps
+        assert len(result.scheduled_steps) == 1, f"Expected 1 merged step, got {len(result.scheduled_steps)}"
+
+        merged_step = result.scheduled_steps[0]
+
+        # Verify merged_from field populated with both original step_ids
+        assert set(merged_step.merged_from) == {"a_prep", "b_prep"}, (
+            f"Expected merged_from=['a_prep', 'b_prep'], got {merged_step.merged_from}"
+        )
+
+        # Verify allocation dict shows breakdown
+        assert "Recipe A" in merged_step.allocation, f"Allocation missing Recipe A: {merged_step.allocation}"
+        assert "Recipe B" in merged_step.allocation, f"Allocation missing Recipe B: {merged_step.allocation}"
+        assert merged_step.allocation["Recipe A"] == "2.0 cup", (
+            f"Expected '2.0 cup', got {merged_step.allocation['Recipe A']}"
+        )
+        assert merged_step.allocation["Recipe B"] == "1.0 cup", (
+            f"Expected '1.0 cup', got {merged_step.allocation['Recipe B']}"
+        )
+
+    def test_different_prep_method_no_merge(self):
+        """
+        Different prep methods prevent merging even with same ingredient.
+
+        Recipe A: diced celery
+        Recipe B: sliced celery
+        Result: 2 separate steps (no merge)
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "celery", "sliced", 1.0, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        # Should have 2 separate steps (no merge)
+        assert len(result.scheduled_steps) == 2, f"Expected 2 steps (no merge), got {len(result.scheduled_steps)}"
+
+        # Verify neither step has merged_from populated
+        for step in result.scheduled_steps:
+            assert step.merged_from == [], f"Expected no merged_from, got {step.merged_from}"
+            assert step.allocation == {}, f"Expected no allocation, got {step.allocation}"
+
+    def test_different_ingredient_no_merge(self):
+        """
+        Different ingredients prevent merging even with same prep method.
+
+        Recipe A: diced celery
+        Recipe B: diced onion
+        Result: 2 separate steps (no merge)
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "onion", "diced", 1.0, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        # Should have 2 separate steps (no merge)
+        assert len(result.scheduled_steps) == 2, f"Expected 2 steps (no merge), got {len(result.scheduled_steps)}"
+
+        # Verify neither step has merged_from populated
+        for step in result.scheduled_steps:
+            assert step.merged_from == [], f"Expected no merged_from, got {step.merged_from}"
+
+    def test_three_recipe_merge(self):
+        """
+        Three recipes with same ingredient+prep produce single merged node.
+
+        Recipe A: 2 cups diced celery
+        Recipe B: 1 cup diced celery
+        Recipe C: 1.5 cups diced celery
+        Result: 1 merged node with 4.5 cups total, 3-way allocation
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "celery", "diced", 1.0, "cup"
+        )
+        dag_c, val_c = self._make_recipe_with_prep(
+            "Recipe C", "recipe_c", "c_prep", "celery", "diced", 1.5, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b, dag_c], [val_a, val_b, val_c], DEFAULT_KITCHEN)
+
+        # Should have 1 merged step
+        assert len(result.scheduled_steps) == 1
+
+        merged_step = result.scheduled_steps[0]
+        assert set(merged_step.merged_from) == {"a_prep", "b_prep", "c_prep"}
+        assert len(merged_step.allocation) == 3
+        assert merged_step.allocation["Recipe A"] == "2.0 cup"
+        assert merged_step.allocation["Recipe B"] == "1.0 cup"
+        assert merged_step.allocation["Recipe C"] == "1.5 cup"
+
+    def test_merged_node_total_quantity_in_description(self):
+        """
+        Merged node description shows total aggregated quantity.
+
+        Recipe A: 2 cups diced celery
+        Recipe B: 1 cup diced celery
+        Result: description mentions '3.0 cup' (or similar aggregation)
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "celery", "diced", 1.0, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        merged_step = result.scheduled_steps[0]
+
+        # Description should mention total quantity (3.0 cup)
+        # The exact format may vary, but it should contain "3" and "cup" and "celery"
+        desc_lower = merged_step.description.lower()
+        assert "celery" in desc_lower, f"Description should mention celery: {merged_step.description}"
+        assert "3" in merged_step.description or "3.0" in merged_step.description, (
+            f"Description should mention total quantity 3: {merged_step.description}"
+        )
+
+    def test_merged_step_id_format(self):
+        """
+        Merged step gets synthetic step_id in format: merged_{ingredient}_{prep_method}_{n}
+
+        Recipe A: diced celery
+        Recipe B: diced celery
+        Result: step_id like 'merged_celery_diced_1'
+        """
+        dag_a, val_a = self._make_recipe_with_prep(
+            "Recipe A", "recipe_a", "a_prep", "celery", "diced", 2.0, "cup"
+        )
+        dag_b, val_b = self._make_recipe_with_prep(
+            "Recipe B", "recipe_b", "b_prep", "celery", "diced", 1.0, "cup"
+        )
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        merged_step = result.scheduled_steps[0]
+
+        # step_id should follow merged_* format
+        assert merged_step.step_id.startswith("merged_"), f"Expected merged_* step_id, got {merged_step.step_id}"
+        assert "celery" in merged_step.step_id, f"step_id should contain ingredient: {merged_step.step_id}"
+        assert "diced" in merged_step.step_id, f"step_id should contain prep method: {merged_step.step_id}"
+
+    def test_no_ingredient_uses_no_merge(self):
+        """
+        Steps without ingredient_uses field are not candidates for merging.
+
+        Recipe A: prep step with no ingredient_uses
+        Recipe B: prep step with no ingredient_uses
+        Result: 2 separate steps
+        """
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=20,
+            ingredients=[],
+            steps=["generic prep"],
+        )
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=20,
+            ingredients=[],
+            steps=["generic prep"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_prep",
+                    description="Generic prep work",
+                    duration_minutes=10,
+                    resource=Resource.HANDS,
+                    ingredient_uses=[],  # empty - no structured metadata
+                )
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_prep",
+                    description="Generic prep work",
+                    duration_minutes=10,
+                    resource=Resource.HANDS,
+                    ingredient_uses=[],
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+
+        val_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        val_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], DEFAULT_KITCHEN)
+
+        # Should have 2 separate steps (no merge without ingredient_uses)
+        assert len(result.scheduled_steps) == 2
 
 
 class TestMergeDags:
