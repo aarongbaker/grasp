@@ -62,6 +62,7 @@ class RecipeStep(BaseModel):
     prep_ahead_window: Optional[str] = None  # e.g. "up to 1 week" — used verbatim
     prep_ahead_notes: Optional[str] = None
     ingredient_uses: list[IngredientUse] = []  # extracted ingredient metadata for prep merging
+    oven_temp_f: Optional[int] = None  # Fahrenheit integer temp extracted from step description
 
     @field_validator("duration_minutes")
     @classmethod
