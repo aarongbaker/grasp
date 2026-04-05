@@ -63,6 +63,18 @@ class _StepInfo:
     critical_path_length: int = 0
     merged_from: list[str] = field(default_factory=list)  # step_ids consolidated into this merged node
     allocation: dict[str, str] = field(default_factory=dict)  # recipe_name → quantity breakdown
+    oven_temp_f: Optional[int] = None  # Fahrenheit temperature for oven steps
+
+
+@dataclass
+class _OvenInterval:
+    """Track oven usage intervals with temperature for conflict detection."""
+
+    start: int
+    end: int
+    temp_f: Optional[int]
+    recipe_name: str
+    step_id: str
 
 
 def _compute_critical_paths(
@@ -325,16 +337,46 @@ class _IntervalIndex:
         return len(self._starts)
 
 
+def _format_oven_conflict_message(
+    recipe_a: str,
+    temp_a: int,
+    recipe_b: str,
+    temp_b: int,
+    start_minute: int,
+    end_minute: int,
+) -> str:
+    """Format R026-compliant error message for oven temperature conflicts."""
+    # Convert minutes to HH:MM format
+    start_h, start_m = divmod(start_minute, 60)
+    end_h, end_m = divmod(end_minute, 60)
+    start_time = f"{start_h}:{start_m:02d}"
+    end_time = f"{end_h}:{end_m:02d}"
+
+    return (
+        f"Oven temperature conflict: {recipe_a} needs {temp_a}°F while "
+        f"{recipe_b} needs {temp_b}°F from {start_time} to {end_time}. "
+        f"You need a second oven or different recipes."
+    )
+
+
 def _find_earliest_start(
     resource: Resource,
     duration: int,
     earliest_from_deps: int,
     resource_intervals: dict[Resource, "_IntervalIndex"],
     capacities: dict[Resource, float],
+    oven_intervals: Optional[list["_OvenInterval"]] = None,
+    oven_temp_f: Optional[int] = None,
+    step_recipe_name: Optional[str] = None,
 ) -> int:
     """
     Find the earliest start time for a step that satisfies resource constraints.
     PASSIVE steps always start at earliest_from_deps (no capacity limit).
+
+    For OVEN steps with temperature conflicts:
+    - If there's spare capacity, incompatible temps don't matter (use different ovens)
+    - If capacity is full and all slots have incompatible temps, advance time
+    - Only raise error if we can't find a valid slot after many iterations
     """
     if resource == Resource.PASSIVE:
         return earliest_from_deps
@@ -342,13 +384,50 @@ def _find_earliest_start(
     index = resource_intervals[resource]
     cap = capacities[resource]
     candidate = earliest_from_deps
+    TEMP_TOLERANCE_F = 15
 
-    for _ in range(10_000):  # safety valve
+    for iteration in range(10_000):  # safety valve
         window_end = candidate + duration
         overlap_count = index.count_overlapping(candidate, window_end)
 
+        # Check if there's capacity available
         if overlap_count < cap:
+            # There's capacity - can we use it?
+            # For oven steps, only check temps if we need to share with existing intervals
+            # If there's spare capacity, we can use a different oven regardless of temp
             return candidate
+
+        # Capacity is full - check if we can wait for a compatible slot
+        # For oven steps with temps, see if any intervals are compatible
+        if resource == Resource.OVEN and oven_intervals and oven_temp_f is not None:
+            # Find compatible and incompatible intervals that overlap
+            compatible_intervals = []
+            incompatible_intervals = []
+            
+            for interval in oven_intervals:
+                if interval.start < window_end and interval.end > candidate:
+                    if interval.temp_f is not None:
+                        temp_diff = abs(oven_temp_f - interval.temp_f)
+                        if temp_diff <= TEMP_TOLERANCE_F:
+                            compatible_intervals.append(interval)
+                        else:
+                            incompatible_intervals.append(interval)
+            
+            # If we have compatible intervals, we might be able to "share" with them
+            # by waiting for capacity to free up while staying compatible
+            # But since capacity is full, we need to advance time regardless
+            
+            # Advance past the earliest-ending interval
+            # Prefer to advance past incompatible ones if possible
+            if incompatible_intervals:
+                next_end = min(i.end for i in incompatible_intervals)
+            else:
+                next_end = index.min_end_after(candidate)
+                if next_end is None:
+                    return candidate
+            
+            candidate = next_end
+            continue
 
         # Advance past the earliest-ending overlapping interval after candidate
         next_end = index.min_end_after(candidate)
@@ -356,6 +435,25 @@ def _find_earliest_start(
             return candidate  # shouldn't happen, but be safe
         candidate = next_end
 
+    # If we exhausted iterations, check if it's a temperature conflict
+    if resource == Resource.OVEN and oven_intervals and oven_temp_f is not None:
+        window_end = candidate + duration
+        for interval in oven_intervals:
+            if interval.start < window_end and interval.end > candidate:
+                if interval.temp_f is not None:
+                    temp_diff = abs(oven_temp_f - interval.temp_f)
+                    if temp_diff > TEMP_TOLERANCE_F:
+                        raise ResourceConflictError(
+                            _format_oven_conflict_message(
+                                step_recipe_name or "Recipe",
+                                oven_temp_f,
+                                interval.recipe_name,
+                                interval.temp_f,
+                                max(candidate, interval.start),
+                                min(window_end, interval.end),
+                            )
+                        )
+    
     raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
 
 
@@ -551,6 +649,7 @@ def _merge_dags(
                 prep_ahead_window=step.prep_ahead_window,
                 prep_ahead_notes=step.prep_ahead_notes,
                 depends_on=list(step.depends_on),
+                oven_temp_f=step.oven_temp_f,  # Preserve oven temperature metadata
             )
             all_steps.append(info)
 
@@ -578,6 +677,7 @@ def _merge_dags(
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
     resource_intervals: dict[Resource, _IntervalIndex] = {r: _IntervalIndex() for r in Resource}
+    oven_intervals: list[_OvenInterval] = []  # Track oven usage with temperature for conflict detection
 
     # Equipment intervals — each piece of equipment has capacity 1
     equipment_names: set[str] = set()
@@ -623,6 +723,9 @@ def _merge_dags(
             earliest,
             resource_intervals,
             capacities,
+            oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+            oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+            step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
         )
 
         # Advance past equipment conflicts (each equipment piece has capacity 1)
@@ -646,6 +749,9 @@ def _merge_dags(
                         start,
                         resource_intervals,
                         capacities,
+                        oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+                        oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+                        step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
                     )
                     break
 
@@ -654,6 +760,16 @@ def _merge_dags(
         # Record resource interval (PASSIVE doesn't consume capacity)
         if step.resource != Resource.PASSIVE:
             resource_intervals[step.resource].add(start, end)
+
+        # Record oven interval with temperature for conflict detection
+        if step.resource == Resource.OVEN:
+            oven_intervals.append(_OvenInterval(
+                start=start,
+                end=end,
+                temp_f=step.oven_temp_f,
+                recipe_name=step.recipe_name,
+                step_id=step.step_id,
+            ))
 
         # Record equipment intervals
         for eq in constrained_equipment:
