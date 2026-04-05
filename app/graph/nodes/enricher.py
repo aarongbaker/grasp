@@ -276,6 +276,7 @@ def _link_steps_to_ingredients(
             prep_ahead_window=step.prep_ahead_window,
             prep_ahead_notes=step.prep_ahead_notes,
             ingredient_uses=ingredient_uses,
+            oven_temp_f=step.oven_temp_f,
         )
         updated_steps.append(updated_step)
     
@@ -513,11 +514,23 @@ note the discrepancy in chef_notes.
 
 {rag_text}
 
+## OVEN TEMPERATURE EXTRACTION
+For each step, extract the oven temperature if the step involves oven cooking. Populate the `oven_temp_f` field as follows:
+- **Numeric Fahrenheit temperatures**: Extract directly (e.g., "375°F" → 375, "425°F" → 425)
+- **Celsius temperatures**: Convert to Fahrenheit using (C × 9/5) + 32 (e.g., "150°C" → 302, "200°C" → 392)
+- **Vague heat levels**: Use these predefined ranges:
+  - "high heat" or "hot oven" → 437°F
+  - "medium heat" or "moderate oven" → 362°F
+  - "low heat" or "low oven" → 312°F
+- **Non-oven steps**: Set oven_temp_f to null
+- **Validation**: All extracted temperatures must be in the 200-550°F range. If a temperature falls outside this range, set to null and note in chef_notes.
+
 ## OUTPUT REQUIREMENTS
 1. Generate exactly {len(raw_recipe.steps)} RecipeStep objects, one per flat text step.
-2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures in °C, visual cues, timing details) but preserve the original intent.
-3. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
-4. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
+2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures, visual cues, timing details) but preserve the original intent.
+3. For oven steps, populate oven_temp_f according to the extraction rules above.
+4. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
+5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -537,6 +550,58 @@ def _create_llm() -> ChatAnthropic:
 
 
 # ── Per-recipe enrichment ────────────────────────────────────────────────────
+
+
+def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep]:
+    """
+    Inject synthetic preheat step before first oven usage.
+    
+    Scans enriched steps for first step with resource=OVEN and oven_temp_f set.
+    Injects preheat step 12 minutes before that step:
+    - step_id: {slug}_preheat_1
+    - description: 'Preheat oven to {temp}°F'
+    - duration_minutes: 12
+    - resource: Resource.OVEN
+    - oven_temp_f: {temp}
+    - depends_on: []
+    
+    Edge cases:
+    - No oven steps → returns steps unchanged
+    - Multiple oven steps → injects ONE preheat before the first
+    - First step is already oven → preheat becomes step 1, oven becomes step 2
+    - None oven_temp_f for oven step → skip preheat injection
+    
+    Returns new list with preheat injected at position 0 if needed.
+    """
+    # Find first oven step with valid temperature
+    first_oven_idx = None
+    first_oven_temp = None
+    
+    for idx, step in enumerate(steps):
+        if step.resource == Resource.OVEN and step.oven_temp_f is not None:
+            first_oven_idx = idx
+            first_oven_temp = step.oven_temp_f
+            break
+    
+    # No oven usage found → no preheat needed
+    if first_oven_idx is None:
+        return steps
+    
+    # Build preheat step
+    preheat_step = RecipeStep(
+        step_id=f"{slug}_preheat_1",
+        description=f"Preheat oven to {first_oven_temp}°F",
+        duration_minutes=12,
+        resource=Resource.OVEN,
+        oven_temp_f=first_oven_temp,
+        depends_on=[],
+        can_be_done_ahead=False,
+        prep_ahead_window=None,
+        ingredient_uses=[],
+    )
+    
+    # Inject at the beginning
+    return [preheat_step] + steps
 
 
 async def _enrich_single_recipe(
@@ -581,13 +646,16 @@ async def _enrich_single_recipe(
 
     # Link LLM-tagged ingredients to normalized metadata
     linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
+    
+    # Inject preheat step before first oven usage
+    steps_with_preheat = _inject_preheat_steps(linked_steps, slug)
 
     # Build EnrichedRecipe
     rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
 
     enriched = EnrichedRecipe(
         source=raw_recipe,
-        steps=linked_steps,  # Use linked steps instead of raw LLM output
+        steps=steps_with_preheat,  # Use steps with preheat injection
         rag_sources=rag_source_ids,
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,
