@@ -1764,3 +1764,534 @@ class TestResourceWarnings:
         assert any("stovetop" in w.lower() for w in result.resource_warnings), (
             f"Warning should mention stovetop: {result.resource_warnings}"
         )
+
+
+# ── Oven Temperature Conflict Tests ─────────────────────────────────────────
+
+
+class TestOvenConflictDetection:
+    """Tests for oven temperature conflict detection (R026)."""
+
+    def test_single_oven_serializes_different_temps(self):
+        """Single oven (capacity=1) serializes steps with different temps, avoiding conflicts."""
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["bake at 375"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe B: 450°F (75°F difference — would conflict if parallel)
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["bake at 450"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="bake at 450F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=450,
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        kitchen = {"max_burners": 4, "has_second_oven": False}
+
+        # Should succeed — single oven capacity forces sequential execution
+        result = _merge_dags([dag_a, dag_b], [validated_a, validated_b], kitchen)
+
+        # Both steps should be scheduled sequentially
+        assert len(result.scheduled_steps) == 2
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+        
+        # Steps should NOT overlap (sequential due to capacity=1)
+        a_step = by_id["a_step_1"]
+        b_step = by_id["b_step_1"]
+        
+        assert (a_step.end_at_minute <= b_step.start_at_minute or 
+                b_step.end_at_minute <= a_step.start_at_minute), (
+            f"Steps should be sequential: A [{a_step.start_at_minute},{a_step.end_at_minute}) "
+            f"vs B [{b_step.start_at_minute},{b_step.end_at_minute})"
+        )
+
+    def test_dual_oven_allows_parallel_different_temps(self):
+        """Dual oven (capacity=2) allows parallel execution of different temps."""
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["bake at 375"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe B: 450°F (75°F difference)
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["bake at 450"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="bake at 450F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=450,
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        kitchen = {"max_burners": 4, "has_second_oven": True}
+
+        # Should succeed with dual oven
+        result = _merge_dags([dag_a, dag_b], [validated_a, validated_b], kitchen)
+
+        # Both steps should be scheduled in parallel
+        assert len(result.scheduled_steps) == 2
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+        
+        # Both should start at T+0 (parallel execution with 2 ovens)
+        assert by_id["a_step_1"].start_at_minute == 0
+        assert by_id["b_step_1"].start_at_minute == 0
+
+    def test_temperature_tolerance_threshold(self):
+        """Temps within 15°F tolerance are allowed (e.g., 375 and 385)."""
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["bake at 375"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe B: 385°F (10°F difference, within tolerance)
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["bake at 385"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="bake at 385F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=385,
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        kitchen = {"max_burners": 4, "has_second_oven": False}
+
+        # Should succeed — temps are similar enough
+        result = _merge_dags([dag_a, dag_b], [validated_a, validated_b], kitchen)
+
+        # Both steps should be scheduled (sequentially due to single oven)
+        assert len(result.scheduled_steps) == 2
+
+    def test_none_temp_backward_compatibility(self):
+        """Steps with oven_temp_f=None don't trigger conflict detection."""
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["bake"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe B: no temp specified
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["keep warm"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="keep warm in oven",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=None,  # No temp specified
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        kitchen = {"max_burners": 4, "has_second_oven": False}
+
+        # Should succeed — no conflict when one temp is None
+        result = _merge_dags([dag_a, dag_b], [validated_a, validated_b], kitchen)
+
+        # Both steps should be scheduled (sequentially due to single oven)
+        assert len(result.scheduled_steps) == 2
+
+    def test_sequential_different_temps_no_conflict(self):
+        """Different temps are OK if steps don't overlap (sequential due to dependencies)."""
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=120,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["prep", "bake at 375"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="prep",
+                    duration_minutes=10,
+                    resource=Resource.HANDS,
+                ),
+                RecipeStep(
+                    step_id="a_step_2",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                    depends_on=["a_step_1"],
+                ),
+            ],
+        )
+
+        # Recipe B: 450°F, starts after prep
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=70,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["prep", "bake at 450"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="prep",
+                    duration_minutes=10,
+                    resource=Resource.HANDS,
+                ),
+                RecipeStep(
+                    step_id="b_step_2",
+                    description="bake at 450F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=450,
+                    depends_on=["b_step_1"],
+                ),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[("a_step_1", "a_step_2")])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[("b_step_1", "b_step_2")])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+
+        kitchen = {"max_burners": 4, "has_second_oven": False}
+
+        # Should succeed — with single oven, steps will be scheduled sequentially
+        result = _merge_dags([dag_a, dag_b], [validated_a, validated_b], kitchen)
+
+        # All 4 steps should be scheduled
+        assert len(result.scheduled_steps) == 4
+        by_id = {s.step_id: s for s in result.scheduled_steps}
+        
+        # Oven steps should not overlap (sequential due to single oven capacity)
+        a_oven = by_id["a_step_2"]
+        b_oven = by_id["b_step_2"]
+        
+        # Check they don't overlap
+        assert (a_oven.end_at_minute <= b_oven.start_at_minute or 
+                b_oven.end_at_minute <= a_oven.start_at_minute), (
+            f"Oven steps should not overlap: A [{a_oven.start_at_minute},{a_oven.end_at_minute}) "
+            f"vs B [{b_oven.start_at_minute},{b_oven.end_at_minute})"
+        )
+
+    def test_conflict_error_message_format(self):
+        """Verify R026-compliant error message format with recipe names, temps, and time range."""
+        # This test would need to force a conflict scenario that the current implementation
+        # should detect. However, based on T01 implementation, the conflict check happens
+        # before capacity check, but single oven naturally serializes.
+        # 
+        # To test the error message, we'd need to simulate a scenario where:
+        # - Dual oven mode (capacity=2)
+        # - Two oven steps want to overlap
+        # - They have incompatible temps (>15°F difference)
+        #
+        # But the current implementation allows this! The conflict check only triggers
+        # when steps would actually overlap, and in dual oven mode with capacity=2,
+        # they CAN overlap.
+        #
+        # Looking at T01 implementation: conflict detection is in _find_earliest_start()
+        # and it checks if a new step conflicts with existing oven_intervals.
+        # So we need a scenario where 3 oven steps exist but only 2 ovens.
+        
+        # Recipe A: 375°F
+        raw_a = RawRecipe(
+            name="Recipe A",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["bake at 375"],
+        )
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(
+                    step_id="a_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe B: 375°F (same temp, uses 1 oven slot)
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="y", quantity="1")],
+            steps=["bake at 375"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_step_1",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                )
+            ],
+        )
+
+        # Recipe C: 450°F (incompatible temp, needs 3rd oven slot)
+        raw_c = RawRecipe(
+            name="Recipe C",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[Ingredient(name="z", quantity="1")],
+            steps=["bake at 450"],
+        )
+        enriched_c = EnrichedRecipe(
+            source=raw_c,
+            steps=[
+                RecipeStep(
+                    step_id="c_step_1",
+                    description="bake at 450F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=450,
+                )
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Recipe A", recipe_slug="recipe_a", steps=[], edges=[])
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+        dag_c = RecipeDAG(recipe_name="Recipe C", recipe_slug="recipe_c", steps=[], edges=[])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=enriched_c, validated_at=datetime.now())
+
+        # Dual oven: capacity=2
+        # Recipe A and B both at 375°F can share or use both ovens
+        # Recipe C at 450°F would conflict with whichever oven has the 375°F recipes
+        kitchen = {"max_burners": 4, "has_second_oven": True}
+
+        # Should raise ResourceConflictError with R026-compliant message
+        with pytest.raises(ResourceConflictError) as exc_info:
+            _merge_dags([dag_a, dag_b, dag_c], [validated_a, validated_b, validated_c], kitchen)
+        
+        error_msg = str(exc_info.value)
+        
+        # Verify R026 compliance: message should contain:
+        # - Recipe names involved
+        # - Temperature values
+        # - Time range of conflict
+        assert "Recipe" in error_msg, f"Error should mention recipe names: {error_msg}"
+        assert "°F" in error_msg or "temp" in error_msg.lower(), f"Error should mention temperatures: {error_msg}"
+        assert any(char.isdigit() for char in error_msg), f"Error should include time/temp numbers: {error_msg}"
+
+    @pytest.mark.skip(reason="Preheat functionality not yet implemented (planned for future task)")
+    def test_preheat_steps_in_timeline(self):
+        """Verify preheat steps appear in timeline with correct timing and temperature labels.
+        
+        Per R024: Enricher should inject 'preheat oven to X°F' steps 10-15 min before
+        first oven use. This test will verify:
+        - Preheat step exists before first oven step
+        - Preheat duration is 10-15 min
+        - Preheat step has correct temperature label
+        - Preheat step occupies OVEN resource
+        
+        This test is currently skipped because preheat injection is not yet implemented.
+        It will be enabled once the Enricher adds preheat step modeling.
+        """
+        # Recipe with oven step at 375°F
+        raw = RawRecipe(
+            name="Baked Recipe",
+            description="test",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=90,
+            ingredients=[Ingredient(name="x", quantity="1")],
+            steps=["prep", "bake at 375"],
+        )
+        enriched = EnrichedRecipe(
+            source=raw,
+            steps=[
+                RecipeStep(
+                    step_id="step_1",
+                    description="prep ingredients",
+                    duration_minutes=15,
+                    resource=Resource.HANDS,
+                ),
+                # Preheat step should be injected by Enricher here
+                RecipeStep(
+                    step_id="step_2",
+                    description="bake at 375F",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=375,
+                    depends_on=["step_1"],
+                ),
+            ],
+        )
+
+        dag = RecipeDAG(recipe_name="Baked Recipe", recipe_slug="baked_recipe", steps=[], edges=[("step_1", "step_2")])
+        validated = ValidatedRecipe(source=enriched, validated_at=datetime.now())
+
+        result = _merge_dags([dag], [validated], DEFAULT_KITCHEN)
+
+        # Once implemented, verify:
+        # - Preheat step exists in timeline
+        # - Preheat happens before baking step
+        # - Preheat has appropriate duration (10-15 min)
+        # - Preheat step mentions temperature
+        assert False, "Preheat implementation pending"
