@@ -120,6 +120,12 @@ def _build_timeline_entry(
         allocation_text = ", ".join(allocation_parts)
         action = f"{step.description} ({allocation_text})"
 
+    # Detect preheat steps by step_id pattern (injected by enricher)
+    is_preheat = step.step_id.startswith("preheat_")
+
+    # Use oven temperature from ScheduledStep (preserved from RecipeStep by merger)
+    oven_temp_f = step.oven_temp_f
+
     return TimelineEntry(
         time_offset_minutes=step.start_at_minute,
         label=label,
@@ -134,6 +140,10 @@ def _build_timeline_entry(
         heads_up=heads_up,
         is_prep_ahead=_is_meaningful_prep_ahead(step),
         prep_ahead_window=step.prep_ahead_window,
+        merged_from=step.merged_from,
+        allocation=step.allocation,
+        oven_temp_f=oven_temp_f,
+        is_preheat=is_preheat,
     )
 
 

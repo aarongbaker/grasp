@@ -36,6 +36,7 @@ class ScheduledStep(BaseModel):
     depends_on: list[str] = []
     merged_from: list[str] = []  # step_ids consolidated into this merged prep node
     allocation: dict[str, str] = {}  # recipe_name → quantity breakdown for merged steps
+    oven_temp_f: Optional[int] = None  # Fahrenheit oven temperature for oven steps
 
 
 class RecipeDAG(BaseModel):
@@ -87,6 +88,11 @@ class TimelineEntry(BaseModel):
     heads_up: Optional[str] = None  # e.g. "Bake 10–14 min depending on oven"
     is_prep_ahead: bool = False
     prep_ahead_window: Optional[str] = None
+    # M018 merged prep and oven features:
+    merged_from: list[str] = []  # step_ids of original prep steps consolidated into this merged step
+    allocation: dict[str, str] = {}  # recipe_name → quantity breakdown for merged steps (e.g., "3 cups")
+    oven_temp_f: Optional[int] = None  # Fahrenheit oven temperature for oven steps
+    is_preheat: bool = False  # True for injected preheat steps
 
 
 class NaturalLanguageSchedule(BaseModel):

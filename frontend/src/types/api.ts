@@ -340,6 +340,11 @@ export interface TimelineEntry {
   heads_up: string | null;
   is_prep_ahead: boolean;
   prep_ahead_window: string | null;
+  // M018 merged prep and oven features:
+  merged_from?: string[];
+  allocation?: Record<string, string>;
+  oven_temp_f?: number | null;
+  is_preheat?: boolean;
 }
 
 export interface NaturalLanguageSchedule {

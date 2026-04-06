@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "skills": {
+    "async-python-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "e2c6c594828cbbf4f0c181eedcf2bd39a2a49b4f087942b295faf36cdc88c423"
+    },
+    "code-review-excellence": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "0f585a4ad2f6d8353069ca9051c6f0e8865abb9d3a6a268d423784c3c3852962"
+    },
+    "deployment-pipeline-design": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "434554edead3f499a1cf50240c7e36f52946c0c14e78f0c9f9078f21535d717c"
+    },
+    "docx": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "6962db07127ee540a56e4677f65576d0727668a1d67f7da8bc978f10791c2bfe"
+    },
+    "error-handling-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "824c53fa080765f05862d3ec0ef829aaff9f8d544f9de0039b8fcafa6bc1a899"
+    },
+    "fastapi-templates": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "8fdfb9bad6aef892b4f16ef3b07ef5eea3b0497d37eeaeddb07244d657cc8711"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "computedHash": "9e1c8b3103f92fa8092568a44fe64858de7c5c9dc65ce4bea8f168080e889cfd"
+    },
+    "git-advanced-workflows": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "c42c3059154889e4f80818407c6634197eefe87dc752d6a0cad8cfc2391550bb"
+    },
+    "github-actions-templates": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "8604814828637308a8cdc45c53e647f0029395328184937312330e4b8e8c587f"
+    },
+    "multi-stage-dockerfile": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "698bf93a84dae18fd7bd0b1d35c21427307fde78fbdf4624be9726f5f98189ca"
+    },
+    "pdf": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "cfbc539377088ca7e44a813b30c306327385bbd973cd7a721e1743f60837dd62"
+    },
+    "pptx": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "6b8b859d26f93aa059c9870d1ab76b44ab69e3d6757ce4a03cc94cb760888073"
+    },
+    "python-performance-optimization": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "1a7009e7e16fd08c201f4a527a44d4f0d9d1d892b15b92ab3492624b23be22b8"
+    },
+    "python-testing-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "69915bb276b6aec61fe5b283a933f96584f66d14b616ce2060d95757629c6866"
+    },
+    "secrets-management": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "3260008952025bac99ba56ab53eba990dd6a520d6f93960e0471dc777d6d2d79"
+    },
+    "skill-creator": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "b122f4d1e91aa1d83027e050b5b37c3156203ee85458d7b1360bc48167c9e02a"
+    },
+    "uv-package-manager": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "8b02057eb73c69f292981b3325447c0c852fb547b5a22312dd4ecff825e7a404"
+    },
+    "xlsx": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "efd0c8011cf0677d8075cf93867ecec804f9a8754a777e1d2fdb46197e9c247f"
+    }
+  }
+}
