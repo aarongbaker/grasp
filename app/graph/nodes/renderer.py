@@ -112,13 +112,21 @@ def _build_timeline_entry(
         clock_time = _offset_to_clock(step.start_at_minute, start_time[0], start_time[1])
         label = clock_time
 
+    # Format allocation breakdown for merged prep steps
+    action = step.description
+    if step.merged_from and step.allocation:
+        # Sort allocations by recipe name for deterministic output
+        allocation_parts = [f"{qty} for {recipe}" for recipe, qty in sorted(step.allocation.items())]
+        allocation_text = ", ".join(allocation_parts)
+        action = f"{step.description} ({allocation_text})"
+
     return TimelineEntry(
         time_offset_minutes=step.start_at_minute,
         label=label,
         clock_time=clock_time,
         step_id=step.step_id,
         recipe_name=step.recipe_name,
-        action=step.description,
+        action=action,
         resource=step.resource,
         duration_minutes=step.duration_minutes,
         duration_max=step.duration_max,

@@ -60,6 +60,228 @@ ALLOWED_RAG_CHUNK_TYPES = {
     "tip",
 }
 
+
+# ── Ingredient parsing and unit normalization ────────────────────────────────
+
+
+def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
+    """
+    Parse ingredients from raw_recipe using ingredient-parser-nlp and normalize
+    units to canonical system using Pint.
+    
+    Canonical units:
+    - Volume: cup, tbsp, tsp
+    - Weight: gram
+    
+    Returns list of IngredientUse dicts ready for RecipeStep.ingredient_uses.
+    Silent fallback: unconvertible units store None + fallback_reason.
+    Preserves exact prep_method from parser (no synonym normalization per D003).
+    """
+    from ingredient_parser import parse_ingredient
+    from pint import UnitRegistry, DimensionalityError, UndefinedUnitError
+    
+    ureg = UnitRegistry()
+    results = []
+    
+    # Canonical unit preferences (in descending size order for volume)
+    CANONICAL_VOLUME = ["cup", "tablespoon", "teaspoon"]
+    CANONICAL_WEIGHT = "gram"
+    
+    for ing in raw_recipe.ingredients:
+        # Build raw string for parser
+        raw_str = f"{ing.quantity} {ing.name}".strip()
+        
+        try:
+            parsed = parse_ingredient(raw_str)
+            
+            # Extract parsed fields - name, amount, preparation are lists
+            ingredient_name = parsed.name[0].text if parsed.name and len(parsed.name) > 0 else ing.name
+            prep_method = parsed.preparation[0].text if parsed.preparation and len(parsed.preparation) > 0 else ing.preparation
+            quantity_original = ing.quantity
+            
+            # Attempt unit normalization
+            quantity_canonical = None
+            unit_canonical = None
+            fallback_reason = None
+            
+            if parsed.amount and len(parsed.amount) > 0:
+                # Get first amount
+                amount = parsed.amount[0]
+                
+                # Check if we have a quantity
+                if amount.quantity is None:
+                    fallback_reason = "no quantity specified"
+                    results.append({
+                        "ingredient_name": ingredient_name,
+                        "prep_method": prep_method,
+                        "quantity_canonical": quantity_canonical,
+                        "unit_canonical": unit_canonical,
+                        "quantity_original": quantity_original,
+                        "fallback_reason": fallback_reason,
+                    })
+                    continue
+                
+                # Convert Fraction to float
+                quantity = float(amount.quantity)
+                
+                # Get unit - amount.unit is a Pint Unit object
+                unit_obj = amount.unit
+                
+                if unit_obj is None or str(unit_obj) == "" or str(unit_obj) == "dimensionless":
+                    # Dimensionless quantity (e.g., "2 eggs")
+                    fallback_reason = "dimensionless quantity"
+                    results.append({
+                        "ingredient_name": ingredient_name,
+                        "prep_method": prep_method,
+                        "quantity_canonical": quantity_canonical,
+                        "unit_canonical": unit_canonical,
+                        "quantity_original": quantity_original,
+                        "fallback_reason": fallback_reason,
+                    })
+                    continue
+                
+                # Attempt Pint conversion
+                try:
+                    pint_quantity = quantity * unit_obj
+                    
+                    # Try to convert to canonical units
+                    converted = False
+                    
+                    # Try volume units - prefer the largest unit that keeps magnitude >= 1
+                    # CANONICAL_VOLUME is ordered: ["cup", "tablespoon", "teaspoon"]
+                    for vol_unit in CANONICAL_VOLUME:
+                        try:
+                            converted_qty = pint_quantity.to(vol_unit)
+                            magnitude = float(converted_qty.magnitude)
+                            
+                            # Use this unit if magnitude >= 1 (first match wins - largest unit)
+                            if magnitude >= 1.0:
+                                quantity_canonical = magnitude
+                                unit_canonical = vol_unit
+                                converted = True
+                                break
+                        except DimensionalityError:
+                            continue
+                    
+                    # If no volume unit gave magnitude >= 1, use teaspoon (smallest) to avoid tiny fractions
+                    if not converted:
+                        for vol_unit in reversed(CANONICAL_VOLUME):  # Try teaspoon first
+                            try:
+                                converted_qty = pint_quantity.to(vol_unit)
+                                quantity_canonical = float(converted_qty.magnitude)
+                                unit_canonical = vol_unit
+                                converted = True
+                                break
+                            except DimensionalityError:
+                                continue
+                    
+                    # If volume didn't work, try weight
+                    if not converted:
+                        try:
+                            converted_qty = pint_quantity.to(CANONICAL_WEIGHT)
+                            quantity_canonical = float(converted_qty.magnitude)
+                            unit_canonical = CANONICAL_WEIGHT
+                            converted = True
+                        except DimensionalityError:
+                            fallback_reason = f"unconvertible unit: '{unit_obj}'"
+                    
+                except (UndefinedUnitError, AttributeError, ValueError, TypeError) as e:
+                    fallback_reason = f"unconvertible unit: '{unit_obj}'"
+            else:
+                # No amount in parsed result
+                fallback_reason = "no quantity specified"
+            
+            results.append({
+                "ingredient_name": ingredient_name,
+                "prep_method": prep_method,
+                "quantity_canonical": quantity_canonical,
+                "unit_canonical": unit_canonical,
+                "quantity_original": quantity_original,
+                "fallback_reason": fallback_reason,
+            })
+            
+        except Exception as e:
+            # Parser failed completely - fallback with original data
+            logger.warning("Ingredient parsing failed for '%s': %s", raw_str, e)
+            results.append({
+                "ingredient_name": ing.name,
+                "prep_method": ing.preparation,
+                "quantity_canonical": None,
+                "unit_canonical": None,
+                "quantity_original": ing.quantity,
+                "fallback_reason": f"parsing failed: {type(e).__name__}",
+            })
+    
+    return results
+
+
+
+def _link_steps_to_ingredients(
+    steps: list[RecipeStep],
+    normalized_ingredients: list[dict],
+    raw_recipe: RawRecipe,
+) -> list[RecipeStep]:
+    """
+    Parse ingredient tags from LLM output ("Uses: ingredient1, ingredient2")
+    and link to normalized_ingredients, populating RecipeStep.ingredient_uses.
+    
+    Returns new list of RecipeStep objects with ingredient_uses populated.
+    Exact name matching only — no fuzzy matching per Q2 research decision.
+    """
+    from app.models.recipe import IngredientUse
+    
+    # Build lookup from ingredient name to normalized metadata
+    ingredient_lookup = {
+        ing_dict["ingredient_name"].lower().strip(): ing_dict
+        for ing_dict in normalized_ingredients
+    }
+    
+    updated_steps = []
+    for step in steps:
+        # Parse "Uses: X, Y, Z" from description
+        uses_pattern = r"Uses:\s*([^\n]+)"
+        match = re.search(uses_pattern, step.description, re.IGNORECASE)
+        
+        ingredient_uses = []
+        if match:
+            # Extract ingredient names from match
+            ing_names_str = match.group(1).strip()
+            # Split on commas and clean up whitespace
+            ing_names = [name.strip().lower() for name in ing_names_str.split(",")]
+            
+            # Match each ingredient name to normalized data
+            for ing_name in ing_names:
+                if ing_name in ingredient_lookup:
+                    ing_data = ingredient_lookup[ing_name]
+                    ingredient_uses.append(
+                        IngredientUse(
+                            ingredient_name=ing_data["ingredient_name"],
+                            prep_method=ing_data["prep_method"],
+                            quantity_canonical=ing_data["quantity_canonical"],
+                            unit_canonical=ing_data["unit_canonical"],
+                            quantity_original=ing_data["quantity_original"],
+                            fallback_reason=ing_data["fallback_reason"],
+                        )
+                    )
+        
+        # Create new RecipeStep with populated ingredient_uses
+        updated_step = RecipeStep(
+            step_id=step.step_id,
+            description=step.description,
+            duration_minutes=step.duration_minutes,
+            duration_max=step.duration_max,
+            resource=step.resource,
+            depends_on=step.depends_on,
+            can_be_done_ahead=step.can_be_done_ahead,
+            prep_ahead_window=step.prep_ahead_window,
+            prep_ahead_notes=step.prep_ahead_notes,
+            ingredient_uses=ingredient_uses,
+            oven_temp_f=step.oven_temp_f,
+        )
+        updated_steps.append(updated_step)
+    
+    return updated_steps
+
 # ── Structured output wrapper ────────────────────────────────────────────────
 
 
@@ -292,11 +514,23 @@ note the discrepancy in chef_notes.
 
 {rag_text}
 
+## OVEN TEMPERATURE EXTRACTION
+For each step, extract the oven temperature if the step involves oven cooking. Populate the `oven_temp_f` field as follows:
+- **Numeric Fahrenheit temperatures**: Extract directly (e.g., "375°F" → 375, "425°F" → 425)
+- **Celsius temperatures**: Convert to Fahrenheit using (C × 9/5) + 32 (e.g., "150°C" → 302, "200°C" → 392)
+- **Vague heat levels**: Use these predefined ranges:
+  - "high heat" or "hot oven" → 437°F
+  - "medium heat" or "moderate oven" → 362°F
+  - "low heat" or "low oven" → 312°F
+- **Non-oven steps**: Set oven_temp_f to null
+- **Validation**: All extracted temperatures must be in the 200-550°F range. If a temperature falls outside this range, set to null and note in chef_notes.
+
 ## OUTPUT REQUIREMENTS
 1. Generate exactly {len(raw_recipe.steps)} RecipeStep objects, one per flat text step.
-2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures in °C, visual cues, timing details) but preserve the original intent.
-3. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
-4. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
+2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures, visual cues, timing details) but preserve the original intent.
+3. For oven steps, populate oven_temp_f according to the extraction rules above.
+4. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
+5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -318,17 +552,72 @@ def _create_llm() -> ChatAnthropic:
 # ── Per-recipe enrichment ────────────────────────────────────────────────────
 
 
+def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep]:
+    """
+    Inject synthetic preheat step before first oven usage.
+    
+    Scans enriched steps for first step with resource=OVEN and oven_temp_f set.
+    Injects preheat step 12 minutes before that step:
+    - step_id: {slug}_preheat_1
+    - description: 'Preheat oven to {temp}°F'
+    - duration_minutes: 12
+    - resource: Resource.OVEN
+    - oven_temp_f: {temp}
+    - depends_on: []
+    
+    Edge cases:
+    - No oven steps → returns steps unchanged
+    - Multiple oven steps → injects ONE preheat before the first
+    - First step is already oven → preheat becomes step 1, oven becomes step 2
+    - None oven_temp_f for oven step → skip preheat injection
+    
+    Returns new list with preheat injected at position 0 if needed.
+    """
+    # Find first oven step with valid temperature
+    first_oven_idx = None
+    first_oven_temp = None
+    
+    for idx, step in enumerate(steps):
+        if step.resource == Resource.OVEN and step.oven_temp_f is not None:
+            first_oven_idx = idx
+            first_oven_temp = step.oven_temp_f
+            break
+    
+    # No oven usage found → no preheat needed
+    if first_oven_idx is None:
+        return steps
+    
+    # Build preheat step
+    preheat_step = RecipeStep(
+        step_id=f"{slug}_preheat_1",
+        description=f"Preheat oven to {first_oven_temp}°F",
+        duration_minutes=12,
+        resource=Resource.OVEN,
+        oven_temp_f=first_oven_temp,
+        depends_on=[],
+        can_be_done_ahead=False,
+        prep_ahead_window=None,
+        ingredient_uses=[],
+    )
+    
+    # Inject at the beginning
+    return [preheat_step] + steps
+
+
 async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
     user_id: str,
     rag_owner_key: str,
 ) -> tuple[EnrichedRecipe, dict]:
     """
-    Enrich a single RawRecipe: RAG retrieval + LLM structured output.
+    Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient metadata extraction.
     Raises on failure — caller handles per-recipe error isolation.
     Returns (EnrichedRecipe, token_usage_dict).
     """
     slug = _generate_recipe_slug(raw_recipe.name)
+
+    # Parse and normalize ingredients (deterministic, no LLM)
+    normalized_ingredients = _parse_and_normalize_ingredients(raw_recipe)
 
     # RAG retrieval (graceful degradation — returns [] on failure)
     rag_query = f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
@@ -355,12 +644,18 @@ async def _enrich_single_recipe(
     result = await _invoke_llm()
     usage = extract_token_usage(result, "rag_enricher")
 
+    # Link LLM-tagged ingredients to normalized metadata
+    linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
+    
+    # Inject preheat step before first oven usage
+    steps_with_preheat = _inject_preheat_steps(linked_steps, slug)
+
     # Build EnrichedRecipe
     rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
 
     enriched = EnrichedRecipe(
         source=raw_recipe,
-        steps=result.steps,
+        steps=steps_with_preheat,  # Use steps with preheat injection
         rag_sources=rag_source_ids,
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,

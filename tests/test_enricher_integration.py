@@ -21,6 +21,7 @@ from app.graph.nodes.enricher import (
     _build_enrichment_prompt,
     _format_rag_context,
     _generate_recipe_slug,
+    _parse_and_normalize_ingredients,
     _retrieve_rag_context,
     rag_enricher_node,
 )
@@ -252,6 +253,315 @@ def test_retrieve_rag_context_graceful_degradation_on_missing_api_keys():
         assert chunks == []
 
 
+# ── Unit tests for ingredient parsing and normalization ──────────────────────
+
+
+def test_parse_and_normalize_ingredients_success():
+    """Test successful parsing and normalization for metric and imperial units."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="celery", quantity="50g", preparation="diced"),
+            Ingredient(name="flour", quantity="2 cups", preparation="sifted"),
+            Ingredient(name="butter", quantity="1 tablespoon", preparation="melted"),
+            Ingredient(name="milk", quantity="500 milliliters", preparation="warm"),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 4
+    
+    # 50g celery → gram (weight)
+    celery = result[0]
+    assert celery["ingredient_name"] == "celery"
+    assert celery["prep_method"] == "diced"
+    assert celery["quantity_canonical"] is not None
+    assert celery["unit_canonical"] == "gram"
+    assert abs(celery["quantity_canonical"] - 50.0) < 0.1
+    assert celery["quantity_original"] == "50g"
+    assert celery["fallback_reason"] is None
+    
+    # 2 cups flour → cup (volume)
+    flour = result[1]
+    assert flour["ingredient_name"] == "flour"
+    assert flour["prep_method"] == "sifted"
+    assert flour["quantity_canonical"] is not None
+    assert flour["unit_canonical"] == "cup"
+    assert abs(flour["quantity_canonical"] - 2.0) < 0.1
+    assert flour["quantity_original"] == "2 cups"
+    assert flour["fallback_reason"] is None
+    
+    # 1 tablespoon butter → tablespoon (volume)
+    butter = result[2]
+    assert butter["ingredient_name"] == "butter"
+    assert butter["prep_method"] == "melted"
+    assert butter["quantity_canonical"] is not None
+    assert butter["unit_canonical"] == "tablespoon"
+    assert abs(butter["quantity_canonical"] - 1.0) < 0.1
+    assert butter["quantity_original"] == "1 tablespoon"
+    assert butter["fallback_reason"] is None
+    
+    # 500 milliliters milk → cup (volume conversion)
+    milk = result[3]
+    assert milk["ingredient_name"] == "milk"
+    assert milk["prep_method"] == "warm"
+    assert milk["quantity_canonical"] is not None
+    assert milk["unit_canonical"] == "cup"
+    # 500 mL ≈ 2.11 cups
+    assert abs(milk["quantity_canonical"] - 2.11) < 0.1
+    assert milk["quantity_original"] == "500 milliliters"
+    assert milk["fallback_reason"] is None
+
+
+def test_parse_and_normalize_ingredients_fallback():
+    """Test fallback behavior for unconvertible units like 'to taste' and 'a pinch'."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="salt", quantity="to taste", preparation=""),
+            Ingredient(name="pepper", quantity="a pinch", preparation="freshly ground"),
+            Ingredient(name="eggs", quantity="3", preparation="beaten"),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 3
+    
+    # "to taste" → fallback with reason
+    salt = result[0]
+    assert salt["ingredient_name"] == "salt"
+    assert salt["quantity_canonical"] is None
+    assert salt["unit_canonical"] is None
+    assert salt["fallback_reason"] is not None
+    assert "no quantity" in salt["fallback_reason"].lower() or "unconvertible" in salt["fallback_reason"].lower()
+    
+    # "a pinch" → fallback (might parse as quantity but unconvertible unit)
+    pepper = result[1]
+    assert pepper["ingredient_name"] == "pepper"
+    assert pepper["prep_method"] == "freshly ground"
+    assert pepper["quantity_canonical"] is None
+    assert pepper["unit_canonical"] is None
+    assert pepper["fallback_reason"] is not None
+    
+    # "3" (dimensionless) → fallback
+    eggs = result[2]
+    assert eggs["ingredient_name"] == "eggs"
+    assert eggs["prep_method"] == "beaten"
+    assert eggs["quantity_canonical"] is None
+    assert eggs["unit_canonical"] is None
+    assert eggs["fallback_reason"] is not None
+    assert "dimensionless" in eggs["fallback_reason"].lower() or "no quantity" in eggs["fallback_reason"].lower()
+
+
+def test_parse_and_normalize_ingredients_cross_conversion():
+    """Test cross-unit conversions: cups ↔ tbsp, grams ↔ kg."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="water", quantity="16 tablespoons", preparation=""),
+            Ingredient(name="oil", quantity="48 teaspoons", preparation=""),
+            Ingredient(name="sugar", quantity="2.5 kilograms", preparation=""),
+            Ingredient(name="rice", quantity="1500 grams", preparation=""),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 4
+    
+    # 16 tablespoons water → cup (16 tbsp = 1 cup)
+    water = result[0]
+    assert water["ingredient_name"] == "water"
+    assert water["quantity_canonical"] is not None
+    assert water["unit_canonical"] == "cup"
+    assert abs(water["quantity_canonical"] - 1.0) < 0.1
+    assert water["fallback_reason"] is None
+    
+    # 48 teaspoons oil → cup (48 tsp = 1 cup)
+    oil = result[1]
+    assert oil["ingredient_name"] == "oil"
+    assert oil["quantity_canonical"] is not None
+    assert oil["unit_canonical"] == "cup"
+    assert abs(oil["quantity_canonical"] - 1.0) < 0.1
+    assert oil["fallback_reason"] is None
+    
+    # 2.5 kilograms sugar → gram (2.5 kg = 2500 g)
+    sugar = result[2]
+    assert sugar["ingredient_name"] == "sugar"
+    assert sugar["quantity_canonical"] is not None
+    assert sugar["unit_canonical"] == "gram"
+    assert abs(sugar["quantity_canonical"] - 2500.0) < 0.1
+    assert sugar["fallback_reason"] is None
+    
+    # 1500 grams rice → gram (already in canonical weight)
+    rice = result[3]
+    assert rice["ingredient_name"] == "rice"
+    assert rice["quantity_canonical"] is not None
+    assert rice["unit_canonical"] == "gram"
+    assert abs(rice["quantity_canonical"] - 1500.0) < 0.1
+    assert rice["fallback_reason"] is None
+
+
+def test_parse_and_normalize_ingredients_malformed_empty_name():
+    """Test malformed input: empty ingredient name."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="", quantity="100g", preparation=""),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 1
+    # Should handle gracefully, even if parser struggles
+    ing = result[0]
+    assert ing["quantity_original"] == "100g"
+    # Either parsed successfully or fallback reason present
+    assert ing["fallback_reason"] is not None or ing["quantity_canonical"] is not None
+
+
+def test_parse_and_normalize_ingredients_missing_quantity():
+    """Test malformed input: missing quantity → fallback with reason."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="vanilla extract", quantity="", preparation=""),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 1
+    vanilla = result[0]
+    assert vanilla["ingredient_name"] == "vanilla extract"
+    assert vanilla["quantity_canonical"] is None
+    assert vanilla["unit_canonical"] is None
+    assert vanilla["fallback_reason"] is not None
+    assert "no quantity" in vanilla["fallback_reason"].lower()
+
+
+def test_parse_and_normalize_ingredients_zero_quantity():
+    """Test boundary condition: 0 cups."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="water", quantity="0 cups", preparation=""),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 1
+    water = result[0]
+    # Parser might handle 0, or might fallback - either is acceptable
+    # Key: function doesn't crash
+    assert water["ingredient_name"] == "water"
+    assert water["quantity_original"] == "0 cups"
+
+
+def test_parse_and_normalize_ingredients_large_quantity():
+    """Test boundary condition: very large quantities."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=100,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="flour", quantity="50 kilograms", preparation=""),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 1
+    flour = result[0]
+    assert flour["ingredient_name"] == "flour"
+    assert flour["quantity_canonical"] is not None
+    assert flour["unit_canonical"] == "gram"
+    # 50 kg = 50000 g
+    assert abs(flour["quantity_canonical"] - 50000.0) < 1.0
+    assert flour["fallback_reason"] is None
+
+
+def test_parse_and_normalize_ingredients_unicode_names():
+    """Test boundary condition: Unicode ingredient names."""
+    from app.graph.nodes.enricher import _parse_and_normalize_ingredients
+    
+    raw_recipe = RawRecipe(
+        name="Test Recipe",
+        description="Test",
+        servings=4,
+        cuisine="Test",
+        estimated_total_minutes=30,
+        ingredients=[
+            Ingredient(name="crème fraîche", quantity="200g", preparation=""),
+            Ingredient(name="jalapeño", quantity="1 tablespoon", preparation="diced"),
+        ],
+        steps=["Step 1"],
+    )
+    
+    result = _parse_and_normalize_ingredients(raw_recipe)
+    
+    assert len(result) == 2
+    # Should handle Unicode gracefully
+    creme = result[0]
+    assert "cr" in creme["ingredient_name"].lower()
+    assert creme["quantity_canonical"] is not None
+    
+    jalapeno = result[1]
+    assert "jalape" in jalapeno["ingredient_name"].lower()
+    assert jalapeno["quantity_canonical"] is not None
+
+
 # ── Unit tests for node error handling (mocked LLM) ─────────────────────────
 
 
@@ -453,3 +763,103 @@ async def test_enricher_node_produces_valid_enriched_recipes(sample_state):
     print(f"\nEnriched '{enriched.source.name}' into {len(enriched.steps)} structured steps:")
     for s in enriched.steps:
         print(f"  {s.step_id}: {s.resource.value} {s.duration_minutes}min — {s.description[:60]}")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enricher_ingredient_metadata_end_to_end():
+    """
+    Integration test: enricher extracts and normalizes ingredient metadata,
+    links it to steps, and populates RecipeStep.ingredient_uses correctly.
+    
+    Tests diverse ingredient strings: metric, imperial, 'to taste', fractions.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        pytest.skip(SKIP_REASON)
+
+    # Fixture recipe with diverse ingredients
+    raw_recipe = RawRecipe(
+        name="Test Recipe with Diverse Ingredients",
+        cuisine="test",
+        description="A test recipe with metric, imperial, and unconvertible ingredients",
+        servings=4,
+        estimated_total_minutes=30,
+        ingredients=[
+            RawIngredient(name="celery", quantity="2 cups diced", preparation="diced"),
+            RawIngredient(name="butter", quantity="50g", preparation=""),
+            RawIngredient(name="lemon", quantity="1", preparation="juiced"),
+            RawIngredient(name="salt", quantity="to taste", preparation=""),
+        ],
+        steps=[
+            "Melt butter in a pan over medium heat. Uses: butter",
+            "Add celery and cook until softened, about 5 minutes. Uses: celery",
+            "Add lemon juice and season with salt. Uses: lemon, salt",
+            "Serve immediately.",
+        ],
+    )
+
+    state = {
+        "user_id": "test-user",
+        "rag_owner_key": "test-owner",
+        "raw_recipes": [raw_recipe.model_dump()],
+    }
+
+    # Mock RAG to bypass external API
+    with patch("app.graph.nodes.enricher._retrieve_rag_context", return_value=[]):
+        result = await rag_enricher_node(state)
+
+    # Should not have errors
+    assert "errors" not in result or len(result.get("errors", [])) == 0, (
+        f"Enricher returned errors: {result.get('errors')}"
+    )
+
+    enriched_recipes = result["enriched_recipes"]
+    assert len(enriched_recipes) == 1
+
+    enriched = EnrichedRecipe.model_validate(enriched_recipes[0])
+    assert len(enriched.steps) == 4, f"Expected 4 steps, got {len(enriched.steps)}"
+
+    # Verify ingredient_uses populated correctly
+    # Step 1: Uses butter (50g → ~3.5 tbsp)
+    step1 = enriched.steps[0]
+    assert len(step1.ingredient_uses) >= 1, "Step 1 should have at least 1 ingredient"
+    butter_use = next((iu for iu in step1.ingredient_uses if "butter" in iu.ingredient_name.lower()), None)
+    assert butter_use is not None, "Step 1 should use butter"
+    assert butter_use.quantity_canonical is not None, "Butter should have canonical quantity"
+    assert butter_use.unit_canonical in ["tablespoon", "teaspoon", "cup"], f"Butter unit should be volume, got {butter_use.unit_canonical}"
+
+    # Step 2: Uses celery (2 cups)
+    step2 = enriched.steps[1]
+    assert len(step2.ingredient_uses) >= 1, "Step 2 should have at least 1 ingredient"
+    celery_use = next((iu for iu in step2.ingredient_uses if "celery" in iu.ingredient_name.lower()), None)
+    assert celery_use is not None, "Step 2 should use celery"
+    assert celery_use.quantity_canonical == 2.0, f"Celery should be 2 cups, got {celery_use.quantity_canonical}"
+    assert celery_use.unit_canonical == "cup", f"Celery unit should be cup, got {celery_use.unit_canonical}"
+
+    # Step 3: Uses lemon (dimensionless) and salt ('to taste')
+    step3 = enriched.steps[2]
+    assert len(step3.ingredient_uses) >= 1, "Step 3 should have at least 1 ingredient"
+    
+    lemon_use = next((iu for iu in step3.ingredient_uses if "lemon" in iu.ingredient_name.lower()), None)
+    if lemon_use:  # LLM may or may not tag lemon depending on how it interprets "lemon juice"
+        # Lemon is dimensionless ("1 lemon") — should have fallback
+        assert lemon_use.quantity_canonical is None, "Lemon should have no canonical quantity (dimensionless)"
+        assert lemon_use.fallback_reason and "dimensionless" in lemon_use.fallback_reason.lower(), (
+            f"Lemon should have dimensionless fallback, got {lemon_use.fallback_reason}"
+        )
+
+    salt_use = next((iu for iu in step3.ingredient_uses if "salt" in iu.ingredient_name.lower()), None)
+    if salt_use:  # LLM may or may not tag salt depending on interpretation
+        # Salt is 'to taste' — unconvertible
+        assert salt_use.quantity_canonical is None, "Salt 'to taste' should have no canonical quantity"
+        assert salt_use.fallback_reason is not None, "Salt should have fallback reason"
+
+    # Step 4: No ingredients (serve)
+    step4 = enriched.steps[3]
+    assert len(step4.ingredient_uses) == 0, "Step 4 (serve) should have no ingredients"
+
+    print("\n✅ Integration test passed: ingredient metadata extraction and linking work end-to-end")
+    print(f"Step 1: {len(step1.ingredient_uses)} ingredients")
+    print(f"Step 2: {len(step2.ingredient_uses)} ingredients")
+    print(f"Step 3: {len(step3.ingredient_uses)} ingredients")
+    print(f"Step 4: {len(step4.ingredient_uses)} ingredients")

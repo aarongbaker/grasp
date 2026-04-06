@@ -30,6 +30,20 @@ class Ingredient(BaseModel):
     preparation: str = ""  # e.g. "finely diced", "at room temperature"
 
 
+class IngredientUse(BaseModel):
+    """
+    Structured ingredient metadata extracted from recipe steps.
+    Maps natural language ingredient references to canonical units for prep merging.
+    """
+
+    ingredient_name: str  # normalized ingredient name (e.g., "celery")
+    prep_method: str  # extracted preparation method (e.g., "diced", "chopped")
+    quantity_canonical: Optional[float] = None  # normalized quantity (None if unconvertible)
+    unit_canonical: Optional[str] = None  # canonical unit (e.g., "cup", "tbsp", "g")
+    quantity_original: str  # original quantity string from step (e.g., "2 cups", "50g")
+    fallback_reason: Optional[str] = None  # why normalization failed (e.g., "unconvertible unit: 'pinch'")
+
+
 class RecipeStep(BaseModel):
     """
     The scheduling atom. Every scheduling decision flows from these fields.
@@ -47,6 +61,8 @@ class RecipeStep(BaseModel):
     can_be_done_ahead: bool = False
     prep_ahead_window: Optional[str] = None  # e.g. "up to 1 week" — used verbatim
     prep_ahead_notes: Optional[str] = None
+    ingredient_uses: list[IngredientUse] = []  # extracted ingredient metadata for prep merging
+    oven_temp_f: Optional[int] = None  # Fahrenheit integer temp extracted from step description
 
     @field_validator("duration_minutes")
     @classmethod

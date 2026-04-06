@@ -34,6 +34,8 @@ class ScheduledStep(BaseModel):
     prep_ahead_window: Optional[str] = None
     prep_ahead_notes: Optional[str] = None
     depends_on: list[str] = []
+    merged_from: list[str] = []  # step_ids consolidated into this merged prep node
+    allocation: dict[str, str] = {}  # recipe_name → quantity breakdown for merged steps
 
 
 class RecipeDAG(BaseModel):

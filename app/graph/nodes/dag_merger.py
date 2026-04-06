@@ -61,6 +61,20 @@ class _StepInfo:
     prep_ahead_notes: Optional[str] = None
     depends_on: list[str] = field(default_factory=list)
     critical_path_length: int = 0
+    merged_from: list[str] = field(default_factory=list)  # step_ids consolidated into this merged node
+    allocation: dict[str, str] = field(default_factory=dict)  # recipe_name → quantity breakdown
+    oven_temp_f: Optional[int] = None  # Fahrenheit temperature for oven steps
+
+
+@dataclass
+class _OvenInterval:
+    """Track oven usage intervals with temperature for conflict detection."""
+
+    start: int
+    end: int
+    temp_f: Optional[int]
+    recipe_name: str
+    step_id: str
 
 
 def _compute_critical_paths(
@@ -323,16 +337,46 @@ class _IntervalIndex:
         return len(self._starts)
 
 
+def _format_oven_conflict_message(
+    recipe_a: str,
+    temp_a: int,
+    recipe_b: str,
+    temp_b: int,
+    start_minute: int,
+    end_minute: int,
+) -> str:
+    """Format R026-compliant error message for oven temperature conflicts."""
+    # Convert minutes to HH:MM format
+    start_h, start_m = divmod(start_minute, 60)
+    end_h, end_m = divmod(end_minute, 60)
+    start_time = f"{start_h}:{start_m:02d}"
+    end_time = f"{end_h}:{end_m:02d}"
+
+    return (
+        f"Oven temperature conflict: {recipe_a} needs {temp_a}°F while "
+        f"{recipe_b} needs {temp_b}°F from {start_time} to {end_time}. "
+        f"You need a second oven or different recipes."
+    )
+
+
 def _find_earliest_start(
     resource: Resource,
     duration: int,
     earliest_from_deps: int,
     resource_intervals: dict[Resource, "_IntervalIndex"],
     capacities: dict[Resource, float],
+    oven_intervals: Optional[list["_OvenInterval"]] = None,
+    oven_temp_f: Optional[int] = None,
+    step_recipe_name: Optional[str] = None,
 ) -> int:
     """
     Find the earliest start time for a step that satisfies resource constraints.
     PASSIVE steps always start at earliest_from_deps (no capacity limit).
+
+    For OVEN steps with temperature conflicts:
+    - If there's spare capacity, incompatible temps don't matter (use different ovens)
+    - If capacity is full and all slots have incompatible temps, advance time
+    - Only raise error if we can't find a valid slot after many iterations
     """
     if resource == Resource.PASSIVE:
         return earliest_from_deps
@@ -340,13 +384,50 @@ def _find_earliest_start(
     index = resource_intervals[resource]
     cap = capacities[resource]
     candidate = earliest_from_deps
+    TEMP_TOLERANCE_F = 15
 
-    for _ in range(10_000):  # safety valve
+    for iteration in range(10_000):  # safety valve
         window_end = candidate + duration
         overlap_count = index.count_overlapping(candidate, window_end)
 
+        # Check if there's capacity available
         if overlap_count < cap:
+            # There's capacity - can we use it?
+            # For oven steps, only check temps if we need to share with existing intervals
+            # If there's spare capacity, we can use a different oven regardless of temp
             return candidate
+
+        # Capacity is full - check if we can wait for a compatible slot
+        # For oven steps with temps, see if any intervals are compatible
+        if resource == Resource.OVEN and oven_intervals and oven_temp_f is not None:
+            # Find compatible and incompatible intervals that overlap
+            compatible_intervals = []
+            incompatible_intervals = []
+            
+            for interval in oven_intervals:
+                if interval.start < window_end and interval.end > candidate:
+                    if interval.temp_f is not None:
+                        temp_diff = abs(oven_temp_f - interval.temp_f)
+                        if temp_diff <= TEMP_TOLERANCE_F:
+                            compatible_intervals.append(interval)
+                        else:
+                            incompatible_intervals.append(interval)
+            
+            # If we have compatible intervals, we might be able to "share" with them
+            # by waiting for capacity to free up while staying compatible
+            # But since capacity is full, we need to advance time regardless
+            
+            # Advance past the earliest-ending interval
+            # Prefer to advance past incompatible ones if possible
+            if incompatible_intervals:
+                next_end = min(i.end for i in incompatible_intervals)
+            else:
+                next_end = index.min_end_after(candidate)
+                if next_end is None:
+                    return candidate
+            
+            candidate = next_end
+            continue
 
         # Advance past the earliest-ending overlapping interval after candidate
         next_end = index.min_end_after(candidate)
@@ -354,7 +435,164 @@ def _find_earliest_start(
             return candidate  # shouldn't happen, but be safe
         candidate = next_end
 
+    # If we exhausted iterations, check if it's a temperature conflict
+    if resource == Resource.OVEN and oven_intervals and oven_temp_f is not None:
+        window_end = candidate + duration
+        for interval in oven_intervals:
+            if interval.start < window_end and interval.end > candidate:
+                if interval.temp_f is not None:
+                    temp_diff = abs(oven_temp_f - interval.temp_f)
+                    if temp_diff > TEMP_TOLERANCE_F:
+                        raise ResourceConflictError(
+                            _format_oven_conflict_message(
+                                step_recipe_name or "Recipe",
+                                oven_temp_f,
+                                interval.recipe_name,
+                                interval.temp_f,
+                                max(candidate, interval.start),
+                                min(window_end, interval.end),
+                            )
+                        )
+    
     raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
+
+
+def _detect_merge_candidates(
+    validated_recipes: list[ValidatedRecipe],
+) -> dict[tuple[str, str], list[tuple[str, str, float, str]]]:
+    """
+    Detect steps that can be merged based on exact ingredient+prep match.
+
+    Returns a dict mapping (ingredient_name, prep_method) → list of (step_id, recipe_name, quantity, unit).
+    Only includes tuples with 2+ steps (mergeable).
+    """
+    # Build index: (ingredient, prep_method) → list of (step_id, recipe_name, quantity, unit)
+    candidates: dict[tuple[str, str], list[tuple[str, str, float, str]]] = {}
+
+    for vr in validated_recipes:
+        recipe_name = vr.source.source.name
+        for step in vr.source.steps:
+            # Only consider steps with ingredient_uses metadata
+            if not step.ingredient_uses:
+                continue
+
+            for ing_use in step.ingredient_uses:
+                # Only merge if we have canonical quantity (successful normalization)
+                if ing_use.quantity_canonical is None or ing_use.unit_canonical is None:
+                    continue
+
+                key = (ing_use.ingredient_name, ing_use.prep_method)
+                if key not in candidates:
+                    candidates[key] = []
+
+                candidates[key].append((
+                    step.step_id,
+                    recipe_name,
+                    ing_use.quantity_canonical,
+                    ing_use.unit_canonical,
+                ))
+
+    # Filter to only mergeable groups (2+ steps)
+    return {k: v for k, v in candidates.items() if len(v) >= 2}
+
+
+def _create_merged_steps(
+    merge_candidates: dict[tuple[str, str], list[tuple[str, str, float, str]]],
+    all_steps: list[_StepInfo],
+) -> tuple[list[_StepInfo], dict[str, str]]:
+    """
+    Create synthetic merged prep nodes for detected candidates.
+
+    Returns:
+        - Updated step list with merged steps added and original steps removed
+        - step_id_rewiring dict: original_step_id → merged_step_id
+    """
+    step_id_rewiring: dict[str, str] = {}
+    steps_to_remove: set[str] = set()
+    merged_steps: list[_StepInfo] = []
+
+    merge_counter = 1
+
+    for (ingredient, prep_method), matches in merge_candidates.items():
+        # Create synthetic merged step
+        merged_step_id = f"merged_{ingredient}_{prep_method}_{merge_counter}".replace(" ", "_").lower()
+        merge_counter += 1
+
+        # Aggregate total quantity
+        total_quantity = sum(qty for _, _, qty, _ in matches)
+        unit = matches[0][3]  # All should have same unit (same canonical unit)
+
+        # Build allocation dict: recipe_name → quantity string
+        allocation: dict[str, str] = {}
+        for step_id, recipe_name, qty, unit_str in matches:
+            allocation[recipe_name] = f"{qty} {unit_str}"
+            step_id_rewiring[step_id] = merged_step_id
+            steps_to_remove.add(step_id)
+
+        # Find one of the original steps to copy metadata from (use first match)
+        original_step_id = matches[0][0]
+        original_step = next((s for s in all_steps if s.step_id == original_step_id), None)
+
+        if original_step is None:
+            continue
+
+        # Create merged step with aggregated description
+        merged_description = f"Prep {total_quantity} {unit} {prep_method} {ingredient}"
+
+        merged_step = _StepInfo(
+            step_id=merged_step_id,
+            recipe_name="[merged]",  # Synthetic recipe name
+            recipe_slug="merged",
+            description=merged_description,
+            resource=original_step.resource,
+            duration_minutes=original_step.duration_minutes,
+            duration_max=original_step.duration_max,
+            required_equipment=original_step.required_equipment.copy(),
+            can_be_done_ahead=original_step.can_be_done_ahead,
+            prep_ahead_window=original_step.prep_ahead_window,
+            prep_ahead_notes=original_step.prep_ahead_notes,
+            depends_on=[],  # Merged step has no dependencies (earliest prep)
+        )
+
+        # Store merge metadata in the step for later use
+        # We'll attach this as extra attributes for the scheduler to preserve
+        merged_step.merged_from = [step_id for step_id, _, _, _ in matches]
+        merged_step.allocation = allocation
+
+        merged_steps.append(merged_step)
+
+    # Remove original steps and add merged steps
+    updated_steps = [s for s in all_steps if s.step_id not in steps_to_remove]
+    updated_steps.extend(merged_steps)
+
+    return updated_steps, step_id_rewiring
+
+
+def _rewire_dependencies(
+    all_edges: list[tuple[str, str]],
+    step_id_rewiring: dict[str, str],
+) -> list[tuple[str, str]]:
+    """
+    Rewire edges to point to merged step IDs where applicable.
+
+    Rules:
+    - If source step was merged, outgoing edges become edges from merged step
+    - If target step was merged, incoming edges become edges to merged step
+    - Deduplicate edges after rewiring
+    """
+    rewired_edges: set[tuple[str, str]] = set()
+
+    for src, dst in all_edges:
+        # Rewire source
+        new_src = step_id_rewiring.get(src, src)
+        # Rewire destination
+        new_dst = step_id_rewiring.get(dst, dst)
+
+        # Skip self-loops (can happen if both endpoints were merged to same node)
+        if new_src != new_dst:
+            rewired_edges.add((new_src, new_dst))
+
+    return list(rewired_edges)
 
 
 def _merge_dags(
@@ -367,6 +605,7 @@ def _merge_dags(
     Pure algorithmic greedy list scheduler.
 
     Joins recipe_dags (edges) with validated_recipes (step details),
+    detects shared prep opportunities, merges exact ingredient+prep matches,
     computes critical paths, and schedules steps one at a time in
     priority order at the earliest feasible time.
 
@@ -410,10 +649,19 @@ def _merge_dags(
                 prep_ahead_window=step.prep_ahead_window,
                 prep_ahead_notes=step.prep_ahead_notes,
                 depends_on=list(step.depends_on),
+                oven_temp_f=step.oven_temp_f,  # Preserve oven temperature metadata
             )
             all_steps.append(info)
 
         all_edges.extend(dag.edges)
+
+    # Detect merge candidates and create merged steps
+    merge_candidates = _detect_merge_candidates(validated_recipes)
+    if merge_candidates:
+        all_steps, step_id_rewiring = _create_merged_steps(merge_candidates, all_steps)
+        all_edges = _rewire_dependencies(all_edges, step_id_rewiring)
+    else:
+        step_id_rewiring = {}
 
     if not all_steps:
         raise ResourceConflictError("No steps to schedule")
@@ -429,6 +677,7 @@ def _merge_dags(
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
     resource_intervals: dict[Resource, _IntervalIndex] = {r: _IntervalIndex() for r in Resource}
+    oven_intervals: list[_OvenInterval] = []  # Track oven usage with temperature for conflict detection
 
     # Equipment intervals — each piece of equipment has capacity 1
     equipment_names: set[str] = set()
@@ -474,6 +723,9 @@ def _merge_dags(
             earliest,
             resource_intervals,
             capacities,
+            oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+            oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+            step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
         )
 
         # Advance past equipment conflicts (each equipment piece has capacity 1)
@@ -497,6 +749,9 @@ def _merge_dags(
                         start,
                         resource_intervals,
                         capacities,
+                        oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+                        oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+                        step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
                     )
                     break
 
@@ -505,6 +760,16 @@ def _merge_dags(
         # Record resource interval (PASSIVE doesn't consume capacity)
         if step.resource != Resource.PASSIVE:
             resource_intervals[step.resource].add(start, end)
+
+        # Record oven interval with temperature for conflict detection
+        if step.resource == Resource.OVEN:
+            oven_intervals.append(_OvenInterval(
+                start=start,
+                end=end,
+                temp_f=step.oven_temp_f,
+                recipe_name=step.recipe_name,
+                step_id=step.step_id,
+            ))
 
         # Record equipment intervals
         for eq in constrained_equipment:
@@ -528,6 +793,8 @@ def _merge_dags(
                 prep_ahead_window=step.prep_ahead_window,
                 prep_ahead_notes=step.prep_ahead_notes,
                 depends_on=step.depends_on,
+                merged_from=step.merged_from,
+                allocation=step.allocation,
             )
         )
 
