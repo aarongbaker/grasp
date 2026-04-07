@@ -27,6 +27,8 @@ function HeadsUpCallout({ text }: { text: string }) {
 }
 
 function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEntry; isLast: boolean; stepNum?: number; stepColor?: string }) {
+  const isMerged = entry.merged_from && entry.merged_from.length > 0;
+  
   return (
     <div className={styles.timelineRow}>
       {/* Time label */}
@@ -39,7 +41,14 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
       >
         <div className={styles.recipeName}>
           {stepNum != null && <span className={styles.stepNum} style={stepColor ? { color: stepColor } : undefined}>{stepNum}.</span>}
-          {entry.recipe_name}
+          {isMerged ? (
+            <>
+              <span className={styles.sharedPrepLabel}>Shared Prep</span>
+              <span className={styles.sharedPrepBadge}>SHARED PREP</span>
+            </>
+          ) : (
+            entry.recipe_name
+          )}
         </div>
         <p className={styles.action}>{entry.action}</p>
         <div className={styles.inlineMeta}>
