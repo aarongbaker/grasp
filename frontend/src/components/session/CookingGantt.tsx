@@ -118,7 +118,13 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
     const seen = new Map<string, string>();
     for (const entry of timeline) {
       if (!seen.has(entry.recipe_name)) {
-        seen.set(entry.recipe_name, LANE_COLORS[seen.size % LANE_COLORS.length]);
+        // Use neutral gray for merged prep lane
+        const isMerged = entry.merged_from && entry.merged_from.length > 0;
+        if (isMerged) {
+          seen.set(entry.recipe_name, '#7a8080');
+        } else {
+          seen.set(entry.recipe_name, LANE_COLORS[seen.size % LANE_COLORS.length]);
+        }
       }
     }
     return seen;
@@ -227,10 +233,12 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                 {lanes.map((lane) => {
                   const color = recipeColorMap.get(lane.recipe) ?? LANE_COLORS[0];
                   const segments = mergeTasks(lane.tasks, stepNumbers);
+                  const isMerged = lane.tasks[0]?.merged_from && lane.tasks[0].merged_from.length > 0;
+                  const laneLabel = isMerged ? 'Shared Prep' : lane.recipe;
 
                   return (
                     <div key={lane.recipe} className={styles.lane}>
-                      <div className={styles.laneLabel}>{lane.recipe}</div>
+                      <div className={styles.laneLabel}>{laneLabel}</div>
                       <div className={styles.barArea}>
                         {segments.map((seg) => {
                           const leftPct = ((seg.startMin - windowStart) / windowDuration) * 100;

@@ -312,6 +312,28 @@ const s = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
+  sharedPrepBadge: {
+    fontFamily: 'JetBrains Mono',
+    fontSize: 6,
+    color: C.accentCool,
+    backgroundColor: '#1f2626',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#3a4545',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginLeft: 4,
+  },
+  sharedPrepRecipeName: {
+    fontSize: 8,
+    fontWeight: 700,
+    color: C.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    width: 104,
+  },
   warningText: {
     fontSize: 8,
     color: C.warning,
@@ -350,15 +372,25 @@ function TimelineSection({ label, entries }: { label: string; entries: TimelineE
   return (
     <View>
       <Text style={s.sectionLabel}>{label}</Text>
-      {entries.map((e) => (
-        <View key={e.step_id} style={s.timelineRow} wrap={false}>
-          <Text style={s.timelineTime}>{e.label}</Text>
-          <Text style={s.timelineRecipe}>{e.recipe_name}</Text>
-          <Text style={s.timelineAction}>{e.action}</Text>
-          <Text style={s.timelineResource}>{RESOURCE_LABELS[e.resource]}</Text>
-          <Text style={s.timelineDuration}>{fmtDuration(e.duration_minutes, e.duration_max)}</Text>
-        </View>
-      ))}
+      {entries.map((e) => {
+        const isMerged = e.merged_from && e.merged_from.length > 0;
+        return (
+          <View key={e.step_id} style={s.timelineRow} wrap={false}>
+            <Text style={s.timelineTime}>{e.label}</Text>
+            {isMerged ? (
+              <View style={{ width: 104, flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={s.sharedPrepRecipeName}>Shared Prep</Text>
+                <Text style={s.sharedPrepBadge}>SHARED</Text>
+              </View>
+            ) : (
+              <Text style={s.timelineRecipe}>{e.recipe_name}</Text>
+            )}
+            <Text style={s.timelineAction}>{e.action}</Text>
+            <Text style={s.timelineResource}>{RESOURCE_LABELS[e.resource]}</Text>
+            <Text style={s.timelineDuration}>{fmtDuration(e.duration_minutes, e.duration_max)}</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
