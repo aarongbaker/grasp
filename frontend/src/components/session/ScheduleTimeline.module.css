@@ -196,6 +196,43 @@
   letter-spacing: 0.02em;
 }
 
+/* Preheat step styling */
+.preheatStep {
+  background: rgba(237, 137, 54, 0.04);
+  border-left-color: var(--cost-warning) !important;
+}
+
+.preheatLabel {
+  color: var(--text-muted);
+  margin-right: var(--space-xs);
+}
+
+.preheatBadge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--cost-warning);
+  background: rgba(237, 137, 54, 0.10);
+  border: 1px solid rgba(237, 137, 54, 0.20);
+  padding: 1px var(--space-sm);
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+}
+
+/* Oven temperature badge */
+.ovenTempBadge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--cost-warning);
+  background: rgba(237, 137, 54, 0.10);
+  border: 1px solid rgba(237, 137, 54, 0.20);
+  padding: 1px var(--space-sm);
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+  font-family: var(--font-mono);
+}
+
 /* Day-of Recipe Steps */
 .timelineRow {
   display: grid;

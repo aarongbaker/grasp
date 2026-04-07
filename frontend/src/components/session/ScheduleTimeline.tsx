@@ -28,6 +28,8 @@ function HeadsUpCallout({ text }: { text: string }) {
 
 function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEntry; isLast: boolean; stepNum?: number; stepColor?: string }) {
   const isMerged = entry.merged_from && entry.merged_from.length > 0;
+  const isPreheat = entry.is_preheat === true;
+  const hasOvenTemp = entry.resource === 'oven' && entry.oven_temp_f != null;
   
   return (
     <div className={styles.timelineRow}>
@@ -36,7 +38,7 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
 
       {/* Content with colored left border */}
       <div
-        className={`${styles.rowContent} ${isLast ? styles.rowContentLast : ''}`}
+        className={`${styles.rowContent} ${isLast ? styles.rowContentLast : ''} ${isPreheat ? styles.preheatStep : ''}`}
         style={stepColor ? { borderLeftColor: stepColor } : undefined}
       >
         <div className={styles.recipeName}>
@@ -45,6 +47,11 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
             <>
               <span className={styles.sharedPrepLabel}>Shared Prep</span>
               <span className={styles.sharedPrepBadge}>SHARED PREP</span>
+            </>
+          ) : isPreheat ? (
+            <>
+              <span className={styles.preheatLabel}>Preheat</span>
+              <span className={styles.preheatBadge}>PREHEAT</span>
             </>
           ) : (
             entry.recipe_name
@@ -59,6 +66,11 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
           {entry.prep_ahead_window && (
             <span className={styles.prepAheadTag} title="This step can be done ahead of time">
               up to {entry.prep_ahead_window}
+            </span>
+          )}
+          {hasOvenTemp && (
+            <span className={styles.ovenTempBadge} title="Oven temperature">
+              {entry.oven_temp_f}°F
             </span>
           )}
         </div>

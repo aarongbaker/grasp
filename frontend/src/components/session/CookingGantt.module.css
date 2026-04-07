@@ -185,6 +185,12 @@
   min-width: 2px;
 }
 
+/* Preheat bar styling — dashed border with lighter opacity */
+.preheatBar {
+  border: 1.5px dashed rgba(255, 255, 255, 0.5);
+  opacity: 0.65;
+}
+
 /* ── Prep-ahead bars (inline) ── */
 .prepBar {
   border-radius: 4px;

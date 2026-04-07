@@ -137,7 +137,14 @@ export function SessionDetailPage() {
       {isFailed && (
         <div className={styles.errorBanner}>
           <div className={styles.errorTitle}>Pipeline failed</div>
-          {session.error_summary || 'An unexpected error occurred. Please try again.'}
+          <div className={styles.errorDetail}>
+            {session.error_summary || 'An unexpected error occurred. Please try again.'}
+          </div>
+          {session.error_summary?.includes('Oven temperature conflict:') && (
+            <div className={styles.errorHint}>
+              💡 This menu requires different oven temperatures at the same time. Try adding a second oven in your kitchen settings, or select different recipes.
+            </div>
+          )}
         </div>
       )}
 
@@ -147,7 +154,12 @@ export function SessionDetailPage() {
           {session.status === 'partial' && session.error_summary && (
             <div className={styles.errorBanner}>
               <div className={styles.errorTitle}>Completed with issues</div>
-              {session.error_summary}
+              <div className={styles.errorDetail}>{session.error_summary}</div>
+              {session.error_summary?.includes('Oven temperature conflict:') && (
+                <div className={styles.errorHint}>
+                  💡 Some recipes couldn't be scheduled due to oven temperature conflicts. Consider adding a second oven or adjusting your recipe selection.
+                </div>
+              )}
             </div>
           )}
 

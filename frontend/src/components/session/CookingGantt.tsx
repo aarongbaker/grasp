@@ -254,6 +254,15 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                           const solidWidthPct = (solidPct / (solidPct + bufferPct || 1)) * 100;
                           const bufferWidthPct = (bufferPct / (solidPct + bufferPct || 1)) * 100;
 
+                          // Check for oven temp and preheat status on tasks in this segment
+                          const segmentTasks = lane.tasks.filter((t) =>
+                            seg.key.split('+').includes(t.step_id)
+                          );
+                          const ovenTemp = segmentTasks.find(
+                            (t) => t.resource === 'oven' && t.oven_temp_f != null
+                          )?.oven_temp_f;
+                          const isPreheat = segmentTasks.some((t) => t.is_preheat === true);
+
                           return (
                             <div
                               key={seg.key}
@@ -263,10 +272,13 @@ export function CookingGantt({ timeline, totalDurationMinutes }: CookingGanttPro
                               tabIndex={0}
                             >
                               <div
-                                className={styles.bar}
+                                className={`${styles.bar} ${isPreheat ? styles.preheatBar : ''}`}
                                 style={{ width: `${solidWidthPct}%`, backgroundColor: color }}
                               >
-                                <span className={styles.barLabel}>{seg.label}</span>
+                                <span className={styles.barLabel}>
+                                  {seg.label}
+                                  {ovenTemp != null && ` · ${ovenTemp}°F`}
+                                </span>
                               </div>
                               {bufferPct > 0 && (
                                 <div

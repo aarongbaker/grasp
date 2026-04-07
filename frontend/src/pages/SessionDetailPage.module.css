@@ -100,6 +100,21 @@
   margin-bottom: var(--space-xs);
 }
 
+.errorDetail {
+  margin-bottom: var(--space-sm);
+}
+
+.errorHint {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(237, 137, 54, 0.08);
+  border-left: 3px solid var(--cost-warning);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
 .progressRow {
   display: flex;
   align-items: center;
