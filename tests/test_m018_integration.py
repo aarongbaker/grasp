@@ -280,14 +280,14 @@ class TestSharedPrepIntegration:
 class TestOvenConflictIntegration:
     """Integration tests for R028: Oven conflict detection."""
 
-    def test_single_oven_serializes_different_temps(self):
+    def test_single_oven_serializes_different_temps_without_serving_time(self):
         """
-        Single oven serializes steps with different temperatures.
-        
+        Single oven serializes steps with different temperatures in ASAP mode.
+
         Recipe A: 375°F for 60 minutes
         Recipe B: 450°F for 60 minutes
         Kitchen: 1 oven (has_second_oven=False)
-        Result: Steps are serialized (no overlap), no ResourceConflictError
+        Result: Steps are serialized (no overlap) and typed metadata reports resequencing.
         """
         dag_a, val_a = _make_recipe_with_oven(
             "Recipe A", "recipe_a", "a_bake", 375, 60
@@ -307,12 +307,18 @@ class TestOvenConflictIntegration:
         # Steps should be serialized (no overlap)
         step_a = next(s for s in result.scheduled_steps if "Recipe A" in s.recipe_name)
         step_b = next(s for s in result.scheduled_steps if "Recipe B" in s.recipe_name)
-        
+
         assert not _steps_overlap(step_a, step_b), (
             f"Steps should be serialized, but they overlap: "
             f"A: {step_a.start_at_minute}-{step_a.end_at_minute}, "
             f"B: {step_b.start_at_minute}-{step_b.end_at_minute}"
         )
+        assert result.one_oven_conflict.classification == "resequence_required"
+        assert result.one_oven_conflict.remediation.suggested_actions == ["Bake Recipe B after Recipe A finishes."]
+        assert result.one_oven_conflict.remediation.delaying_recipe_names == ["Recipe B"]
+        assert result.one_oven_conflict.remediation.blocking_recipe_names == ["Recipe A"]
+        assert result.one_oven_conflict.affected_step_ids == ["a_bake", "b_bake"]
+        assert "Single-oven schedule remains feasible" in (result.one_oven_conflict.remediation.notes or "")
 
     def test_dual_oven_parallel_temps(self):
         """
@@ -353,8 +359,67 @@ class TestOvenConflictIntegration:
         # The actual overlap depends on scheduler's greedy algorithm and other factors
         assert step_a.resource == Resource.OVEN
         assert step_b.resource == Resource.OVEN
+        assert result.one_oven_conflict.classification == "compatible"
+        assert result.one_oven_conflict.has_second_oven is True
 
-    def test_temp_tolerance_allows_sharing(self):
+    def test_finish_together_single_oven_conflicting_temps_is_irreconcilable(self):
+        dag_a, val_a = _make_recipe_with_oven("Recipe A", "recipe_a", "a_bake", 375, 60)
+        dag_b, val_b = _make_recipe_with_oven("Recipe B", "recipe_b", "b_bake", 450, 60)
+
+        with pytest.raises(ResourceConflictError) as exc_info:
+            _merge_dags(
+                [dag_a, dag_b],
+                [val_a, val_b],
+                DEFAULT_KITCHEN,
+                serving_time="18:00",
+            )
+
+        metadata = exc_info.value.metadata
+        assert metadata["classification"] == "irreconcilable"
+        assert metadata["temperature_gap_f"] == 75
+        assert metadata["blocking_recipe_names"] == ["Recipe A", "Recipe B"]
+        assert metadata["affected_step_ids"] == ["a_bake", "b_bake"]
+        assert metadata["remediation"]["requires_resequencing"] is False
+        assert metadata["remediation"]["blocking_recipe_names"] == ["Recipe A", "Recipe B"]
+        assert metadata["remediation"]["suggested_actions"] == ["Use a second oven or change recipes."]
+        assert "Oven temperature conflict" in (metadata["remediation"]["notes"] or "")
+
+    def test_missing_temp_keeps_finish_together_schedule_conservative(self):
+        raw_b = RawRecipe(
+            name="Recipe B",
+            description="Test recipe requiring oven with no explicit temperature",
+            servings=2,
+            cuisine="test",
+            estimated_total_minutes=60,
+            ingredients=[],
+            steps=["Hold warm in oven for 60 minutes"],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(
+                    step_id="b_bake",
+                    description="Hold warm in oven",
+                    duration_minutes=60,
+                    resource=Resource.OVEN,
+                    oven_temp_f=None,
+                )
+            ],
+        )
+        dag_a, val_a = _make_recipe_with_oven("Recipe A", "recipe_a", "a_bake", 375, 60)
+        dag_b = RecipeDAG(recipe_name="Recipe B", recipe_slug="recipe_b", steps=[], edges=[])
+        val_b = _make_validated(enriched_b)
+
+        result = _merge_dags(
+            [dag_a, dag_b],
+            [val_a, val_b],
+            DEFAULT_KITCHEN,
+            serving_time="18:00",
+        )
+
+        assert result.one_oven_conflict.classification == "compatible"
+        assert result.one_oven_conflict.temperature_gap_f is None
+
         """
         Temperature tolerance (≤15°F) allows oven sharing.
         
@@ -385,3 +450,5 @@ class TestOvenConflictIntegration:
         # Key verification: no ResourceConflictError raised
         assert step_a.resource == Resource.OVEN
         assert step_b.resource == Resource.OVEN
+        assert result.one_oven_conflict.classification == "compatible"
+        assert result.one_oven_conflict.temperature_gap_f == 10

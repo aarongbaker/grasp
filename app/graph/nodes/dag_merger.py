@@ -29,13 +29,15 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Optional
 
+from pydantic import ValidationError
+
 import networkx as nx
 from pydantic import TypeAdapter
 
 from app.models.enums import ErrorType, Resource
 from app.models.pipeline import GRASPState
 from app.models.recipe import ValidatedRecipe
-from app.models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
+from app.models.scheduling import MergedDAG, OneOvenConflictSummary, RecipeDAG, ScheduledStep
 from app.models.user import BurnerDescriptor
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,9 @@ logger = logging.getLogger(__name__)
 class ResourceConflictError(Exception):
     """Raised when the scheduler cannot find a valid time slot."""
 
-    pass
+    def __init__(self, message: str, metadata: Optional[dict[str, Any]] = None):
+        super().__init__(message)
+        self.metadata = metadata or {}
 
 
 @dataclass
@@ -387,6 +391,177 @@ def _format_oven_conflict_message(
     )
 
 
+def _build_one_oven_conflict_metadata(
+    oven_intervals: list[_OvenInterval],
+    has_second_oven: bool,
+    tolerance_f: int = 15,
+    *,
+    treat_overlap_as_irreconcilable: bool = False,
+) -> OneOvenConflictSummary:
+    """Summarize one-oven temperature feasibility from oven demand windows.
+
+    Classification is conservative and intentionally separates two views:
+    - already-scheduled windows can be reported as resequence_required when the
+      scheduler proved a single-oven ordering exists
+    - intended overlapping windows can be reported as irreconcilable when a
+      finish-together request or other upstream timing contract makes the overlap
+      a hard requirement
+    - missing temperatures stay compatible so we do not invent certainty from
+      sparse metadata
+    """
+    summary: dict[str, Any] = {
+        "classification": "compatible",
+        "tolerance_f": tolerance_f,
+        "has_second_oven": has_second_oven,
+        "temperature_gap_f": None,
+        "blocking_recipe_names": [],
+        "affected_step_ids": [],
+        "remediation": {
+            "requires_resequencing": False,
+            "suggested_actions": [],
+            "delaying_recipe_names": [],
+            "blocking_recipe_names": [],
+            "notes": None,
+        },
+    }
+
+    if has_second_oven or len(oven_intervals) < 2:
+        return OneOvenConflictSummary.model_validate(summary)
+
+    max_gap: Optional[int] = None
+    resequence_pair: Optional[tuple[_OvenInterval, _OvenInterval, int]] = None
+    irreconcilable_pair: Optional[tuple[_OvenInterval, _OvenInterval, int]] = None
+
+    for idx, interval_a in enumerate(oven_intervals):
+        if interval_a.temp_f is None:
+            continue
+        for interval_b in oven_intervals[idx + 1 :]:
+            if interval_b.temp_f is None:
+                continue
+            gap = abs(interval_a.temp_f - interval_b.temp_f)
+            if max_gap is None or gap > max_gap:
+                max_gap = gap
+            if gap <= tolerance_f:
+                continue
+
+            overlaps = interval_a.start < interval_b.end and interval_b.start < interval_a.end
+            if overlaps:
+                if irreconcilable_pair is None:
+                    irreconcilable_pair = (interval_a, interval_b, gap)
+                if not treat_overlap_as_irreconcilable and resequence_pair is None:
+                    earlier, later = (interval_a, interval_b)
+                    if interval_b.start < interval_a.start:
+                        earlier, later = interval_b, interval_a
+                    resequence_pair = (earlier, later, gap)
+            elif resequence_pair is None:
+                earlier, later = (interval_a, interval_b)
+                if interval_b.start < interval_a.start:
+                    earlier, later = interval_b, interval_a
+                resequence_pair = (earlier, later, gap)
+
+    if max_gap is not None:
+        summary["temperature_gap_f"] = max_gap
+
+    if irreconcilable_pair is not None and treat_overlap_as_irreconcilable:
+        left, right, gap = irreconcilable_pair
+        overlap_start = max(left.start, right.start)
+        overlap_end = min(left.end, right.end)
+        blocking_recipe_names = [left.recipe_name, right.recipe_name]
+        affected_step_ids = [left.step_id, right.step_id]
+        summary.update(
+            {
+                "classification": "irreconcilable",
+                "temperature_gap_f": gap,
+                "blocking_recipe_names": blocking_recipe_names,
+                "affected_step_ids": affected_step_ids,
+                "remediation": {
+                    "requires_resequencing": False,
+                    "suggested_actions": ["Use a second oven or change recipes."],
+                    "delaying_recipe_names": [],
+                    "blocking_recipe_names": blocking_recipe_names,
+                    "notes": _format_oven_conflict_message(
+                        left.recipe_name,
+                        left.temp_f,
+                        right.recipe_name,
+                        right.temp_f,
+                        overlap_start,
+                        overlap_end,
+                    ),
+                },
+            }
+        )
+        return OneOvenConflictSummary.model_validate(summary)
+
+    if resequence_pair is not None:
+        blocker, delayed, gap = resequence_pair
+        summary.update(
+            {
+                "classification": "resequence_required",
+                "temperature_gap_f": gap,
+                "blocking_recipe_names": [blocker.recipe_name, delayed.recipe_name],
+                "affected_step_ids": [blocker.step_id, delayed.step_id],
+                "remediation": {
+                    "requires_resequencing": True,
+                    "suggested_actions": [f"Bake {delayed.recipe_name} after {blocker.recipe_name} finishes."],
+                    "delaying_recipe_names": [delayed.recipe_name],
+                    "blocking_recipe_names": [blocker.recipe_name],
+                    "notes": "Single-oven schedule remains feasible by staging incompatible oven temperatures into separate windows.",
+                },
+            }
+        )
+
+    return OneOvenConflictSummary.model_validate(summary)
+
+
+def _build_planned_oven_intervals(
+    all_steps: list[_StepInfo],
+    all_edges: list[tuple[str, str]],
+    finish_offsets: dict[str, int],
+) -> list[_OvenInterval]:
+    """Build conservative oven demand windows before resource-capacity placement.
+
+    This captures when oven steps *would* want to run from dependency timing plus
+    finish-together offsets, so one-oven classification can tell the difference
+    between a menu that merely needs staging and one whose requested windows are
+    fundamentally incompatible.
+    """
+    if not all_steps:
+        return []
+
+    by_step_id = {step.step_id: step for step in all_steps}
+    earliest_end: dict[str, int] = {}
+
+    graph = nx.DiGraph()
+    graph.add_nodes_from(by_step_id.keys())
+    graph.add_edges_from(all_edges)
+
+    for step_id in nx.topological_sort(graph):
+        step = by_step_id[step_id]
+        earliest_start = max((earliest_end[dep] for dep in step.depends_on), default=0)
+        if _is_cooking_step(step.resource) and step.recipe_name in finish_offsets:
+            earliest_start = max(earliest_start, finish_offsets[step.recipe_name])
+        earliest_end[step_id] = earliest_start + step.duration_minutes
+
+    planned: list[_OvenInterval] = []
+    for step in all_steps:
+        if step.resource != Resource.OVEN:
+            continue
+        end = earliest_end.get(step.step_id)
+        if end is None:
+            continue
+        start = end - step.duration_minutes
+        planned.append(
+            _OvenInterval(
+                start=start,
+                end=end,
+                temp_f=step.oven_temp_f,
+                recipe_name=step.recipe_name,
+                step_id=step.step_id,
+            )
+        )
+    return planned
+
+
 def _find_earliest_start(
     resource: Resource,
     duration: int,
@@ -471,16 +646,30 @@ def _find_earliest_start(
                 if interval.temp_f is not None:
                     temp_diff = abs(oven_temp_f - interval.temp_f)
                     if temp_diff > TEMP_TOLERANCE_F:
-                        raise ResourceConflictError(
-                            _format_oven_conflict_message(
-                                step_recipe_name or "Recipe",
-                                oven_temp_f,
-                                interval.recipe_name,
-                                interval.temp_f,
-                                max(candidate, interval.start),
-                                min(window_end, interval.end),
-                            )
+                        message = _format_oven_conflict_message(
+                            step_recipe_name or "Recipe",
+                            oven_temp_f,
+                            interval.recipe_name,
+                            interval.temp_f,
+                            max(candidate, interval.start),
+                            min(window_end, interval.end),
                         )
+                        metadata = {
+                            "classification": "irreconcilable",
+                            "tolerance_f": TEMP_TOLERANCE_F,
+                            "has_second_oven": False,
+                            "temperature_gap_f": temp_diff,
+                            "blocking_recipe_names": [step_recipe_name or "Recipe", interval.recipe_name],
+                            "affected_step_ids": [interval.step_id],
+                            "remediation": {
+                                "requires_resequencing": False,
+                                "suggested_actions": ["Use a second oven or change recipes."],
+                                "delaying_recipe_names": [],
+                                "blocking_recipe_names": [step_recipe_name or "Recipe", interval.recipe_name],
+                                "notes": message,
+                            },
+                        }
+                        raise ResourceConflictError(message, metadata=metadata)
 
     raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
 
@@ -889,6 +1078,18 @@ def _merge_dags(
 
     # Compute finish-together offsets (empty dict if serving_time is None)
     finish_offsets = _compute_finish_together_offsets(all_steps, all_edges, serving_time)
+    planned_oven_intervals = _build_planned_oven_intervals(all_steps, all_edges, finish_offsets)
+    planned_one_oven_conflict = _build_one_oven_conflict_metadata(
+        planned_oven_intervals,
+        has_second_oven=has_second_oven,
+        treat_overlap_as_irreconcilable=serving_time is not None,
+    )
+    if planned_one_oven_conflict.classification == "irreconcilable":
+        raise ResourceConflictError(
+            planned_one_oven_conflict.remediation.notes
+            or "Single-oven schedule is irreconcilable for the requested temperature windows.",
+            metadata=planned_one_oven_conflict.model_dump(),
+        )
 
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
@@ -1093,6 +1294,11 @@ def _merge_dags(
 
     # Detect resource constraint warnings for finish-together scheduling
     resource_warnings = _detect_resource_warnings(result, finish_offsets, capacities)
+    one_oven_conflict = planned_one_oven_conflict
+    if one_oven_conflict.classification == "compatible":
+        one_oven_conflict = _build_one_oven_conflict_metadata(oven_intervals, has_second_oven=has_second_oven)
+    elif one_oven_conflict.classification == "resequence_required" and one_oven_conflict.remediation.notes is None:
+        one_oven_conflict = _build_one_oven_conflict_metadata(oven_intervals, has_second_oven=has_second_oven)
 
     return MergedDAG(
         scheduled_steps=result,
@@ -1102,6 +1308,7 @@ def _merge_dags(
         resource_utilisation=utilisation,
         equipment_utilisation=eq_utilisation,
         resource_warnings=resource_warnings,
+        one_oven_conflict=one_oven_conflict,
     )
 
 
@@ -1130,6 +1337,16 @@ async def dag_merger_node(state: GRASPState) -> dict:
 
     except ResourceConflictError as exc:
         logger.error("Resource conflict: %s", exc)
+        metadata = dict(exc.metadata) if exc.metadata else {"detail": str(exc)}
+        if metadata and "detail" not in metadata:
+            metadata["detail"] = str(exc)
+        try:
+            if "classification" in metadata:
+                metadata = OneOvenConflictSummary.model_validate(metadata).model_dump()
+                metadata["detail"] = str(exc)
+        except ValidationError:
+            logger.warning("Resource conflict metadata failed validation; falling back to detail only")
+            metadata = {"detail": str(exc)}
         return {
             "errors": [
                 {
@@ -1137,7 +1354,7 @@ async def dag_merger_node(state: GRASPState) -> dict:
                     "error_type": ErrorType.RESOURCE_CONFLICT.value,
                     "recoverable": False,
                     "message": str(exc),
-                    "metadata": {"detail": str(exc)},
+                    "metadata": metadata,
                 }
             ]
         }
