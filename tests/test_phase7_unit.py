@@ -19,6 +19,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from langgraph.checkpoint.memory import MemorySaver
+
+from app.graph.graph import build_grasp_graph
 from app.graph.nodes.generator import (
     RecipeGenerationOutput,
     _derive_recipe_count,
@@ -435,6 +438,150 @@ def test_normalize_generation_retry_reason_rejects_exhausted_attempt_budget_or_m
     assert malformed_eligibility.retry_reason is None
     assert normalize_generation_retry_reason(exhausted_state) is None
     assert normalize_generation_retry_reason(malformed_state) is None
+
+
+class TestCompiledGraphRetryRouting:
+    @staticmethod
+    def _retryable_dag_merger_error(*, classification: str = "irreconcilable", gap_f: int = 20) -> dict:
+        return {
+            "node_name": "dag_merger",
+            "error_type": ErrorType.RESOURCE_CONFLICT.value,
+            "recoverable": False,
+            "message": "Oven temperature conflict",
+            "metadata": {
+                "classification": classification,
+                "tolerance_f": 15,
+                "has_second_oven": False,
+                "temperature_gap_f": gap_f,
+                "blocking_recipe_names": ["Ratatouille Tian", "Tarte Tatin aux Pommes"],
+                "affected_step_ids": ["r1", "r2"],
+                "remediation": {
+                    "requires_resequencing": False,
+                    "suggested_actions": ["Use a second oven or change recipes."],
+                    "delaying_recipe_names": [],
+                    "blocking_recipe_names": ["Ratatouille Tian", "Tarte Tatin aux Pommes"],
+                    "notes": "Single oven cannot support this overlap.",
+                },
+                "detail": "Ratatouille Tian at 375°F conflicts with Tarte Tatin aux Pommes at 395°F.",
+            },
+        }
+
+    @staticmethod
+    def _compile_graph_with_mocked_nodes(**node_returns):
+        async def _noop(_state):
+            return {}
+
+        generator = AsyncMock(return_value=node_returns.get("recipe_generator", {}))
+        enricher = AsyncMock(return_value=node_returns.get("rag_enricher", {}))
+        validator = AsyncMock(return_value=node_returns.get("validator", {}))
+        dag_builder = AsyncMock(return_value=node_returns.get("dag_builder", {}))
+        dag_merger_return = node_returns.get("dag_merger", {})
+        dag_merger = (
+            AsyncMock(side_effect=dag_merger_return)
+            if isinstance(dag_merger_return, list)
+            else AsyncMock(return_value=dag_merger_return)
+        )
+        renderer = AsyncMock(return_value=node_returns.get("schedule_renderer", {}))
+
+        with (
+            patch("app.graph.graph.recipe_generator_node", generator),
+            patch("app.graph.graph.rag_enricher_node", enricher),
+            patch("app.graph.graph.validator_node", validator),
+            patch("app.graph.graph.dag_builder_node", dag_builder),
+            patch("app.graph.graph.dag_merger_node", dag_merger),
+            patch("app.graph.graph.schedule_renderer_node", renderer),
+            patch("app.graph.graph.handle_fatal_error_node", new=AsyncMock(side_effect=_noop)),
+            patch("app.graph.graph.mark_complete_node", new=AsyncMock(side_effect=_noop)),
+            patch("app.graph.graph.mark_partial_node", new=AsyncMock(side_effect=_noop)),
+        ):
+            graph = build_grasp_graph(MemorySaver())
+
+        return graph, {
+            "recipe_generator": generator,
+            "rag_enricher": enricher,
+            "validator": validator,
+            "dag_builder": dag_builder,
+            "dag_merger": dag_merger,
+            "schedule_renderer": renderer,
+        }
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_routes_beyond_tolerance_single_oven_conflict_back_to_generation_with_retry_state(self):
+        graph, calls = self._compile_graph_with_mocked_nodes(
+            recipe_generator={"raw_recipes": [{"name": "Initial recipe"}]},
+            rag_enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
+            validator={"validated_recipes": [{"name": "Initial recipe"}]},
+            dag_builder={"recipe_dags": [{"recipe_name": "Initial recipe", "edges": []}]},
+            dag_merger={"errors": [self._retryable_dag_merger_error()]},
+        )
+        initial_state = build_initial_pipeline_state(
+            concept=DinnerConcept.model_validate(CONCEPT_DICT),
+            user_id="user-123",
+            rag_owner_key="rag-owner-123",
+            kitchen_config=KITCHEN_CONFIG,
+            equipment=[],
+        )
+        config = {"configurable": {"thread_id": f"retry-{uuid.uuid4()}"}, "recursion_limit": 8}
+
+        async for _ in graph.astream(initial_state, config=config, interrupt_after=["retry_generation"]):
+            pass
+        snapshot = await graph.aget_state(config)
+        values = snapshot.values
+
+        assert snapshot.next == ("recipe_generator",)
+        assert calls["recipe_generator"].await_count == 1
+        assert calls["dag_merger"].await_count == 1
+        assert calls["schedule_renderer"].await_count == 0
+        assert values["generation_attempt"] == 2
+        assert values["generation_retry_reason"]["node_name"] == "dag_merger"
+        assert values["generation_retry_reason"]["summary"]["classification"] == "irreconcilable"
+        assert values["generation_retry_reason"]["summary"]["temperature_gap_f"] == 20
+        assert values["generation_history"] == [
+            {
+                "attempt": 2,
+                "trigger": "auto_repair",
+                "recipe_names": ["Ratatouille Tian", "Tarte Tatin aux Pommes"],
+                "retry_reason": values["generation_retry_reason"],
+            }
+        ]
+        assert values["raw_recipes"] == []
+        assert values["enriched_recipes"] == []
+        assert values["validated_recipes"] == []
+        assert values["recipe_dags"] == []
+        assert values.get("merged_dag") is None
+        assert values.get("schedule") is None
+        assert values["errors"] == [self._retryable_dag_merger_error()]
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_keeps_non_retryable_conflict_on_existing_non_retry_path(self):
+        non_retryable_error = self._retryable_dag_merger_error(classification="compatible", gap_f=12)
+        graph, calls = self._compile_graph_with_mocked_nodes(
+            recipe_generator={"raw_recipes": [{"name": "Initial recipe"}]},
+            rag_enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
+            validator={"validated_recipes": [{"name": "Initial recipe"}]},
+            dag_builder={"recipe_dags": [{"recipe_name": "Initial recipe", "edges": []}]},
+            dag_merger={"errors": [non_retryable_error]},
+        )
+        initial_state = build_initial_pipeline_state(
+            concept=DinnerConcept.model_validate(CONCEPT_DICT),
+            user_id="user-123",
+            rag_owner_key="rag-owner-123",
+            kitchen_config=KITCHEN_CONFIG,
+            equipment=[],
+        )
+        config = {"configurable": {"thread_id": f"non-retry-{uuid.uuid4()}"}, "recursion_limit": 8}
+
+        await graph.ainvoke(initial_state, config=config)
+        snapshot = await graph.aget_state(config)
+        values = snapshot.values
+
+        assert calls["recipe_generator"].await_count == 1
+        assert calls["dag_merger"].await_count == 1
+        assert calls["schedule_renderer"].await_count == 0
+        assert values["generation_attempt"] == 1
+        assert values["generation_retry_reason"] is None
+        assert values["generation_history"] == []
+        assert values["errors"] == [non_retryable_error]
 
 
 class TestCookbookGeneratorSeeding:
