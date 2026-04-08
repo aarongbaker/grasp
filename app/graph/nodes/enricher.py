@@ -38,6 +38,7 @@ See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -363,6 +364,25 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
             chunk_id = metadata.get("chunk_id", match.get("id", "unknown"))
             raw_text = metadata.get("text", "")
 
+            match_rag_owner_key = str(metadata.get("rag_owner_key", "")).strip()
+            match_user_id = str(metadata.get("user_id", "")).strip()
+            owner_matches = False
+            if rag_owner_key:
+                owner_matches = match_rag_owner_key == rag_owner_key or (
+                    not match_rag_owner_key and bool(user_id) and match_user_id == user_id
+                )
+            elif user_id:
+                owner_matches = match_user_id == user_id
+
+            if not owner_matches:
+                logger.warning(
+                    "RAG chunk ownership mismatch (dropped): chunk_id=%s rag_owner_key=%s user_id=%s",
+                    chunk_id,
+                    match_rag_owner_key or "<missing>",
+                    match_user_id or "<missing>",
+                )
+                continue
+
             # DEFENSIVE VALIDATION: Enforce advisory text-only contract.
             # Chunks without valid text are silently filtered (not errors).
             if not isinstance(raw_text, str):
@@ -397,6 +417,36 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
     except Exception as exc:
         logger.warning("RAG retrieval failed (graceful degradation): %s", exc)
         return []
+
+
+def _build_rag_query(raw_recipe: RawRecipe) -> str:
+    """Stable retrieval query for a recipe's advisory cookbook context."""
+    return f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
+
+
+def _rag_cache_key(query: str, user_id: str, rag_owner_key: str) -> tuple[str, str, str]:
+    """Cache key stays scoped to one run via the local cache dict in rag_enricher_node()."""
+    return (user_id.strip(), rag_owner_key.strip(), query.strip())
+
+
+async def _get_cached_rag_context(
+    *,
+    query: str,
+    user_id: str,
+    rag_owner_key: str,
+    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]],
+    rag_cache_lock: asyncio.Lock,
+) -> list[dict]:
+    cache_key = _rag_cache_key(query, user_id, rag_owner_key)
+    async with rag_cache_lock:
+        cached_result = rag_cache.get(cache_key)
+        if cached_result is None:
+            cached_result = asyncio.create_task(
+                asyncio.to_thread(_retrieve_rag_context, query, user_id, rag_owner_key)
+            )
+            rag_cache[cache_key] = cached_result
+
+    return list(await cached_result)
 
 
 # ── Prompt builders ──────────────────────────────────────────────────────────
@@ -608,6 +658,8 @@ async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
     user_id: str,
     rag_owner_key: str,
+    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]],
+    rag_cache_lock: asyncio.Lock,
 ) -> tuple[EnrichedRecipe, dict]:
     """
     Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient metadata extraction.
@@ -620,8 +672,14 @@ async def _enrich_single_recipe(
     normalized_ingredients = _parse_and_normalize_ingredients(raw_recipe)
 
     # RAG retrieval (graceful degradation — returns [] on failure)
-    rag_query = f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
-    rag_chunks = await asyncio.to_thread(_retrieve_rag_context, rag_query, user_id, rag_owner_key)
+    rag_query = _build_rag_query(raw_recipe)
+    rag_chunks = await _get_cached_rag_context(
+        query=rag_query,
+        user_id=user_id,
+        rag_owner_key=rag_owner_key,
+        rag_cache=rag_cache,
+        rag_cache_lock=rag_cache_lock,
+    )
 
     # Build prompt
     system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
@@ -682,13 +740,21 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     enriched: list[dict] = []
     errors: list[dict] = []
     token_usages: list[dict] = []
+    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]] = {}
+    rag_cache_lock = asyncio.Lock()
 
     async def _enrich_one(recipe_dict: dict) -> tuple[dict | None, dict | None, dict | None]:
         """Enrich a single recipe, returning (enriched_dict, usage, error)."""
         recipe_name = recipe_dict.get("name", "unknown")
         try:
             raw_recipe = RawRecipe.model_validate(recipe_dict)
-            enriched_recipe, usage = await _enrich_single_recipe(raw_recipe, user_id, rag_owner_key)
+            enriched_recipe, usage = await _enrich_single_recipe(
+                raw_recipe,
+                user_id,
+                rag_owner_key,
+                rag_cache,
+                rag_cache_lock,
+            )
             logger.info(
                 "Enriched recipe: %s (%d steps, %d RAG sources)",
                 recipe_name,

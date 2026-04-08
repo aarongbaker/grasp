@@ -184,6 +184,7 @@ def test_retrieve_rag_context_filters_empty_text():
                         "text": "Valid cookbook text",
                         "chunk_type": "technique",
                         "chunk_id": "c1",
+                        "user_id": "user123",
                     },
                     "score": 0.9,
                 },
@@ -193,6 +194,7 @@ def test_retrieve_rag_context_filters_empty_text():
                         "text": "",  # EMPTY TEXT — should be filtered
                         "chunk_type": "recipe",
                         "chunk_id": "c2",
+                        "user_id": "user123",
                     },
                     "score": 0.8,
                 },
@@ -201,6 +203,7 @@ def test_retrieve_rag_context_filters_empty_text():
                     "metadata": {
                         "chunk_type": "narrative",
                         "chunk_id": "c3",
+                        "user_id": "user123",
                         # NO TEXT FIELD — should be filtered
                     },
                     "score": 0.7,
@@ -211,6 +214,7 @@ def test_retrieve_rag_context_filters_empty_text():
                         "text": 12345,  # INVALID TYPE — should be filtered
                         "chunk_type": "tip",
                         "chunk_id": "c4",
+                        "user_id": "user123",
                     },
                     "score": 0.6,
                 },
@@ -220,6 +224,7 @@ def test_retrieve_rag_context_filters_empty_text():
                         "text": "Table of contents: soups, salads, desserts",
                         "chunk_type": "index",  # NON-ADVISORY — should be filtered
                         "chunk_id": "c5",
+                        "user_id": "user123",
                     },
                     "score": 0.5,
                 },
@@ -229,6 +234,7 @@ def test_retrieve_rag_context_filters_empty_text():
                         "text": "Browse all poultry recipes on pages 10-40",
                         "chunk_type": "catalog",  # NON-ADVISORY — should be filtered
                         "chunk_id": "c6",
+                        "user_id": "user123",
                     },
                     "score": 0.4,
                 },
@@ -251,6 +257,72 @@ def test_retrieve_rag_context_graceful_degradation_on_missing_api_keys():
         
         chunks = _retrieve_rag_context("test query", "user123")
         assert chunks == []
+
+
+def test_retrieve_rag_context_drops_mismatched_owner_chunks(caplog):
+    """Returned chunks must match rag_owner_key or legacy user_id ownership before use."""
+    with (
+        patch("openai.OpenAI") as mock_openai,
+        patch("pinecone.Pinecone") as mock_pinecone,
+        patch("app.graph.nodes.enricher.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.pinecone_api_key = "test-key"
+        mock_settings.return_value.openai_api_key = "test-key"
+        mock_settings.return_value.pinecone_index_name = "test-index"
+        mock_settings.return_value.rag_retrieval_top_k = 5
+
+        mock_openai_instance = MagicMock()
+        mock_openai.return_value = mock_openai_instance
+        mock_openai_instance.embeddings.create.return_value.data = [
+            MagicMock(embedding=[0.1] * 1536)
+        ]
+
+        mock_pc_instance = MagicMock()
+        mock_pinecone.return_value = mock_pc_instance
+        mock_index = MagicMock()
+        mock_pc_instance.Index.return_value = mock_index
+        mock_index.query.return_value = {
+            "matches": [
+                {
+                    "id": "chunk1",
+                    "metadata": {
+                        "text": "Owner-key matched text",
+                        "chunk_type": "technique",
+                        "chunk_id": "c1",
+                        "rag_owner_key": "owner:chef-1",
+                        "user_id": "someone-else",
+                    },
+                    "score": 0.9,
+                },
+                {
+                    "id": "chunk2",
+                    "metadata": {
+                        "text": "Legacy user-id matched text",
+                        "chunk_type": "tip",
+                        "chunk_id": "c2",
+                        "user_id": "user-123",
+                    },
+                    "score": 0.8,
+                },
+                {
+                    "id": "chunk3",
+                    "metadata": {
+                        "text": "Wrong owner text",
+                        "chunk_type": "recipe",
+                        "chunk_id": "c3",
+                        "rag_owner_key": "owner:someone-else",
+                        "user_id": "another-user",
+                    },
+                    "score": 0.7,
+                },
+            ]
+        }
+
+        with caplog.at_level("WARNING"):
+            chunks = _retrieve_rag_context("test query", "user-123", "owner:chef-1")
+
+    assert [chunk["chunk_id"] for chunk in chunks] == ["c1", "c2"]
+    assert "ownership mismatch" in caplog.text
 
 
 # ── Unit tests for ingredient parsing and normalization ──────────────────────
@@ -707,6 +779,47 @@ async def test_enricher_preserves_raw_recipe_structure_not_rag():
     # Menu-intent source remains authoritative; advisory cookbook text does not rewrite it
     assert enriched["source"]["description"] == RAW_SHORT_RIBS.description
     assert enriched["source"]["steps"] == RAW_SHORT_RIBS.steps
+
+
+@pytest.mark.asyncio
+async def test_enricher_rag_context_cache_reuses_duplicate_queries_within_one_run():
+    """Equivalent recipe queries in one node execution should reuse the same RAG retrieval."""
+    from tests.fixtures.recipes import ENRICHED_SHORT_RIBS, RAW_SHORT_RIBS
+
+    retrieval_calls = 0
+
+    def fake_retrieve(query, user_id, rag_owner_key=""):
+        nonlocal retrieval_calls
+        retrieval_calls += 1
+        return [{"text": "Use a hot pan for browning.", "chunk_type": "technique", "chunk_id": "cache-1"}]
+
+    async def mock_llm_response(messages):
+        return StepEnrichmentOutput(
+            steps=ENRICHED_SHORT_RIBS.steps,
+            chef_notes="Use a hot pan.",
+            techniques_used=["searing", "braising"],
+        )
+
+    mock_chain = AsyncMock()
+    mock_chain.ainvoke = AsyncMock(side_effect=mock_llm_response)
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_chain
+
+    state = {
+        "raw_recipes": [RAW_SHORT_RIBS.model_dump(), RAW_SHORT_RIBS.model_dump()],
+        "user_id": "user-123",
+        "rag_owner_key": "owner:chef-1",
+        "errors": [],
+    }
+
+    with (
+        patch("app.graph.nodes.enricher._create_llm", return_value=mock_llm),
+        patch("app.graph.nodes.enricher._retrieve_rag_context", side_effect=fake_retrieve),
+    ):
+        result = await rag_enricher_node(state)
+
+    assert len(result["enriched_recipes"]) == 2
+    assert retrieval_calls == 1
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────
