@@ -86,6 +86,20 @@ async def embed_and_upsert_chunks(
     total_upserted = 0
 
     async with AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0) as openai_client:
+        fallback_sem = asyncio.Semaphore(10)
+
+        async def _embed_single_text(text: str, chunk_index: int) -> list[float] | None:
+            async with fallback_sem:
+                try:
+                    resp = await openai_client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=[text],
+                    )
+                    return resp.data[0].embedding
+                except Exception as chunk_err:
+                    logger.warning("Skipping chunk %d: %s", chunk_index, chunk_err)
+                    return None
+
         for batch_start in range(0, len(chunks), _EMBED_BATCH_SIZE):
             batch = chunks[batch_start : batch_start + _EMBED_BATCH_SIZE]
             texts = [c["text"] for c in batch]
@@ -99,17 +113,17 @@ async def embed_and_upsert_chunks(
                 embeddings = [item.embedding for item in response.data]
             except Exception as e:
                 logger.warning("Batch embedding failed (%d chunks), falling back to per-chunk: %s", len(batch), e)
+                fallback_results = await asyncio.gather(
+                    *(_embed_single_text(text, batch_start + i) for i, text in enumerate(texts)),
+                    return_exceptions=True,
+                )
                 embeddings = []
-                for i, text in enumerate(texts):
-                    try:
-                        resp = await openai_client.embeddings.create(
-                            model="text-embedding-3-small",
-                            input=[text],
-                        )
-                        embeddings.append(resp.data[0].embedding)
-                    except Exception as chunk_err:
-                        logger.warning("Skipping chunk %d: %s", batch_start + i, chunk_err)
+                for i, result in enumerate(fallback_results):
+                    if isinstance(result, BaseException):
+                        logger.warning("Skipping chunk %d: %s", batch_start + i, result)
                         embeddings.append(None)
+                    else:
+                        embeddings.append(result)
 
             vectors = []
             for i, (chunk_data, embedding) in enumerate(zip(batch, embeddings)):

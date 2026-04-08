@@ -195,3 +195,44 @@ async def test_embed_and_upsert_chunks_reuses_context_managed_client_for_fallbac
     assert client.call_inputs[0]["input"] == ["first chunk", "second chunk"]
     assert client.call_inputs[1]["input"] == ["first chunk"]
     assert client.call_inputs[2]["input"] == ["second chunk"]
+
+
+@pytest.mark.asyncio
+async def test_embed_and_upsert_chunks_partial_fallback_failures_do_not_abort_batch():
+    from app.ingestion.embedder import embed_and_upsert_chunks
+
+    user_id = uuid.uuid4()
+    user = UserProfile(
+        user_id=user_id,
+        name="Chef",
+        email="chef@test.com",
+        rag_owner_key="owner-key",
+    )
+    db = StubDB(user)
+    FakeAsyncOpenAI.instances = []
+
+    async def _partial_failure(*, model, input):
+        if len(input) == 2:
+            raise RuntimeError("batch failed")
+        text = input[0]
+        if text == "first chunk":
+            return _embedding_response([0.1, 0.2])
+        raise RuntimeError("single chunk failed")
+
+    FakeAsyncOpenAI.create_side_effect = _partial_failure
+
+    with pytest.MonkeyPatch.context() as mp:
+        for module_name, module in _stub_modules().items():
+            mp.setitem(sys.modules, module_name, module)
+        count = await embed_and_upsert_chunks(_sample_chunks(), str(uuid.uuid4()), str(user_id), db)
+
+    assert count == 1
+    assert len(FakeAsyncOpenAI.instances) == 1
+    client = FakeAsyncOpenAI.instances[0]
+    assert client.entered is True
+    assert client.exited is True
+    assert len(client.call_inputs) == 3
+    assert db.commits == 1
+    assert len(db.added) == 1
+    assert len(FakePinecone.last_index.upserts) == 1
+    assert len(FakePinecone.last_index.upserts[0]) == 1
