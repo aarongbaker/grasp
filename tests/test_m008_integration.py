@@ -75,7 +75,6 @@ async def test_ft_scheduling_stagger(
         "merged_dag": None,
         "schedule": None,
         "errors": [],
-        "test_mode": None,
     }
 
     # Create session row
@@ -190,7 +189,6 @@ async def test_ft_resource_warnings(
         "merged_dag": None,
         "schedule": None,
         "errors": [],
-        "test_mode": None,
     }
 
     # Create session row
@@ -312,7 +310,6 @@ async def test_ft_asap_mode_no_warnings(
         "merged_dag": None,
         "schedule": None,
         "errors": [],
-        "test_mode": None,
     }
 
     # Create session row

@@ -22,7 +22,12 @@ venv/
 
 # Testing
 .pytest_cache/
+.ruff_cache/
 .coverage
+
+# Local scratch / logs
+.tmp/
+worker-startup.log
 
 # Docker volumes
 pgdata/

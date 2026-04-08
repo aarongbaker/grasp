@@ -262,8 +262,8 @@ def enricher_fail_fondant():
     """
     Function-scoped fixture that makes the enricher mock raise for Chocolate
     Fondant. Used by test_run2 (recoverable error) to simulate per-recipe
-    RAG enrichment failure. Replaces the old test_mode="recoverable_error"
-    mechanism that lived in mock_enricher.py.
+    RAG enrichment failure. Controls per-recipe enricher failure behavior
+    for test_run2 (recoverable error).
     """
     _enricher_skip_recipes.add("Chocolate Fondant")
     yield
@@ -395,5 +395,4 @@ def base_initial_state() -> dict:
         "merged_dag": None,
         "schedule": None,
         "errors": [],
-        "test_mode": None,
     }

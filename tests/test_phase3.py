@@ -60,7 +60,7 @@ async def test_run1_happy_path_complete(
     from app.models.session import Session
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
-    initial_state = {**base_initial_state, "test_mode": None}
+    initial_state = {**base_initial_state}
 
     # Create a dummy session row in the test DB
     session_row = Session(
@@ -155,8 +155,7 @@ async def test_run2_recoverable_error_partial(
     """
     Enricher drops fondant (RAG_FAILURE, recoverable=True).
     Pipeline continues. 2-recipe schedule produced. PARTIAL outcome.
-    Phase 5: enricher_fail_fondant fixture replaces the old test_mode
-    mechanism that lived in mock_enricher.py.
+    Phase 5: enricher_fail_fondant fixture controls per-recipe failure behavior.
     """
     from app.core.status import finalise_session
     from app.models.session import Session
@@ -171,7 +170,7 @@ async def test_run2_recoverable_error_partial(
     await test_db_session.commit()
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
-    initial_state = {**base_initial_state, "test_mode": "recoverable_error"}
+    initial_state = {**base_initial_state}
 
     final_state = await compiled_graph.ainvoke(initial_state, config=config)
 
@@ -252,7 +251,7 @@ async def test_run3_fatal_error_failed(
     await test_db_session.commit()
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
-    initial_state = {**base_initial_state, "test_mode": None}
+    initial_state = {**base_initial_state}
 
     final_state = await compiled_graph.ainvoke(initial_state, config=config)
 
@@ -328,7 +327,7 @@ async def test_run4_checkpoint_resume(
     await test_db_session.commit()
 
     config = {"configurable": {"thread_id": str(unique_session_id)}}
-    initial_state = {**base_initial_state, "test_mode": None}
+    initial_state = {**base_initial_state}
 
     # ── First invoke: interrupt at dag_builder ────────────────────────────────
     monkeypatch.setenv("SIMULATE_INTERRUPT", "1")

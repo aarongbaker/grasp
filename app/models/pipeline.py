@@ -342,7 +342,6 @@ class InitialPipelineState(TypedDict):
     merged_dag: Optional[dict]
     schedule: Optional[dict]
     errors: list[dict]
-    test_mode: Optional[str]
 
 
 def build_initial_pipeline_state(
@@ -366,7 +365,6 @@ def build_initial_pipeline_state(
         "merged_dag": None,
         "schedule": None,
         "errors": [],
-        "test_mode": None,
     }
 
 
@@ -404,8 +402,6 @@ def build_session_initial_state(
 # state as plain Python dicts, NOT Pydantic model instances. If nodes assume
 # they receive Pydantic objects, they will crash on resume from checkpoint.
 # Storing as dicts and validating at node boundaries is the safe pattern.
-#
-# The one exception to dict storage is test_mode — it's a plain str | None.
 
 
 class GRASPState(TypedDict, total=False):
@@ -422,4 +418,3 @@ class GRASPState(TypedDict, total=False):
     schedule: Optional[dict]  # NaturalLanguageSchedule.model_dump() | None
     errors: Annotated[list[dict], operator.add]  # ACCUMULATOR — NodeError.model_dump()
     token_usage: Annotated[list[dict], operator.add]  # ACCUMULATOR — per-node LLM token counts
-    test_mode: Optional[str]  # Phase 3 only. None in production.

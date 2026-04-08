@@ -528,7 +528,7 @@ For each step, extract the oven temperature if the step involves oven cooking. P
 ## OUTPUT REQUIREMENTS
 1. Generate exactly {len(raw_recipe.steps)} RecipeStep objects, one per flat text step.
 2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures, visual cues, timing details) but preserve the original intent.
-3. For oven steps, populate oven_temp_f according to the extraction rules above.
+3. For oven steps, populate oven_temp_f according to the oven extraction rules above.
 4. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
 5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
 

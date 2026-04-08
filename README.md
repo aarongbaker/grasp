@@ -280,9 +280,10 @@ grasp/
 │   ├── ingestion/      # Internal curated-text ingestion pipeline (OCR, classify, chunk, embed)
 │   ├── models/         # Pydantic/SQLModel data models
 │   └── workers/        # Celery task workers
-├── scripts/            # Archived utilities and bulk-ingestion helpers
 ├── tests/              # Test suite
 ├── frontend/           # React frontend
-├── docker-compose.yml  # Local Postgres + Redis + API + worker
-└── docs/               # Deployment and project docs
+├── docs/               # Deployment docs and archived milestone research
+└── docker-compose.yml  # Local Postgres + Redis + API + worker
 ```
+
+Local machine state such as `.venv/`, `node_modules/`, `.env`, and tool runtime scratch directories is intentionally excluded from the structure above.
