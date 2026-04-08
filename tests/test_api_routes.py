@@ -30,7 +30,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, KitchenConfig, UserProfile
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserProfile
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -98,10 +98,11 @@ class MockDBSession:
     def __init__(self):
         self._store: dict[tuple, object] = {}
         self.exec_result = None
+        self.execute_side_effect = None
 
     def add(self, obj):
         model_class = obj.__class__
-        for pk_name in ("session_id", "job_id", "recipe_id", "cookbook_id", "user_id"):
+        for pk_name in ("session_id", "job_id", "recipe_id", "cookbook_id", "equipment_id", "user_id"):
             if hasattr(obj, pk_name):
                 pk = getattr(obj, pk_name)
                 if pk is not None:
@@ -122,6 +123,8 @@ class MockDBSession:
             obj.job_id = uuid.uuid4()
         if hasattr(obj, "recipe_id") and obj.recipe_id is None:
             obj.recipe_id = uuid.uuid4()
+        if hasattr(obj, "equipment_id") and obj.equipment_id is None:
+            obj.equipment_id = uuid.uuid4()
         if isinstance(obj, RecipeCookbookRecord) and obj.cookbook_id is None:
             obj.cookbook_id = uuid.uuid4()
         if hasattr(obj, "updated_at"):
@@ -134,6 +137,19 @@ class MockDBSession:
     def seed(self, model_class, pk, obj):
         """Pre-populate a row for get() to find."""
         self._store[(model_class, pk)] = obj
+
+    async def execute(self, stmt):
+        if self.execute_side_effect is not None:
+            raise self.execute_side_effect
+        return MagicMock()
+
+    async def delete(self, obj):
+        model_class = obj.__class__
+        for pk_name in ("session_id", "job_id", "recipe_id", "cookbook_id", "equipment_id", "user_id"):
+            if hasattr(obj, pk_name):
+                pk = getattr(obj, pk_name)
+                self._store.pop((model_class, pk), None)
+                break
 
     async def exec(self, stmt):
         """Stub for select queries."""
@@ -159,6 +175,17 @@ class MockDBSession:
                 if isinstance(value, str) and "%" in value:
                     return value.strip("%").lower()
             return None
+
+        def _extract_uuid_filters():
+            filters = {}
+            for criterion in where_criteria:
+                left = getattr(criterion, "left", None)
+                right = getattr(criterion, "right", None)
+                column_name = getattr(left, "key", None)
+                value = getattr(right, "value", None)
+                if column_name and isinstance(value, uuid.UUID):
+                    filters[column_name] = value
+            return filters
 
         if "from authored_recipes" in lowered_text:
             user_id = _extract_uuid_filter()
@@ -187,6 +214,19 @@ class MockDBSession:
                 and (name_filter is None or name_filter in obj.name.lower())
             ]
             rows.sort(key=lambda record: (record.updated_at, record.name), reverse=True)
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from equipment" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is Equipment
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
             mock_result = MagicMock()
             mock_result.first.return_value = rows[0] if rows else None
             mock_result.all.return_value = rows
@@ -363,6 +403,33 @@ async def test_kitchen_config_burners_round_trip_through_real_db(db_session_for_
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+async def test_health_check_returns_ok_with_connected_db(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "db": "connected"}
+
+
+async def test_health_check_returns_500_when_db_execute_fails(mock_db):
+    from app.db.session import get_session
+
+    app = _create_test_app()
+    mock_db.execute_side_effect = RuntimeError("database unavailable")
+
+    async def _override_session():
+        yield mock_db
+
+    app.dependency_overrides[get_session] = _override_session
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/health")
+
+    assert resp.status_code == 500
+    app.dependency_overrides.clear()
+
+
 async def test_auth_invalid_token_returns_401():
     """Malformed JWT token should return 401."""
     from app.db.session import get_session
@@ -425,6 +492,100 @@ async def test_auth_valid_token_unknown_user_returns_404():
 # ─────────────────────────────────────────────────────────────────────────────
 # Session routes (Fix #7)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_add_equipment_returns_201_and_persists_row(app_with_overrides, test_user, mock_db):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            f"/api/v1/users/{test_user.user_id}/equipment",
+            json={
+                "name": "Stand Mixer",
+                "category": "prep",
+                "unlocks_techniques": ["laminated_dough", "meringue"],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["equipment_id"]
+    assert data["user_id"] == str(test_user.user_id)
+    assert data["name"] == "Stand Mixer"
+    assert data["category"] == "prep"
+    assert data["unlocks_techniques"] == ["laminated_dough", "meringue"]
+
+    result = await mock_db.exec(
+        select(Equipment).where(Equipment.equipment_id == uuid.UUID(data["equipment_id"]), Equipment.user_id == test_user.user_id)
+    )
+    equipment = result.first()
+    assert equipment is not None
+    assert equipment.name == "Stand Mixer"
+    assert equipment.unlocks_techniques == ["laminated_dough", "meringue"]
+
+
+async def test_delete_equipment_returns_204_and_removes_row(app_with_overrides, test_user, mock_db):
+    equipment = Equipment(
+        equipment_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        name="Dutch Oven",
+        category="baking",
+        unlocks_techniques=["braise"],
+    )
+    mock_db.seed(Equipment, equipment.equipment_id, equipment)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.delete(f"/api/v1/users/{test_user.user_id}/equipment/{equipment.equipment_id}")
+
+    assert resp.status_code == 204
+
+    result = await mock_db.exec(
+        select(Equipment).where(Equipment.equipment_id == equipment.equipment_id, Equipment.user_id == test_user.user_id)
+    )
+    assert result.first() is None
+
+
+async def test_delete_equipment_returns_403_for_cross_user_caller(app_with_overrides, mock_db, test_user):
+    from app.core.auth import get_current_user
+
+    equipment = Equipment(
+        equipment_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        name="Sheet Pan",
+        category="baking",
+        unlocks_techniques=["roast"],
+    )
+    mock_db.seed(Equipment, equipment.equipment_id, equipment)
+
+    other_user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Other Chef",
+        email="other@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("other@test.com"),
+    )
+
+    async def _override_other_user():
+        return other_user
+
+    app_with_overrides.dependency_overrides[get_current_user] = _override_other_user
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.delete(f"/api/v1/users/{test_user.user_id}/equipment/{equipment.equipment_id}")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Access denied"
+
+
+async def test_delete_equipment_returns_404_when_row_missing(app_with_overrides, test_user):
+    missing_equipment_id = uuid.uuid4()
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.delete(f"/api/v1/users/{test_user.user_id}/equipment/{missing_equipment_id}")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Equipment not found"
 
 
 async def test_create_session_201(app_with_overrides, test_user):
