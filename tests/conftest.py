@@ -67,10 +67,28 @@ _generator_ft_mode: bool = False
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Session-scoped event loop — required for session-scoped async fixtures."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+    """Session-scoped event loop — required for session-scoped async fixtures.
+
+    pytest-asyncio's sync wrapper still calls asyncio.get_event_loop() for some
+    async tests, so the custom session loop must also be installed as the
+    current loop under Python 3.12+. Restore any prior loop only if it is
+    still open.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    previous_loop = getattr(policy._local, "_loop", None)
+    previous_set_called = getattr(policy._local, "_set_called", False)
+    asyncio.set_event_loop(loop)
+    try:
+        yield loop
+    finally:
+        loop.close()
+        if previous_loop is not None and not previous_loop.is_closed():
+            asyncio.set_event_loop(previous_loop)
+            policy._local._set_called = previous_set_called
+        else:
+            asyncio.set_event_loop(None)
+            policy._local._set_called = previous_set_called
 
 
 @pytest_asyncio.fixture(scope="session")
