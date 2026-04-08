@@ -8,7 +8,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
 
 - [x] **Phase 1: Test Infrastructure** - Add missing test coverage for admin routes, health endpoint, and Celery task failure paths; extract shared test helper (completed 2026-04-08)
 - [x] **Phase 2: Correctness Fixes** - Fix AsyncOpenAI connection leak and finalise_session() race condition; parallelize embedding fallback (completed 2026-04-08)
-- [ ] **Phase 3: Security Surface Closure** - Add rate limiting, kitchen config bounds validators, and RAG user_id assertion; cache RAG context
+- [x] **Phase 3: Security Surface Closure** - Add rate limiting, kitchen config bounds validators, and RAG user_id assertion; cache RAG context (completed 2026-04-08)
 - [ ] **Phase 4: Performance** - Profile scheduler O(n²) and resolve if confirmed; gate on Phase 1 kitchen edge case tests
 
 ## Phase Details
@@ -45,7 +45,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
   2. Submitting a kitchen config with `max_burners` above the allowed ceiling or an equipment count above the allowed maximum returns a Pydantic validation error before the pipeline executes
   3. A RAG retrieval that returns a chunk whose `user_id` metadata does not match the requesting user causes that chunk to be logged and dropped silently — no crash, no cross-user data leak
   4. Pipeline runs with multiple recipes issue one Pinecone query per unique context key rather than one per recipe step; N+1 query pattern is eliminated
-**Plans**: TBD
+**Plans**: 3/3 plans complete
 
 ### Phase 4: Performance
 **Goal**: Scheduler slot-finding performance is confirmed adequate or improved via interval-based indexing; all performance work is gated on profiling results from Phase 1 regression tests
@@ -62,5 +62,5 @@ The backend pipeline is complete. This milestone hardens it for production by cl
 |-------|----------------|--------|-----------|
 | 1. Test Infrastructure | 4/4 | Complete    | 2026-04-08 |
 | 2. Correctness Fixes | 2/2 | Complete    | 2026-04-08 |
-| 3. Security Surface Closure | 0/TBD | Not started | - |
+| 3. Security Surface Closure | 3/3 | Complete    | 2026-04-08 |
 | 4. Performance | 0/TBD | Not started | - |
