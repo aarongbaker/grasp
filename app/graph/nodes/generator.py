@@ -153,6 +153,8 @@ def _build_system_prompt(
     max_oven_racks = kitchen_config.get("max_oven_racks", 2)
     has_second_oven = kitchen_config.get("has_second_oven", False)
 
+    oven_guidance = _build_oven_compatibility_prompt_guidance(has_second_oven=has_second_oven)
+
     return f'''You are GRASP, an expert chef assistant that designs cohesive multi-course meal plans.
 Your recipes are written for experienced home cooks who value precision, technique, and timing.
 
@@ -186,7 +188,8 @@ Your recipes are written for experienced home cooks who value precision, techniq
 7. Include cuisine attribution for each recipe.
 8. Provide realistic estimated_total_minutes for each recipe (prep through plating).
 9. Use the available equipment to unlock advanced techniques where appropriate.
-10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.'''
+10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
+11. {oven_guidance}'''
 
 
 def _build_mixed_origin_system_prompt(
@@ -202,6 +205,7 @@ def _build_mixed_origin_system_prompt(
     max_burners = kitchen_config.get("max_burners", 4)
     max_oven_racks = kitchen_config.get("max_oven_racks", 2)
     has_second_oven = kitchen_config.get("has_second_oven", False)
+    oven_guidance = _build_oven_compatibility_prompt_guidance(has_second_oven=has_second_oven)
 
     return f'''You are GRASP, an expert chef assistant that designs cohesive multi-course meal plans.
 Your recipes are written for experienced home cooks who value precision, technique, and timing.
@@ -244,21 +248,104 @@ Your recipes are written for experienced home cooks who value precision, techniq
 7. Design recipes that work within the kitchen's burner and oven rack limits alongside the anchor.
 8. Include cuisine attribution for each generated recipe.
 9. Provide realistic estimated_total_minutes for each generated recipe (prep through plating).
-10. Each generated recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.'''
+10. Each generated recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
+11. {oven_guidance}'''
 
 
-def _build_human_prompt(recipe_count: int, concept: DinnerConcept) -> str:
-    return f"Generate {recipe_count} recipes for this {concept.occasion.value} {concept.meal_type.value}."
+def _build_oven_compatibility_prompt_guidance(*, has_second_oven: bool) -> str:
+    if has_second_oven:
+        return (
+            "Prefer menus with naturally compatible oven workloads, but a second oven means "
+            "parallel dishes may use meaningfully different temperatures when needed."
+        )
 
-
-def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRecipe) -> str:
     return (
-        f"Generate {complement_count} complementary recipes around the anchored dish {anchor_recipe.name!r}. "
-        "Return only the new complementary recipes."
+        "For single-oven kitchens, prefer recipe combinations whose oven-temperature windows are naturally compatible. "
+        "Treat oven temperatures within about 15°F of each other as compatible, avoid pairing overlapping long low braises "
+        "with high-heat bakes or desserts unless timing can be serialized cleanly, and if tension remains, prefer menus with "
+        "only one oven-heavy dish plus stovetop/passive complements."
     )
 
 
-# ── Cookbook-mode deterministic parsing ─────────────────────────────────────
+def _extract_oven_step_temperatures(recipe: RawRecipe) -> list[int]:
+    temperatures: list[int] = []
+    for step in recipe.steps:
+        lower_step = step.lower()
+        if "oven" not in lower_step and "bake" not in lower_step and "roast" not in lower_step and "broil" not in lower_step:
+            continue
+
+        fahrenheit_match = re.search(r"(\d{3})\s*°?\s*f", lower_step)
+        if fahrenheit_match:
+            temperatures.append(int(fahrenheit_match.group(1)))
+            continue
+
+        celsius_match = re.search(r"(\d{2,3})\s*°?\s*c", lower_step)
+        if celsius_match:
+            celsius = int(celsius_match.group(1))
+            temperatures.append(round((celsius * 9 / 5) + 32))
+            continue
+
+        vague_heat_map = {
+            "high heat": 437,
+            "hot oven": 437,
+            "medium heat": 362,
+            "moderate oven": 362,
+            "low heat": 312,
+            "low oven": 312,
+        }
+        for phrase, temp_f in vague_heat_map.items():
+            if phrase in lower_step:
+                temperatures.append(temp_f)
+                break
+
+    return temperatures
+
+
+def _score_menu_oven_compatibility(*, recipes: list[RawRecipe], has_second_oven: bool) -> dict:
+    tolerance_f = 15
+    oven_heavy_recipe_count = 0
+    temperatures_by_recipe: dict[str, list[int]] = {}
+    incompatible_pairs: list[tuple[str, str, int, int]] = []
+    missing_temperature_recipes: list[str] = []
+
+    for recipe in recipes:
+        temps = _extract_oven_step_temperatures(recipe)
+        temperatures_by_recipe[recipe.name] = temps
+        if temps:
+            oven_heavy_recipe_count += 1
+        else:
+            missing_temperature_recipes.append(recipe.name)
+
+    if has_second_oven:
+        score = 0
+    else:
+        score = max(0, oven_heavy_recipe_count - 1) * 20
+
+    recipe_items = list(temperatures_by_recipe.items())
+    for index, (recipe_a, temps_a) in enumerate(recipe_items):
+        for recipe_b, temps_b in recipe_items[index + 1 :]:
+            if not temps_a or not temps_b:
+                continue
+
+            min_gap = min(abs(temp_a - temp_b) for temp_a in temps_a for temp_b in temps_b)
+            if min_gap > tolerance_f:
+                incompatible_pairs.append((recipe_a, recipe_b, temps_a[0], temps_b[0]))
+                if not has_second_oven:
+                    score += 50
+            elif not has_second_oven and oven_heavy_recipe_count > 1:
+                score += 5
+
+    return {
+        "score": score,
+        "tolerance_f": tolerance_f,
+        "has_second_oven": has_second_oven,
+        "oven_heavy_recipe_count": oven_heavy_recipe_count,
+        "temperatures_by_recipe": temperatures_by_recipe,
+        "incompatible_pairs": incompatible_pairs,
+        "missing_temperature_recipes": missing_temperature_recipes,
+    }
+
+
 
 
 def _strip_markdown_heading_prefix(line: str) -> str:

@@ -16,13 +16,14 @@ import pytest_asyncio
 
 from app.graph.nodes.generator import (
     RecipeGenerationOutput,
+    _build_mixed_origin_system_prompt,
     _build_system_prompt,
     _derive_recipe_count,
     recipe_generator_node,
 )
 from app.models.enums import MealType, Occasion
 from app.models.pipeline import DinnerConcept
-from app.models.recipe import RawRecipe
+from app.models.recipe import Ingredient, RawRecipe
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 
@@ -103,6 +104,65 @@ def test_build_system_prompt_dietary_restrictions(casual_lunch_concept):
         recipe_count=1,
     )
     assert "gluten-free" in prompt
+
+
+def test_build_system_prompt_prefers_single_oven_compatible_menus(dinner_concept):
+    """Single-oven prompts should name the oven-compatibility contract explicitly."""
+    prompt = _build_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        equipment=[],
+        recipe_count=3,
+    )
+
+    assert "single-oven kitchens" in prompt
+    assert "within about 15°F" in prompt
+    assert "long low braises with high-heat bakes or desserts" in prompt
+    assert "one oven-heavy dish plus stovetop/passive complements" in prompt
+
+
+def test_build_mixed_origin_system_prompt_prefers_anchor_compatible_oven_load(dinner_concept):
+    """Mixed-origin prompts should preserve the same single-oven compatibility guidance."""
+    anchor_recipe = RawRecipe(
+        name="Anchored Short Rib Braise",
+        description="An authored braise anchor.",
+        servings=4,
+        cuisine="French",
+        estimated_total_minutes=210,
+        ingredients=[Ingredient(name="short ribs", quantity="2 kg")],
+        steps=[
+            "Brown the ribs in a Dutch oven.",
+            "Add stock and aromatics.",
+            "Cover and braise in a 150°C oven for 3 hours.",
+        ],
+    )
+
+    prompt = _build_mixed_origin_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        equipment=[],
+        anchor_recipe=anchor_recipe,
+        complement_count=2,
+    )
+
+    assert "fixed anchor recipe" in prompt.lower()
+    assert "single-oven kitchens" in prompt
+    assert "within about 15°F" in prompt
+    assert "long low braises with high-heat bakes or desserts" in prompt
+    assert "one oven-heavy dish plus stovetop/passive complements" in prompt
+
+
+def test_build_system_prompt_relaxes_parallel_temp_guidance_with_second_oven(dinner_concept):
+    """Second-oven kitchens should still prefer compatibility without forbidding mixed oven temps."""
+    prompt = _build_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": True},
+        equipment=[],
+        recipe_count=3,
+    )
+
+    assert "second oven means parallel dishes may use meaningfully different temperatures" in prompt
+    assert "single-oven kitchens" not in prompt
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────
