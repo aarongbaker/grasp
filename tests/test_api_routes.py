@@ -115,6 +115,9 @@ class MockDBSession:
     async def flush(self):
         pass
 
+    async def rollback(self):
+        pass
+
     async def refresh(self, obj):
         # Simulate assigning a UUID if not already set
         if hasattr(obj, "session_id") and obj.session_id is None:
@@ -225,6 +228,19 @@ class MockDBSession:
                 obj
                 for (model_class, _), obj in self._store.items()
                 if model_class is Equipment
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from sessions" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is Session
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             mock_result = MagicMock()
@@ -1295,6 +1311,30 @@ async def test_run_pipeline_rejects_non_pending_session(app_with_overrides, mock
 
     assert resp.status_code == 409
     assert "already" in resp.json()["detail"]
+
+
+async def test_cancel_pipeline_returns_cancelled_for_already_cancelled_session(app_with_overrides, mock_db, test_user):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.CANCELLED, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"session_id": str(session.session_id), "status": "cancelled"}
+
+
+async def test_cancel_pipeline_rejects_terminal_complete_session(app_with_overrides, mock_db, test_user):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.COMPLETE, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/cancel")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Session is complete, not in progress"
 
 
 async def test_get_session_status_requires_ownership(app_with_overrides, mock_db):

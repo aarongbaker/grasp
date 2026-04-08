@@ -26,6 +26,7 @@ status_projection():
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.enums import SessionStatus
@@ -44,15 +45,19 @@ async def finalise_session(
     Writes terminal state to the Session row. Called exactly once per pipeline run.
     final_state is the GRASPState dict returned by graph.ainvoke().
     """
-    result = await db.get(Session, session_id)
+    stmt = (
+        select(Session)
+        .where(Session.session_id == session_id)
+        .execution_options(populate_existing=True)
+        .with_for_update()
+    )
+    result = (await db.execute(stmt)).scalar_one_or_none()
     if not result:
         return
 
-    # Re-read from DB to catch cancellation that happened during pipeline execution
-    await db.refresh(result)
-
     # If the session was cancelled while the pipeline was running, don't overwrite
     if result.status == SessionStatus.CANCELLED:
+        await db.rollback()
         return
 
     errors: list[dict] = final_state.get("errors", [])

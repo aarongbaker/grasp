@@ -258,7 +258,7 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
         raise HTTPException(status_code=403, detail="Access denied")
     session_status = _session_status(session.status)
     if session_status != SessionStatus.PENDING:
-        raise HTTPException(status_code=409, detail=f"Session is already {session.status}")
+        raise HTTPException(status_code=409, detail=f"Session is already {session_status.value}")
 
     # Direct DB write — the one exception to the checkpoint-derived rule
     session.status = SessionStatus.GENERATING
@@ -283,16 +283,26 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
     Cancels an in-progress pipeline by revoking its Celery task and
     marking the session as CANCELLED. Idempotent — returns 200 if already cancelled.
     """
-    session = await db.get(Session, session_id)
+    stmt = (
+        select(Session)
+        .where(Session.session_id == session_id)
+        .execution_options(populate_existing=True)
+        .with_for_update()
+    )
+    result = await db.exec(stmt)
+    session = result.first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
+        await db.rollback()
         raise HTTPException(status_code=403, detail="Access denied")
     session_status = _session_status(session.status)
     if session_status == SessionStatus.CANCELLED:
+        await db.rollback()
         return {"session_id": str(session_id), "status": "cancelled"}
     if not session_status.is_in_progress:
-        raise HTTPException(status_code=409, detail=f"Session is {session.status}, not in progress")
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f"Session is {session_status.value}, not in progress")
 
     # Revoke the Celery task (best-effort — don't fail cancel if revoke fails)
     if session.celery_task_id:
