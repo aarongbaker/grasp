@@ -1183,6 +1183,22 @@ async def test_get_session_results_fast_path_returns_persisted_provenance(app_wi
     assert resp.status_code == 200
     data = resp.json()
     assert data["errors"] == []
+    assert data["schedule"]["total_duration_minutes_max"] is None
+    assert data["schedule"]["one_oven_conflict"] == {
+        "classification": "compatible",
+        "tolerance_f": 15,
+        "has_second_oven": False,
+        "temperature_gap_f": None,
+        "blocking_recipe_names": [],
+        "affected_step_ids": [],
+        "remediation": {
+            "requires_resequencing": False,
+            "suggested_actions": [],
+            "delaying_recipe_names": [],
+            "blocking_recipe_names": [],
+            "notes": None,
+        },
+    }
     assert data["recipes"][0]["source"]["source"]["provenance"] == validated_recipe["source"]["source"]["provenance"]
     assert data["recipes"][0]["source"]["rag_sources"] == ["chunk_001"]
 
@@ -1232,9 +1248,134 @@ async def test_get_session_results_fallback_returns_checkpoint_provenance(app_wi
 
     assert resp.status_code == 200
     data = resp.json()
+    assert data["schedule"]["total_duration_minutes_max"] is None
+    assert data["schedule"]["one_oven_conflict"] == {
+        "classification": "compatible",
+        "tolerance_f": 15,
+        "has_second_oven": False,
+        "temperature_gap_f": None,
+        "blocking_recipe_names": [],
+        "affected_step_ids": [],
+        "remediation": {
+            "requires_resequencing": False,
+            "suggested_actions": [],
+            "delaying_recipe_names": [],
+            "blocking_recipe_names": [],
+            "notes": None,
+        },
+    }
     assert data["recipes"][0]["source"]["source"]["provenance"] == checkpoint_recipe["source"]["source"]["provenance"]
     assert data["recipes"][0]["source"]["rag_sources"] == []
     assert data["errors"] == [{"node_name": "validator", "message": "kept for parity", "recoverable": True}]
+async def test_get_session_results_fast_path_preserves_explicit_schedule_metadata(app_with_overrides, mock_db, test_user):
+    session = Session(
+        user_id=test_user.user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={},
+        result_schedule={
+            "summary": "Ready",
+            "timeline": [],
+            "total_duration_minutes": 10,
+            "total_duration_minutes_max": 14,
+            "error_summary": None,
+            "one_oven_conflict": {
+                "classification": "resequence_required",
+                "temperature_gap_f": 75,
+                "affected_step_ids": ["a_bake", "b_bake"],
+                "remediation": {
+                    "requires_resequencing": True,
+                    "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+                    "delaying_recipe_names": ["Recipe B"],
+                    "blocking_recipe_names": ["Recipe A"],
+                    "notes": "Single-oven schedule remains feasible with staged oven windows.",
+                },
+            },
+        },
+        result_recipes=[],
+    )
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/sessions/{session.session_id}/results")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["schedule"]["total_duration_minutes_max"] == 14
+    assert data["schedule"]["one_oven_conflict"] == {
+        "classification": "resequence_required",
+        "tolerance_f": 15,
+        "has_second_oven": False,
+        "temperature_gap_f": 75,
+        "blocking_recipe_names": [],
+        "affected_step_ids": ["a_bake", "b_bake"],
+        "remediation": {
+            "requires_resequencing": True,
+            "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+            "delaying_recipe_names": ["Recipe B"],
+            "blocking_recipe_names": ["Recipe A"],
+            "notes": "Single-oven schedule remains feasible with staged oven windows.",
+        },
+    }
+
+
+async def test_get_session_results_fallback_preserves_explicit_schedule_metadata(app_with_overrides, mock_db, test_user):
+    session = Session(
+        user_id=test_user.user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={},
+        result_schedule=None,
+        result_recipes=None,
+    )
+    mock_db.seed(Session, session.session_id, session)
+
+    mock_snapshot = MagicMock()
+    mock_snapshot.values = {
+        "schedule": {
+            "summary": "Ready",
+            "timeline": [],
+            "total_duration_minutes": 10,
+            "total_duration_minutes_max": 14,
+            "error_summary": None,
+            "one_oven_conflict": {
+                "classification": "resequence_required",
+                "temperature_gap_f": 75,
+                "affected_step_ids": ["a_bake", "b_bake"],
+                "remediation": {
+                    "requires_resequencing": True,
+                    "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+                },
+            },
+        },
+        "validated_recipes": [],
+        "errors": [],
+    }
+    mock_graph = AsyncMock()
+    mock_graph.aget_state.return_value = mock_snapshot
+
+    with patch("app.main.get_graph", new=AsyncMock(return_value=mock_graph)):
+        transport = ASGITransport(app=app_with_overrides)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.get(f"/api/v1/sessions/{session.session_id}/results")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["schedule"]["total_duration_minutes_max"] == 14
+    assert data["schedule"]["one_oven_conflict"] == {
+        "classification": "resequence_required",
+        "tolerance_f": 15,
+        "has_second_oven": False,
+        "temperature_gap_f": 75,
+        "blocking_recipe_names": [],
+        "affected_step_ids": ["a_bake", "b_bake"],
+        "remediation": {
+            "requires_resequencing": True,
+            "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+            "delaying_recipe_names": [],
+            "blocking_recipe_names": [],
+            "notes": None,
+        },
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

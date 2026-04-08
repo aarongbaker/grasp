@@ -1187,9 +1187,11 @@ class TestScheduleRendererNode:
         assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
         assert sum(1 for e in schedule.timeline if e.is_prep_ahead) == 2
         assert schedule.total_duration_minutes == 195
+        assert schedule.total_duration_minutes_max == 210
         assert schedule.active_time_minutes == 282
         assert schedule.summary == "A three-course dinner party menu."
         assert schedule.error_summary is None
+        assert schedule.one_oven_conflict == MERGED_DAG_FULL.one_oven_conflict
 
     @pytest.mark.asyncio
     async def test_happy_path_with_errors(self):
@@ -1224,6 +1226,7 @@ class TestScheduleRendererNode:
         assert len(schedule.timeline) == 7  # all entries unified (6 day-of + 1 prep-ahead)
         assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
         assert schedule.error_summary == "Chocolate Fondant dropped due to enrichment failure."
+        assert schedule.one_oven_conflict == MERGED_DAG_TWO_RECIPE.one_oven_conflict
 
     @pytest.mark.asyncio
     async def test_no_merged_dag_fatal(self):

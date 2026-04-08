@@ -416,6 +416,7 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
             active_time_minutes=merged_dag.active_time_minutes,
             summary=summary,
             error_summary=error_summary,
+            one_oven_conflict=merged_dag.one_oven_conflict,
         )
         return {
             "schedule": schedule.model_dump(),
@@ -426,9 +427,11 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
         timeline=timeline,
         prep_ahead_entries=[],
         total_duration_minutes=merged_dag.total_duration_minutes,
+        total_duration_minutes_max=merged_dag.total_duration_minutes_max,
         active_time_minutes=merged_dag.active_time_minutes,
         summary=summary,
         error_summary=error_summary,
+        one_oven_conflict=merged_dag.one_oven_conflict,
     )
     return {
         "schedule": schedule.model_dump(),
