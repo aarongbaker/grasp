@@ -23,7 +23,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
   3. Health check endpoint test confirms liveness under normal DB connection and the degraded/failure path
   4. `_run_pipeline_async` task early-exit, graph exception, and ValidationError paths each have a dedicated test that runs without a real Celery broker
   5. Kitchen edge case tests (zero burners, missing config, invalid descriptors) exist and pass, serving as regression gate for Phase 4 scheduler work
-**Plans**: TBD
+**Plans**: 0/4 plans executed
 
 ### Phase 2: Correctness Fixes
 **Goal**: The two confirmed production bugs are closed — AsyncOpenAI connections no longer accumulate in Celery workers, and finalise_session() cannot double-write via a TOCTOU race; embedding fallback is parallelized as a co-located improvement
@@ -60,7 +60,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Infrastructure | 0/TBD | Not started | - |
+| 1. Test Infrastructure | 0/4 | Planned | - |
 | 2. Correctness Fixes | 0/TBD | Not started | - |
 | 3. Security Surface Closure | 0/TBD | Not started | - |
 | 4. Performance | 0/TBD | Not started | - |
