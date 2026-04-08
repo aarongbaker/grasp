@@ -19,18 +19,22 @@ import pytest_asyncio
 from app.graph.nodes.generator import (
     RecipeGenerationOutput,
     _build_mixed_origin_system_prompt,
+    _build_retry_human_prompt,
+    _build_retry_system_prompt,
     _build_system_prompt,
     _derive_recipe_count,
     recipe_generator_node,
 )
-from app.models.enums import MealType, Occasion
+from app.models.enums import ErrorType, MealType, Occasion
 from app.models.pipeline import (
     DinnerConcept,
+    GenerationRetryReason,
     PlannerLibraryAuthoredRecipeAnchor,
     PlannerLibraryCookbookPlanningMode,
     PlannerLibraryCookbookTarget,
 )
 from app.models.recipe import Ingredient, RawRecipe
+from app.models.scheduling import OneOvenConflictSummary
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
 
@@ -174,6 +178,96 @@ def test_build_system_prompt_relaxes_parallel_temp_guidance_with_second_oven(din
 
     assert "second oven means parallel dishes may use meaningfully different temperatures" in prompt
     assert "single-oven kitchens" not in prompt
+
+
+def test_build_retry_system_prompt_includes_typed_single_oven_conflict_context(dinner_concept):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=False,
+            temperature_gap_f=45,
+            blocking_recipe_names=["Braised Short Ribs", "Chocolate Souffle"],
+            affected_step_ids=["short_ribs_braise", "souffle_bake"],
+            remediation={
+                "requires_resequencing": False,
+                "suggested_actions": ["Use a second oven or change recipes."],
+                "notes": "Braised Short Ribs at 300°F conflicts with Chocolate Souffle at 425°F.",
+            },
+        ),
+        detail="Braised Short Ribs at 300°F conflicts with Chocolate Souffle at 425°F from 18:00 to 18:20.",
+        attempt=1,
+    )
+
+    prompt = _build_retry_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        equipment=[],
+        recipe_count=3,
+        retry_reason=retry_reason,
+    )
+
+    assert "performing corrective regeneration after the scheduler rejected the previous menu" in prompt
+    assert "SCHEDULER CONFLICT CONTEXT (AUTHORITATIVE)" in prompt
+    assert "Triggering node: dag_merger" in prompt
+    assert "Allowed oven temperature tolerance: 15°F" in prompt
+    assert "Reported conflicting temperature gap: 45°F" in prompt
+    assert "Blocking recipe names: Braised Short Ribs, Chocolate Souffle" in prompt
+    assert "Affected scheduler step ids: short_ribs_braise, souffle_bake" in prompt
+    assert "Do NOT reproduce the same beyond-tolerance overlap shape" in prompt
+    assert "If more than one oven-using dish would overlap in a single-oven kitchen" in prompt
+    assert "you MUST change the menu before proceeding" in prompt
+
+
+def test_build_retry_system_prompt_relaxes_parallel_temperature_rule_with_second_oven(dinner_concept):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=True,
+            temperature_gap_f=60,
+            blocking_recipe_names=["Duck Confit", "Tarte Tatin"],
+        ),
+        detail="Retry context imported from a mixed-origin failure.",
+        attempt=2,
+    )
+
+    prompt = _build_retry_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": True},
+        equipment=[],
+        recipe_count=3,
+        retry_reason=retry_reason,
+    )
+
+    assert "parallel oven dishes may use meaningfully different temperatures because a second oven is available" in prompt
+    assert "If more than one oven-using dish would overlap in a single-oven kitchen" not in prompt
+
+
+def test_build_retry_human_prompt_names_conflict_shape(dinner_concept):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=False,
+            blocking_recipe_names=["Ratatouille Tian", "Apple Galette"],
+        ),
+        detail="Ratatouille Tian at 375°F conflicts with Apple Galette at 410°F.",
+        attempt=1,
+    )
+
+    prompt = _build_retry_human_prompt(3, dinner_concept, retry_reason)
+
+    assert "Regenerate exactly 3 recipes" in prompt
+    assert "Ratatouille Tian, Apple Galette" in prompt
+    assert "single-oven kitchen" in prompt
+    assert "does not repeat that conflict pattern" in prompt
 
 
 @pytest.fixture
@@ -517,6 +611,113 @@ async def test_generator_node_prefers_compatible_complements_for_planner_cookboo
         "Apple Tart",
     ]
     assert invoke_mock.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generator_node_uses_retry_prompt_builder_for_single_oven_repair(
+    dinner_concept,
+    compatible_candidate_menu,
+):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=False,
+            temperature_gap_f=50,
+            blocking_recipe_names=["Braised Short Ribs", "Chocolate Souffle"],
+            affected_step_ids=["short_ribs_braise", "souffle_bake"],
+        ),
+        detail="Braised Short Ribs at 300°F conflicts with Chocolate Souffle at 425°F.",
+        attempt=1,
+    )
+    state = {
+        "concept": dinner_concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+        "generation_attempt": 2,
+        "generation_retry_reason": retry_reason.model_dump(mode="json"),
+        "generation_history": [
+            {
+                "attempt": 2,
+                "trigger": "auto_repair",
+                "recipe_names": ["Braised Short Ribs", "Chocolate Souffle"],
+                "retry_reason": retry_reason.model_dump(mode="json"),
+            }
+        ],
+        "enriched_recipes": [{"name": "stale enriched"}],
+        "validated_recipes": [{"name": "stale validated"}],
+        "recipe_dags": [{"recipe_name": "stale dag"}],
+        "merged_dag": {"recipe_count": 1},
+        "schedule": {"summary": "stale schedule"},
+    }
+
+    with patch(
+        "app.graph.nodes.generator._generate_ranked_recipe_candidates",
+        AsyncMock(return_value=(compatible_candidate_menu, [{"total_tokens": 30}], {})),
+    ) as ranked_mock:
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Roast Chicken",
+        "Apple Tart",
+        "Frisee Salad",
+    ]
+    kwargs = ranked_mock.await_args.kwargs
+    assert "SCHEDULER CONFLICT CONTEXT (AUTHORITATIVE)" in kwargs["system_prompt"]
+    assert "Braised Short Ribs, Chocolate Souffle" in kwargs["system_prompt"]
+    assert "Do NOT reproduce the same beyond-tolerance overlap shape" in kwargs["system_prompt"]
+    assert "Regenerate exactly 3 recipes" in kwargs["human_prompt"]
+    assert "does not repeat that conflict pattern" in kwargs["human_prompt"]
+    assert result["token_usage"] == [{"total_tokens": 30}]
+    assert result["generation_retry_reason"] is None
+    assert result["generation_history"] == [
+        {
+            "attempt": 2,
+            "trigger": "auto_repair",
+            "recipe_names": ["Roast Chicken", "Apple Tart", "Frisee Salad"],
+            "retry_reason": retry_reason.model_dump(mode="json"),
+        }
+    ]
+    assert result["enriched_recipes"] == []
+    assert result["validated_recipes"] == []
+    assert result["recipe_dags"] == []
+    assert result["merged_dag"] is None
+    assert result["schedule"] is None
+
+
+@pytest.mark.asyncio
+async def test_generator_node_records_initial_attempt_history_without_retry_context(
+    dinner_concept,
+    compatible_candidate_menu,
+):
+    state = {
+        "concept": dinner_concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+        "generation_attempt": 1,
+        "generation_history": [],
+    }
+
+    with patch(
+        "app.graph.nodes.generator._generate_ranked_recipe_candidates",
+        AsyncMock(return_value=(compatible_candidate_menu, [{"prompt_tokens": 10, "completion_tokens": 20}], {})),
+    ):
+        result = await recipe_generator_node(state)
+
+    assert result["generation_history"] == [
+        {
+            "attempt": 1,
+            "trigger": "initial",
+            "recipe_names": ["Roast Chicken", "Apple Tart", "Frisee Salad"],
+            "retry_reason": None,
+        }
+    ]
+    assert result["token_usage"] == [{"prompt_tokens": 10, "completion_tokens": 20}]
+    assert result["generation_retry_reason"] is None
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────

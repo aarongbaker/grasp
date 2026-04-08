@@ -48,9 +48,11 @@ from app.models.errors import NodeError
 from app.models.pipeline import (
     DinnerConcept,
     GRASPState,
+    GenerationAttemptRecord,
+    GenerationRetryReason,
     PlannerLibraryAuthoredRecipeAnchor,
-    PlannerLibraryCookbookTarget,
     PlannerLibraryCookbookPlanningMode,
+    PlannerLibraryCookbookTarget,
     SelectedAuthoredRecipe,
     SelectedCookbookRecipe,
 )
@@ -275,7 +277,6 @@ def _build_human_prompt(recipe_count: int, concept: DinnerConcept) -> str:
     )
 
 
-
 def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRecipe) -> str:
     return (
         f"Generate {complement_count} complementary recipes around the anchored dish {anchor_recipe.name!r}. "
@@ -283,12 +284,119 @@ def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRe
     )
 
 
+def _format_retry_conflict_details(retry_reason: GenerationRetryReason) -> str:
+    summary = retry_reason.summary
+    lines = [
+        f"- Triggering node: {retry_reason.node_name}",
+        f"- Attempt that failed: {retry_reason.attempt}",
+        f"- Scheduler classification: {summary.classification}",
+        f"- Single-oven kitchen: {'Yes' if not summary.has_second_oven else 'No'}",
+        f"- Allowed oven temperature tolerance: {summary.tolerance_f}°F",
+    ]
+
+    if summary.temperature_gap_f is not None:
+        lines.append(f"- Reported conflicting temperature gap: {summary.temperature_gap_f}°F")
+    if summary.blocking_recipe_names:
+        lines.append("- Blocking recipe names: " + ", ".join(summary.blocking_recipe_names))
+    if summary.affected_step_ids:
+        lines.append("- Affected scheduler step ids: " + ", ".join(summary.affected_step_ids))
+    if summary.remediation.suggested_actions:
+        lines.append("- Scheduler suggested actions: " + "; ".join(summary.remediation.suggested_actions))
+    if summary.remediation.notes:
+        lines.append(f"- Scheduler notes: {summary.remediation.notes}")
+
+    lines.append(f"- Conflict detail: {retry_reason.detail}")
+    return "\n".join(lines)
+
+
+def _build_retry_system_prompt(
+    concept: DinnerConcept,
+    kitchen_config: dict,
+    equipment: list[dict],
+    recipe_count: int,
+    retry_reason: GenerationRetryReason,
+) -> str:
+    restrictions = _format_dietary_restrictions(concept.dietary_restrictions)
+    equip_text = _format_equipment(equipment)
+    retry_details = _format_retry_conflict_details(retry_reason)
+
+    max_burners = kitchen_config.get("max_burners", 4)
+    max_oven_racks = kitchen_config.get("max_oven_racks", 2)
+    has_second_oven = kitchen_config.get("has_second_oven", False)
+    oven_guidance = _build_oven_compatibility_prompt_guidance(has_second_oven=has_second_oven)
+
+    single_oven_retry_rule = (
+        "This is a corrective retry for a one-oven conflict. If more than one oven-using dish would overlap in a single-oven kitchen, "
+        "their required oven temperatures must stay within the allowed tolerance. If they cannot stay within tolerance, you MUST change the menu "
+        "before proceeding: choose different dishes, change cooking methods, or shift one dish away from oven use entirely. Do not keep the same oven shape and hope scheduling fixes it later."
+        if not has_second_oven
+        else "This is a corrective retry informed by scheduler conflict context. Use the conflict details to avoid repeating the same failure shape, but parallel oven dishes may use meaningfully different temperatures because a second oven is available."
+    )
+
+    return f'''You are GRASP, an expert chef assistant performing corrective regeneration after the scheduler rejected the previous menu.
+Your task is to produce a NEW feasible multi-course menu, not to restate the failed one.
+
+## ORIGINAL DINNER CONCEPT
+"{concept.free_text}"
+
+## MENU PARAMETERS
+- Meal type: {concept.meal_type.value}
+- Occasion: {concept.occasion.value}
+- Guest count: {concept.guest_count}
+- Number of courses to generate: {recipe_count}
+- Retry attempt: {retry_reason.attempt + 1}
+
+## DIETARY RESTRICTIONS
+{restrictions}
+
+## KITCHEN CONSTRAINTS
+- Stovetop burners available: {max_burners}
+- Oven racks available: {max_oven_racks}
+- Second oven: {"Yes" if has_second_oven else "No"}
+
+## AVAILABLE EQUIPMENT
+{equip_text}
+
+## SCHEDULER CONFLICT CONTEXT (AUTHORITATIVE)
+{retry_details}
+
+## CORRECTIVE REQUIREMENTS
+1. Generate exactly {recipe_count} recipes forming a balanced, cohesive {concept.occasion.value} {concept.meal_type.value} menu.
+2. Scale all ingredient quantities for {concept.guest_count} servings.
+3. Write clear, detailed steps with temperatures (Celsius), times, and visual doneness cues.
+4. STRICTLY respect all dietary restrictions. Never include restricted ingredients or derivatives.
+5. Treat the scheduler conflict context above as a hard constraint for this retry.
+6. Do NOT reproduce the same beyond-tolerance overlap shape, blocking recipe combination, or oven-temperature conflict described above.
+7. If the prior concept implicitly suggested incompatible dishes, preserve the spirit of the meal while changing dishes or cooking methods enough to become feasible.
+8. Design recipes that work within the kitchen's burner and oven rack limits.
+9. Include cuisine attribution for each recipe.
+10. Provide realistic estimated_total_minutes for each recipe (prep through plating).
+11. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
+12. {oven_guidance}
+13. {single_oven_retry_rule}'''
+
+
+def _build_retry_human_prompt(recipe_count: int, concept: DinnerConcept, retry_reason: GenerationRetryReason) -> str:
+    summary = retry_reason.summary
+    blocking = ", ".join(summary.blocking_recipe_names) if summary.blocking_recipe_names else "the conflicting dishes"
+    return (
+        f"Regenerate exactly {recipe_count} recipes for the concept {concept.free_text!r}. "
+        f"The previous menu failed because {blocking} created an irreconcilable oven conflict in a "
+        f"{'single-oven' if not summary.has_second_oven else 'multi-oven'} kitchen. "
+        "Return only the structured recipe payload, and make sure the new menu does not repeat that conflict pattern."
+    )
+
 
 def _extract_oven_step_temperatures(recipe: RawRecipe) -> list[int]:
     temperatures: list[int] = []
     for step in recipe.steps:
         lower_step = step.lower()
-        if "oven" not in lower_step and "bake" not in lower_step and "roast" not in lower_step and "broil" not in lower_step:
+        if (
+            "oven" not in lower_step
+            and "bake" not in lower_step
+            and "roast" not in lower_step
+            and "broil" not in lower_step
+        ):
             continue
 
         fahrenheit_match = re.search(r"(\d{3})\s*°?\s*f", lower_step)
@@ -361,8 +469,6 @@ def _score_menu_oven_compatibility(*, recipes: list[RawRecipe], has_second_oven:
         "incompatible_pairs": incompatible_pairs,
         "missing_temperature_recipes": missing_temperature_recipes,
     }
-
-
 
 
 def _strip_markdown_heading_prefix(line: str) -> str:
@@ -677,7 +783,6 @@ async def _invoke_recipe_generation_candidates(
     return candidate_results, usages
 
 
-
 def _select_best_recipe_generation_candidate(
     *,
     candidate_results: list[RecipeGenerationOutput],
@@ -724,6 +829,23 @@ async def _generate_ranked_recipe_candidates(
         has_second_oven=kitchen_config.get("has_second_oven", False),
     )
     return best_candidate, usages, score_details
+
+
+# ── Retry-attempt state helpers ──────────────────────────────────────────────
+
+
+def _build_generation_attempt_record(
+    *,
+    attempt: int,
+    recipes: list[RawRecipe],
+    retry_reason: GenerationRetryReason | None,
+) -> dict:
+    return GenerationAttemptRecord(
+        attempt=attempt,
+        trigger="auto_repair" if retry_reason is not None else "initial",
+        recipe_names=[recipe.name for recipe in recipes],
+        retry_reason=retry_reason,
+    ).model_dump(mode="json")
 
 
 # ── Node function ────────────────────────────────────────────────────────────
@@ -886,10 +1008,41 @@ async def recipe_generator_node(state: GRASPState) -> dict:
             }
 
         # Derive recipe count from concept
-        system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
-        human_prompt = _build_human_prompt(recipe_count, concept)
+        retry_reason_payload = state.get("generation_retry_reason")
+        retry_reason = (
+            GenerationRetryReason.model_validate(retry_reason_payload) if retry_reason_payload is not None else None
+        )
+        generation_attempt = max(1, int(state.get("generation_attempt", 1)))
+        generation_history = list(state.get("generation_history", []))
 
-        logger.info("Generating %d recipe candidates for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
+        if retry_reason is not None:
+            system_prompt = _build_retry_system_prompt(
+                concept=concept,
+                kitchen_config=kitchen_config,
+                equipment=equipment,
+                recipe_count=recipe_count,
+                retry_reason=retry_reason,
+            )
+            human_prompt = _build_retry_human_prompt(recipe_count, concept, retry_reason)
+            logger.info(
+                "Corrective regeneration attempt %d for %s %s using blocking recipes=%s classification=%s gap=%s",
+                retry_reason.attempt + 1,
+                concept.occasion.value,
+                concept.meal_type.value,
+                retry_reason.summary.blocking_recipe_names,
+                retry_reason.summary.classification,
+                retry_reason.summary.temperature_gap_f,
+            )
+        else:
+            system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
+            human_prompt = _build_human_prompt(recipe_count, concept)
+            logger.info(
+                "Generating %d recipe candidates for %s %s",
+                recipe_count,
+                concept.occasion.value,
+                concept.meal_type.value,
+            )
+
         result, usages, _score_details = await _generate_ranked_recipe_candidates(
             system_prompt=system_prompt,
             human_prompt=human_prompt,
@@ -897,10 +1050,27 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         )
 
         logger.info("Selected %d generated recipes: %s", len(result.recipes), [r.name for r in result.recipes])
+        history_record = _build_generation_attempt_record(
+            attempt=generation_attempt,
+            recipes=result.recipes,
+            retry_reason=retry_reason,
+        )
+        if generation_history and generation_history[-1].get("attempt") == generation_attempt:
+            generation_history[-1] = history_record
+        else:
+            generation_history.append(history_record)
+
         # Return raw_recipes as dicts (replace semantics)
         return {
             "raw_recipes": [r.model_dump() for r in result.recipes],
             "token_usage": usages,
+            "generation_history": generation_history,
+            "generation_retry_reason": None,
+            "enriched_recipes": [],
+            "validated_recipes": [],
+            "recipe_dags": [],
+            "merged_dag": None,
+            "schedule": None,
         }
 
     except Exception as exc:
