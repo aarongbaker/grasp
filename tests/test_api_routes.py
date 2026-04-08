@@ -18,8 +18,12 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlmodel import SQLModel, select
 
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.recipe import RecipeProvenance
@@ -27,6 +31,7 @@ from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
 from app.models.user import BurnerDescriptor, KitchenConfig, UserProfile
+from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +68,25 @@ def _make_test_user() -> UserProfile:
         dietary_defaults=["gluten-free"],
     )
     return user
+
+
+@pytest_asyncio.fixture
+async def db_session_for_routes():
+    """Fresh async DB session for route-level schema round-trip tests."""
+    _ensure_test_postgres_available()
+    from app.core.settings import get_settings
+
+    settings = get_settings()
+    engine = create_async_engine(settings.test_database_url, echo=False, future=True, poolclass=NullPool)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield session
+        await session.rollback()
+
+    await engine.dispose()
 
 
 class MockDBSession:
@@ -296,6 +320,41 @@ async def test_update_kitchen_accepts_optional_burner_descriptors(app_with_overr
             size="large",
             label="Front Left",
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_kitchen_config_burners_round_trip_through_real_db(db_session_for_routes):
+    kitchen = KitchenConfig(
+        max_burners=4,
+        max_oven_racks=2,
+        has_second_oven=False,
+        max_second_oven_racks=2,
+        burners=[
+            BurnerDescriptor(
+                burner_id="front_left_large",
+                position="front_left",
+                size="large",
+                label="Front Left",
+            )
+        ],
+    )
+    db_session_for_routes.add(kitchen)
+    await db_session_for_routes.commit()
+
+    result = await db_session_for_routes.exec(
+        select(KitchenConfig).where(KitchenConfig.kitchen_config_id == kitchen.kitchen_config_id)
+    )
+    stored = result.first()
+
+    assert stored is not None
+    assert [burner.model_dump() for burner in stored.burners] == [
+        {
+            "burner_id": "front_left_large",
+            "position": "front_left",
+            "size": "large",
+            "label": "Front Left",
+        }
     ]
 
 
