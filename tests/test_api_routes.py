@@ -26,7 +26,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import KitchenConfig, UserProfile
+from app.models.user import BurnerDescriptor, KitchenConfig, UserProfile
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,6 +245,58 @@ def authored_recipe_payload(test_user):
         "plating_notes": "Finish with pistachio dukkah.",
         "chef_notes": "Keep the labneh cold for contrast.",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kitchen config burner descriptor support
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_update_kitchen_accepts_optional_burner_descriptors(app_with_overrides, test_user, mock_db):
+    kitchen = KitchenConfig(
+        kitchen_config_id=uuid.uuid4(),
+        max_burners=4,
+        max_oven_racks=2,
+        has_second_oven=False,
+        burners=[],
+    )
+    test_user.kitchen_config_id = kitchen.kitchen_config_id
+    mock_db.exec_result = MagicMock()
+    mock_db.exec_result.first.return_value = kitchen
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.patch(
+            f"/api/v1/users/{test_user.user_id}/kitchen",
+            json={
+                "burners": [
+                    {
+                        "burner_id": "front_left_large",
+                        "position": "front_left",
+                        "size": "large",
+                        "label": "Front Left",
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["burners"] == [
+        {
+            "burner_id": "front_left_large",
+            "position": "front_left",
+            "size": "large",
+            "label": "Front Left",
+        }
+    ]
+    assert kitchen.burners == [
+        BurnerDescriptor(
+            burner_id="front_left_large",
+            position="front_left",
+            size="large",
+            label="Front Left",
+        )
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

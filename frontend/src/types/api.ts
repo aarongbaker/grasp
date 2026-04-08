@@ -340,6 +340,16 @@ export interface TimelineEntry {
   heads_up: string | null;
   is_prep_ahead: boolean;
   prep_ahead_window: string | null;
+  burner_id?: string | null;
+  burner_position?: string | null;
+  burner_size?: string | null;
+  burner_label?: string | null;
+  burner?: {
+    burner_id: string;
+    position?: string | null;
+    size?: string | null;
+    label?: string | null;
+  } | null;
   // M018 merged prep and oven features:
   merged_from?: string[];
   allocation?: Record<string, string>;

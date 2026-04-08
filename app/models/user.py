@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
+from pydantic import field_validator
 from sqlalchemy import JSON
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -36,6 +37,23 @@ class Equipment(SQLModel, table=True):
     user: Optional["UserProfile"] = Relationship(back_populates="equipment")
 
 
+class BurnerDescriptor(SQLModel):
+    """Stable burner metadata carried in kitchen_config snapshots and scheduling output."""
+
+    burner_id: str
+    position: Optional[str] = None
+    size: Optional[str] = None
+    label: Optional[str] = None
+
+    @field_validator("burner_id")
+    @classmethod
+    def _validate_burner_id(cls, value: str) -> str:
+        burner_id = value.strip()
+        if not burner_id:
+            raise ValueError("burner_id must not be empty")
+        return burner_id
+
+
 class KitchenConfig(SQLModel, table=True):
     __tablename__ = "kitchen_configs"
 
@@ -44,6 +62,9 @@ class KitchenConfig(SQLModel, table=True):
     max_oven_racks: int = Field(default=2)
     has_second_oven: bool = Field(default=False)
     max_second_oven_racks: int = Field(default=2)
+    # Optional ordered explicit burner descriptors. When absent, max_burners still
+    # defines a fungible fallback pool and later scheduling code synthesizes burner_1..N.
+    burners: list[BurnerDescriptor] = Field(default_factory=list, sa_column=Column(JSON))
 
     user: Optional["UserProfile"] = Relationship(back_populates="kitchen_config")
 

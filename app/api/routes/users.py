@@ -14,7 +14,7 @@ from app.core.deps import CurrentUser, DBSession
 from app.core.settings import get_settings
 from app.models.enums import EquipmentCategory
 from app.models.invite import Invite
-from app.models.user import Equipment, KitchenConfig, UserProfile
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class UpdateKitchenRequest(BaseModel):
     max_oven_racks: int | None = Field(default=None, ge=1, le=6)
     has_second_oven: bool | None = None
     max_second_oven_racks: int | None = Field(default=None, ge=1, le=6)
+    burners: list[BurnerDescriptor] | None = None
 
 
 class UpdateDietaryDefaultsRequest(BaseModel):
@@ -205,10 +206,19 @@ async def update_kitchen(user_id: uuid.UUID, body: UpdateKitchenRequest, db: DBS
         kc.has_second_oven = body.has_second_oven
     if body.max_second_oven_racks is not None:
         kc.max_second_oven_racks = body.max_second_oven_racks
+    if body.burners is not None:
+        kc.burners = body.burners
 
     await db.commit()
     await db.refresh(kc)
-    return {"kitchen_config_id": str(kc.kitchen_config_id), "max_burners": kc.max_burners, "max_oven_racks": kc.max_oven_racks, "has_second_oven": kc.has_second_oven, "max_second_oven_racks": kc.max_second_oven_racks}
+    return {
+        "kitchen_config_id": str(kc.kitchen_config_id),
+        "max_burners": kc.max_burners,
+        "max_oven_racks": kc.max_oven_racks,
+        "has_second_oven": kc.has_second_oven,
+        "max_second_oven_racks": kc.max_second_oven_racks,
+        "burners": [burner.model_dump() for burner in kc.burners],
+    }
 
 
 @router.put("/{user_id}/dietary-defaults")

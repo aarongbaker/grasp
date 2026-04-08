@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import Resource
 from app.models.recipe import RecipeStep
+from app.models.user import BurnerDescriptor
 
 
 class ScheduledStep(BaseModel):
@@ -37,6 +38,11 @@ class ScheduledStep(BaseModel):
     merged_from: list[str] = []  # step_ids consolidated into this merged prep node
     allocation: dict[str, str] = {}  # recipe_name → quantity breakdown for merged steps
     oven_temp_f: Optional[int] = None  # Fahrenheit oven temperature for oven steps
+    burner_id: Optional[str] = None  # explicit stovetop burner assignment when known
+    burner_position: Optional[str] = None  # burner descriptor context when known
+    burner_size: Optional[str] = None  # burner descriptor context when known
+    burner_label: Optional[str] = None  # human-facing burner descriptor label when known
+    burner: Optional[BurnerDescriptor] = None  # structured burner descriptor snapshot when known
 
 
 class RecipeDAG(BaseModel):
@@ -88,6 +94,14 @@ class TimelineEntry(BaseModel):
     heads_up: Optional[str] = None  # e.g. "Bake 10–14 min depending on oven"
     is_prep_ahead: bool = False
     prep_ahead_window: Optional[str] = None
+    # Burner-aware contract: renderer passes through scheduler-owned burner metadata
+    # verbatim for stovetop entries; consumers must not infer burner identity from
+    # action text or kitchen config.
+    burner_id: Optional[str] = None
+    burner_position: Optional[str] = None
+    burner_size: Optional[str] = None
+    burner_label: Optional[str] = None
+    burner: Optional[BurnerDescriptor] = None
     # M018 merged prep and oven features:
     merged_from: list[str] = []  # step_ids of original prep steps consolidated into this merged step
     allocation: dict[str, str] = {}  # recipe_name → quantity breakdown for merged steps (e.g., "3 cups")

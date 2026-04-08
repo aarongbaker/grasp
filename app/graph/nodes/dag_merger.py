@@ -26,14 +26,17 @@ Mockable seam:
 import bisect
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+import re
+from typing import Any, Optional
 
 import networkx as nx
+from pydantic import TypeAdapter
 
 from app.models.enums import ErrorType, Resource
 from app.models.pipeline import GRASPState
 from app.models.recipe import ValidatedRecipe
 from app.models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
+from app.models.user import BurnerDescriptor
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ class _StepInfo:
     merged_from: list[str] = field(default_factory=list)  # step_ids consolidated into this merged node
     allocation: dict[str, str] = field(default_factory=dict)  # recipe_name → quantity breakdown
     oven_temp_f: Optional[int] = None  # Fahrenheit temperature for oven steps
+    stovetop_heat_f: Optional[int] = None  # Optional stovetop heat preference signal for burner continuity
 
 
 @dataclass
@@ -75,6 +79,27 @@ class _OvenInterval:
     temp_f: Optional[int]
     recipe_name: str
     step_id: str
+
+
+@dataclass(frozen=True)
+class _BurnerSlot:
+    """Stable stovetop slot metadata derived from kitchen config or fallback numbering."""
+
+    burner_id: str
+    position: Optional[str] = None
+    size: Optional[str] = None
+    label: Optional[str] = None
+
+    def to_descriptor(self) -> BurnerDescriptor:
+        return BurnerDescriptor(
+            burner_id=self.burner_id,
+            position=self.position,
+            size=self.size,
+            label=self.label,
+        )
+
+
+_BURNER_DESCRIPTOR_ADAPTER = TypeAdapter(list[BurnerDescriptor])
 
 
 def _compute_critical_paths(
@@ -126,9 +151,6 @@ def _compute_recipe_cooking_durations(
     steps_by_recipe: dict[str, list[_StepInfo]] = {}
     for step in all_steps:
         steps_by_recipe.setdefault(step.recipe_name, []).append(step)
-
-    # Build edge lookup for filtering per-recipe edges
-    step_to_recipe = {s.step_id: s.recipe_name for s in all_steps}
 
     # For each recipe, compute the critical path length considering only cooking steps
     result: dict[str, int] = {}
@@ -288,19 +310,25 @@ def _detect_resource_warnings(
                 if capacity == 1:
                     suggestion = f"Consider starting {recipe_name} earlier if you have a second oven."
                 else:
-                    suggestion = f"You may need additional oven capacity for simultaneous cooking."
+                    suggestion = "You may need additional oven capacity for simultaneous cooking."
             elif resource == Resource.STOVETOP:
-                suggestion = f"Consider timing {recipe_name} to start earlier or adding burners."
+                suggestion = f"Consider timing {recipe_name} to start earlier, waiting for a burner to free up, or adding burners."
             else:
                 suggestion = f"Consider adjusting timing for {recipe_name}."
 
             # Find anchor recipe name for message (use first anchor for simplicity)
             anchor_name = anchor_recipes[0]
 
-            warnings.append(
-                f"{recipe_name}'s {resource_name} cooking will finish ~{delay_rounded} minutes "
-                f"after {anchor_name} due to {resource_name} capacity. {suggestion}"
-            )
+            if resource == Resource.STOVETOP:
+                warnings.append(
+                    f"{recipe_name}'s stovetop cooking will finish ~{delay_rounded} minutes "
+                    f"after {anchor_name} because all burners are occupied at the intended start time. {suggestion}"
+                )
+            else:
+                warnings.append(
+                    f"{recipe_name}'s {resource_name} cooking will finish ~{delay_rounded} minutes "
+                    f"after {anchor_name} due to {resource_name} capacity. {suggestion}"
+                )
 
     return warnings
 
@@ -403,7 +431,7 @@ def _find_earliest_start(
             # Find compatible and incompatible intervals that overlap
             compatible_intervals = []
             incompatible_intervals = []
-            
+
             for interval in oven_intervals:
                 if interval.start < window_end and interval.end > candidate:
                     if interval.temp_f is not None:
@@ -412,11 +440,11 @@ def _find_earliest_start(
                             compatible_intervals.append(interval)
                         else:
                             incompatible_intervals.append(interval)
-            
+
             # If we have compatible intervals, we might be able to "share" with them
             # by waiting for capacity to free up while staying compatible
             # But since capacity is full, we need to advance time regardless
-            
+
             # Advance past the earliest-ending interval
             # Prefer to advance past incompatible ones if possible
             if incompatible_intervals:
@@ -425,7 +453,7 @@ def _find_earliest_start(
                 next_end = index.min_end_after(candidate)
                 if next_end is None:
                     return candidate
-            
+
             candidate = next_end
             continue
 
@@ -453,8 +481,194 @@ def _find_earliest_start(
                                 min(window_end, interval.end),
                             )
                         )
-    
+
     raise ResourceConflictError(f"Cannot schedule step: resource {resource.value} exhausted after 10,000 iterations")
+
+
+def _build_burner_slots(kitchen_config: dict[str, Any]) -> list[_BurnerSlot]:
+    """Return stable stovetop slots from explicit descriptors or fallback max_burners numbering."""
+    raw_burners = kitchen_config.get("burners") or []
+    slots: list[_BurnerSlot] = []
+
+    if raw_burners:
+        descriptors = _BURNER_DESCRIPTOR_ADAPTER.validate_python(raw_burners)
+        for descriptor in descriptors:
+            slots.append(
+                _BurnerSlot(
+                    burner_id=descriptor.burner_id,
+                    position=descriptor.position,
+                    size=descriptor.size,
+                    label=descriptor.label,
+                )
+            )
+        return slots
+
+    burner_count = max(int(kitchen_config.get("max_burners", 4) or 0), 0)
+    for index in range(burner_count):
+        burner_number = index + 1
+        slots.append(
+            _BurnerSlot(
+                burner_id=f"burner_{burner_number}",
+                label=f"Burner {burner_number}",
+            )
+        )
+    return slots
+
+
+def _extract_stovetop_heat_f(description: str) -> Optional[int]:
+    """Extract an optional stovetop heat preference in Fahrenheit from step text.
+
+    This is intentionally narrow: S02 treats stovetop heat as a local burner-selection
+    preference signal, not a pool-level feasibility rule. If no explicit heat signal is
+    present, placement falls back to suitability + stable burner identity.
+    """
+    if not description:
+        return None
+
+    match = re.search(r"(?:stovetop[_\s-]*)?heat(?:[_\s-]*f)?\s*[:=]?\s*(\d{2,3})", description, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    temp_match = re.search(r"(\d{2,3})\s*°\s*f", description, re.IGNORECASE)
+    if temp_match:
+        return int(temp_match.group(1))
+
+    return None
+
+
+_SIZE_CLASS_RANK = {"small": 0, "medium": 1, "large": 2}
+
+
+def _infer_required_burner_size(step: _StepInfo) -> Optional[str]:
+    """Infer a narrow burner-size preference from existing structured/local recipe signals.
+
+    S02 deliberately does not invent a general hardware-capability engine. We only consume
+    signals already present in step text/allocation metadata and map them into the coarse
+    burner classes already supported by kitchen burner descriptors.
+    """
+    text = " ".join(filter(None, [step.description, " ".join(step.allocation.values())])).lower()
+
+    explicit_patterns = [
+        (
+            "large",
+            [
+                r"\brequires?\s+(?:a\s+)?large\s+burner\b",
+                r"\blarge\s+burner\b",
+                r"\blarge\s+pan\b",
+                r"\bwide\s+skillet\b",
+                r"\bhigh-heat\s+sear\b",
+                r"\bsear\b",
+            ],
+        ),
+        (
+            "small",
+            [
+                r"\brequires?\s+(?:a\s+)?small\s+burner\b",
+                r"\bsmall\s+burner\b",
+                r"\bsmall\s+pan\b",
+                r"\bgentle\s+simmer\b",
+                r"\blow\s+simmer\b",
+            ],
+        ),
+    ]
+    for size, patterns in explicit_patterns:
+        if any(re.search(pattern, text) for pattern in patterns):
+            return size
+
+    return None
+
+
+def _burner_size_score(slot: _BurnerSlot, required_size: Optional[str]) -> int:
+    """Return a deterministic suitability score; lower is better."""
+    if required_size is None:
+        return 0
+    if slot.size is None:
+        return 1
+
+    slot_rank = _SIZE_CLASS_RANK.get(slot.size.lower())
+    required_rank = _SIZE_CLASS_RANK.get(required_size.lower())
+    if slot_rank is None or required_rank is None:
+        return 1
+    if slot_rank == required_rank:
+        return 0
+    if slot_rank > required_rank:
+        return slot_rank - required_rank
+    return 100 + (required_rank - slot_rank)
+
+
+def _most_recent_stovetop_heat(
+    slot: _BurnerSlot,
+    burner_history: dict[str, list[tuple[int, Optional[int]]]],
+    candidate: int,
+) -> Optional[int]:
+    """Return the latest known heat recorded for this burner before candidate time."""
+    history = burner_history.get(slot.burner_id, [])
+    for end_minute, heat_f in reversed(history):
+        if end_minute <= candidate:
+            return heat_f
+    return None
+
+
+def _find_stovetop_slot(
+    step: _StepInfo,
+    earliest_from_deps: int,
+    burner_slots: list[_BurnerSlot],
+    burner_intervals: dict[str, _IntervalIndex],
+    burner_history: dict[str, list[tuple[int, Optional[int]]]],
+) -> tuple[int, _BurnerSlot]:
+    """Apply the S02 stovetop placement policy.
+
+    Policy order is intentionally narrow and deterministic:
+    1. prefer any suitable burner free at the candidate start time
+    2. among suitable free burners, prefer the burner whose most recent assigned
+       stovetop heat is closest to the requested ``stovetop_heat_f``
+    3. if heat metadata is absent or tied, prefer the most size-appropriate burner
+       class when structured/local recipe signals justify it
+    4. if still tied, prefer the lowest stable burner identity
+    5. if no suitable burner is free at the candidate time, advance to the next
+       suitable burner release boundary and retry
+
+    This helper intentionally does *not* perform global stovetop search or treat
+    mixed stovetop heats as a pool-level conflict. Availability, heat continuity,
+    and size suitability are burner-local signals only.
+    """
+    if not burner_slots:
+        raise ResourceConflictError("Cannot schedule stovetop step: no burner slots configured")
+
+    required_size = _infer_required_burner_size(step)
+    requested_heat_f = step.stovetop_heat_f
+    candidate = earliest_from_deps
+
+    for _ in range(10_000):
+        window_end = candidate + step.duration_minutes
+        suitable_free: list[tuple[tuple[int, int, str], _BurnerSlot]] = []
+        next_release: Optional[int] = None
+
+        for slot in burner_slots:
+            size_score = _burner_size_score(slot, required_size)
+            if size_score >= 100:
+                continue
+
+            slot_index = burner_intervals[slot.burner_id]
+            if slot_index.count_overlapping(candidate, window_end) == 0:
+                recent_heat = _most_recent_stovetop_heat(slot, burner_history, candidate)
+                heat_score = abs(recent_heat - requested_heat_f) if (recent_heat is not None and requested_heat_f is not None) else 10_000
+                suitable_free.append(((heat_score, size_score, slot.burner_id), slot))
+                continue
+
+            slot_release = slot_index.min_end_after(candidate)
+            if slot_release is not None and (next_release is None or slot_release < next_release):
+                next_release = slot_release
+
+        if suitable_free:
+            suitable_free.sort(key=lambda item: item[0])
+            return candidate, suitable_free[0][1]
+
+        if next_release is None:
+            raise ResourceConflictError("Cannot schedule stovetop step: burner release boundary not found")
+        candidate = next_release
+
+    raise ResourceConflictError("Cannot schedule stovetop step: burner allocation exhausted after 10,000 iterations")
 
 
 def _detect_merge_candidates(
@@ -614,7 +828,8 @@ def _merge_dags(
     (HANDS/PASSIVE) remain ASAP.
     """
     # Resource capacities
-    max_burners = kitchen_config.get("max_burners", 4)
+    burner_slots = _build_burner_slots(kitchen_config)
+    max_burners = len(burner_slots)
     has_second_oven = kitchen_config.get("has_second_oven", False)
     capacities: dict[Resource, float] = {
         Resource.STOVETOP: max_burners,
@@ -650,6 +865,7 @@ def _merge_dags(
                 prep_ahead_notes=step.prep_ahead_notes,
                 depends_on=list(step.depends_on),
                 oven_temp_f=step.oven_temp_f,  # Preserve oven temperature metadata
+                stovetop_heat_f=_extract_stovetop_heat_f(step.description) if step.resource == Resource.STOVETOP else None,
             )
             all_steps.append(info)
 
@@ -677,6 +893,8 @@ def _merge_dags(
     # Scheduling state
     step_map = {s.step_id: s for s in all_steps}
     resource_intervals: dict[Resource, _IntervalIndex] = {r: _IntervalIndex() for r in Resource}
+    burner_intervals: dict[str, _IntervalIndex] = {slot.burner_id: _IntervalIndex() for slot in burner_slots}
+    burner_history: dict[str, list[tuple[int, Optional[int]]]] = {slot.burner_id: [] for slot in burner_slots}
     oven_intervals: list[_OvenInterval] = []  # Track oven usage with temperature for conflict detection
 
     # Equipment intervals — each piece of equipment has capacity 1
@@ -717,16 +935,29 @@ def _merge_dags(
             earliest = max(earliest, finish_offsets[step.recipe_name])
 
         # Find earliest feasible start respecting resource constraints
-        start = _find_earliest_start(
-            step.resource,
-            step.duration_minutes,
-            earliest,
-            resource_intervals,
-            capacities,
-            oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
-            oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
-            step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
-        )
+        assigned_burner: Optional[_BurnerSlot] = None
+        if step.resource == Resource.STOVETOP:
+            # S02: explicit burner slots are the authoritative stovetop scheduling model.
+            # Do not reserve pooled STOVETOP capacity here; burner-local occupancy below is
+            # the source of truth for feasibility, release-boundary waiting, and assignment.
+            start, assigned_burner = _find_stovetop_slot(
+                step,
+                earliest,
+                burner_slots,
+                burner_intervals,
+                burner_history,
+            )
+        else:
+            start = _find_earliest_start(
+                step.resource,
+                step.duration_minutes,
+                earliest,
+                resource_intervals,
+                capacities,
+                oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+                oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+                step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
+            )
 
         # Advance past equipment conflicts (each equipment piece has capacity 1)
         constrained_equipment = [eq for eq in step.required_equipment if eq in equipment_intervals]
@@ -743,22 +974,36 @@ def _merge_dags(
                         break
                 if not conflict:
                     # Also re-check resource constraint at new start (equipment may have pushed us)
-                    start = _find_earliest_start(
-                        step.resource,
-                        step.duration_minutes,
-                        start,
-                        resource_intervals,
-                        capacities,
-                        oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
-                        oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
-                        step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
-                    )
+                    if step.resource == Resource.STOVETOP:
+                        start, assigned_burner = _find_stovetop_slot(
+                            step,
+                            start,
+                            burner_slots,
+                            burner_intervals,
+                            burner_history,
+                        )
+                    else:
+                        start = _find_earliest_start(
+                            step.resource,
+                            step.duration_minutes,
+                            start,
+                            resource_intervals,
+                            capacities,
+                            oven_intervals=oven_intervals if step.resource == Resource.OVEN else None,
+                            oven_temp_f=step.oven_temp_f if step.resource == Resource.OVEN else None,
+                            step_recipe_name=step.recipe_name if step.resource == Resource.OVEN else None,
+                        )
                     break
 
         end = start + step.duration_minutes
 
         # Record resource interval (PASSIVE doesn't consume capacity)
-        if step.resource != Resource.PASSIVE:
+        if step.resource == Resource.STOVETOP:
+            if assigned_burner is None:
+                raise ResourceConflictError(f"Cannot schedule stovetop step {step.step_id}: burner assignment missing")
+            burner_intervals[assigned_burner.burner_id].add(start, end)
+            burner_history.setdefault(assigned_burner.burner_id, []).append((end, step.stovetop_heat_f))
+        elif step.resource != Resource.PASSIVE:
             resource_intervals[step.resource].add(start, end)
 
         # Record oven interval with temperature for conflict detection
@@ -795,6 +1040,11 @@ def _merge_dags(
                 depends_on=step.depends_on,
                 merged_from=step.merged_from,
                 allocation=step.allocation,
+                burner_id=assigned_burner.burner_id if assigned_burner else None,
+                burner_position=assigned_burner.position if assigned_burner else None,
+                burner_size=assigned_burner.size if assigned_burner else None,
+                burner_label=assigned_burner.label if assigned_burner else None,
+                burner=assigned_burner.to_descriptor() if assigned_burner else None,
             )
         )
 
@@ -860,7 +1110,7 @@ async def dag_merger_node(state: GRASPState) -> dict:
     dag_dicts = state.get("recipe_dags", [])
     validated_dicts = state.get("validated_recipes", [])
     kitchen_config = state.get("kitchen_config", {})
-    
+
     # Extract serving_time for finish-together scheduling
     concept = state.get("concept", {})
     serving_time = concept.get("serving_time") if concept else None

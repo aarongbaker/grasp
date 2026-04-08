@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCard } from '../SessionCard';
 import { RecipeCard } from '../RecipeCard';
 import { RecipePDF } from '../RecipePDF';
+import { ScheduleTimeline } from '../ScheduleTimeline';
 import { getRecipeProvenanceDisplay, getSessionConceptDisplay } from '../sessionConceptDisplay';
 import { SessionDetailPage } from '../../../pages/SessionDetailPage';
 import type { DinnerConcept, Session, SessionResults, ValidatedRecipe } from '../../../types/api';
@@ -575,6 +576,77 @@ describe('session presentation', () => {
     expect(screen.getByText('From your recipe library')).toBeInTheDocument();
     expect(screen.getByText('Generated for this session')).toBeInTheDocument();
     expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
+  });
+
+  it('uses scheduler-provided burner metadata in schedule presentation without inventing labels for oven rows', () => {
+    render(
+      <ScheduleTimeline
+        schedule={{
+          timeline: [
+            {
+              step_id: 'oven-step',
+              recipe_name: 'Roast Chicken',
+              action: 'Roast until browned',
+              resource: 'oven',
+              duration_minutes: 25,
+              duration_max: null,
+              label: 'T+10',
+              time_offset_minutes: 10,
+              heads_up: null,
+              prep_ahead_window: null,
+              prep_ahead_notes: null,
+              merged_from: [],
+              allocation: {},
+              is_preheat: false,
+              oven_temp_f: 425,
+              burner_id: null,
+              burner_position: null,
+              burner_size: null,
+              burner_label: null,
+              burner: null,
+            },
+            {
+              step_id: 'stovetop-step',
+              recipe_name: 'Pan Sauce',
+              action: 'Simmer sauce on burner Rear Right',
+              resource: 'stovetop',
+              duration_minutes: 12,
+              duration_max: null,
+              label: 'T+35',
+              time_offset_minutes: 35,
+              heads_up: null,
+              prep_ahead_window: null,
+              prep_ahead_notes: null,
+              merged_from: [],
+              allocation: {},
+              is_preheat: false,
+              oven_temp_f: null,
+              burner_id: 'burner_2',
+              burner_position: 'rear_right',
+              burner_size: 'small',
+              burner_label: 'Rear Right',
+              burner: {
+                burner_id: 'burner_2',
+                position: 'rear_right',
+                size: 'small',
+                label: 'Rear Right',
+              },
+            },
+          ],
+          prep_ahead_entries: [],
+          total_duration_minutes: 47,
+          total_duration_minutes_max: null,
+          active_time_minutes: 37,
+          summary: 'Dinner lands all at once.',
+          error_summary: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Roast until browned')).toBeInTheDocument();
+    expect(screen.getByText('425°F')).toBeInTheDocument();
+    expect(screen.getByText('Simmer sauce on burner Rear Right')).toBeInTheDocument();
+    expect(screen.queryByText(/burner.*roast until browned/i)).not.toBeInTheDocument();
   });
 
   it('uses authored metadata in the PDF surface', () => {

@@ -24,6 +24,7 @@ from app.graph.nodes.dag_merger import (
     _merge_dags,
     _StepInfo,
 )
+from app.graph.nodes.renderer import _build_timeline, _build_timeline_entry
 from app.models.enums import Resource
 from app.models.recipe import (
     EnrichedRecipe,
@@ -34,6 +35,7 @@ from app.models.recipe import (
     ValidatedRecipe,
 )
 from app.models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
+from app.models.user import BurnerDescriptor, KitchenConfig
 from tests.fixtures.recipes import (
     CYCLIC_STEPS_SHORT_RIBS,
     ENRICHED_CHOCOLATE_FONDANT,
@@ -631,18 +633,20 @@ class TestResourceContention:
 
 class TestResourceUtilisation:
     def test_utilisation_populated(self):
-        """resource_utilisation dict has correct keys and interval counts."""
+        """resource_utilisation tracks pooled resources; stovetop now reports via explicit burner assignments."""
         recipe_dags = [RECIPE_DAG_SHORT_RIBS, RECIPE_DAG_POMMES_PUREE, RECIPE_DAG_FONDANT]
         validated = [VALIDATED_SHORT_RIBS, VALIDATED_POMMES_PUREE, VALIDATED_FONDANT]
 
         result = _merge_dags(recipe_dags, validated, DEFAULT_KITCHEN)
 
-        assert "stovetop" in result.resource_utilisation
+        assert "stovetop" not in result.resource_utilisation
         assert "hands" in result.resource_utilisation
         assert "oven" in result.resource_utilisation
         assert "passive" not in result.resource_utilisation  # PASSIVE not tracked
 
-        assert len(result.resource_utilisation["stovetop"]) == 3  # 3 burner uses
+        stovetop_steps = [s for s in result.scheduled_steps if s.resource == Resource.STOVETOP]
+        assert len(stovetop_steps) == 3
+        assert all(step.burner_id is not None for step in stovetop_steps)
         assert len(result.resource_utilisation["hands"]) == 5  # 5 HANDS steps
         assert len(result.resource_utilisation["oven"]) == 2  # braise + bake
 
@@ -1248,10 +1252,10 @@ class TestFinishTogetherScheduling:
 
         # Equal cooking durations → offset = 0 for both → cooking starts same as ASAP
         assert ft_by_id["eq_a_cook"].start_at_minute == asap_by_id["eq_a_cook"].start_at_minute, (
-            f"Equal duration: Cook A should start same time in FT vs ASAP"
+            "Equal duration: Cook A should start same time in FT vs ASAP"
         )
         assert ft_by_id["eq_b_cook"].start_at_minute == asap_by_id["eq_b_cook"].start_at_minute, (
-            f"Equal duration: Cook B should start same time in FT vs ASAP"
+            "Equal duration: Cook B should start same time in FT vs ASAP"
         )
 
     def test_cooking_steps_staggered_correctly(self, finish_together_fixtures):
@@ -1412,6 +1416,516 @@ class TestFinishTogetherScheduling:
         assert asap_window > window, (
             f"ASAP window ({asap_window}) should be larger than FT window ({window})"
         )
+
+
+class TestBurnerDescriptorModels:
+    def test_scheduled_step_accepts_explicit_burner_metadata(self):
+        """ScheduledStep persists optional burner assignment metadata."""
+        descriptor = BurnerDescriptor(
+            burner_id="front_left_large",
+            position="front_left",
+            size="large",
+            label="Front Left",
+        )
+
+        step = ScheduledStep(
+            step_id="s",
+            recipe_name="r",
+            description="cook",
+            resource=Resource.STOVETOP,
+            duration_minutes=5,
+            start_at_minute=0,
+            end_at_minute=5,
+            burner_id="front_left_large",
+            burner_position="front_left",
+            burner_size="large",
+            burner_label="Front Left",
+            burner=descriptor,
+        )
+
+        assert step.burner_id == "front_left_large"
+        assert step.burner_position == "front_left"
+        assert step.burner_size == "large"
+        assert step.burner_label == "Front Left"
+        assert step.burner is not None
+        assert step.burner.burner_id == "front_left_large"
+
+    def test_timeline_entry_accepts_explicit_burner_metadata(self):
+        """TimelineEntry is the renderer/presentation seam for scheduler-owned burner metadata."""
+        descriptor = BurnerDescriptor(
+            burner_id="front_left_large",
+            position="front_left",
+            size="large",
+            label="Front Left",
+        )
+
+        entry = _build_timeline_entry(
+            ScheduledStep(
+                step_id="s",
+                recipe_name="r",
+                description="cook",
+                resource=Resource.STOVETOP,
+                duration_minutes=5,
+                start_at_minute=0,
+                end_at_minute=5,
+                burner_id="front_left_large",
+                burner_position="front_left",
+                burner_size="large",
+                burner_label="Front Left",
+                burner=descriptor,
+            )
+        )
+
+        assert entry.burner_id == "front_left_large"
+        assert entry.burner_position == "front_left"
+        assert entry.burner_size == "large"
+        assert entry.burner_label == "Front Left"
+        assert entry.burner is not None
+        assert entry.burner.burner_id == "front_left_large"
+
+    def test_timeline_entry_does_not_infer_burner_metadata_for_non_stovetop_steps(self):
+        """Consumers must read burner metadata from the scheduler contract, not derive it from copy."""
+        entry = _build_timeline_entry(
+            ScheduledStep(
+                step_id="oven_step",
+                recipe_name="Roast",
+                description="Roast until browned",
+                resource=Resource.OVEN,
+                duration_minutes=25,
+                start_at_minute=10,
+                end_at_minute=35,
+            )
+        )
+
+        assert entry.burner_id is None
+        assert entry.burner_position is None
+        assert entry.burner_size is None
+        assert entry.burner_label is None
+        assert entry.burner is None
+
+    def test_kitchen_config_accepts_optional_burner_descriptors(self):
+        """KitchenConfig burners remain optional but preserve ordered descriptors when present."""
+        config = KitchenConfig(
+            max_burners=4,
+            burners=[
+                BurnerDescriptor(burner_id="front_left_large", position="front_left", size="large"),
+                BurnerDescriptor(burner_id="rear_right_small", position="rear_right", size="small"),
+            ],
+        )
+
+        assert [burner.burner_id for burner in config.burners] == ["front_left_large", "rear_right_small"]
+        assert config.max_burners == 4
+
+
+class TestRendererBurnerOutput:
+    def test_renderer_timeline_entry_preserves_scheduler_burner_fields_verbatim(self):
+        descriptor = BurnerDescriptor(
+            burner_id="front_left_large",
+            position="front_left",
+            size="large",
+            label="Front Left",
+        )
+
+        entry = _build_timeline_entry(
+            ScheduledStep(
+                step_id="sear_step",
+                recipe_name="Steak",
+                description="Sear steak",
+                resource=Resource.STOVETOP,
+                duration_minutes=8,
+                start_at_minute=15,
+                end_at_minute=23,
+                burner_id="front_left_large",
+                burner_position="front_left",
+                burner_size="large",
+                burner_label="Front Left",
+                burner=descriptor,
+            )
+        )
+
+        assert entry.step_id == "sear_step"
+        assert entry.action == "Sear steak"
+        assert entry.burner_id == "front_left_large"
+        assert entry.burner_position == "front_left"
+        assert entry.burner_size == "large"
+        assert entry.burner_label == "Front Left"
+        assert entry.burner is not None
+        assert entry.burner.burner_id == "front_left_large"
+
+    def test_renderer_timeline_keeps_non_stovetop_entries_burner_free(self):
+        merged = MergedDAG(
+            scheduled_steps=[
+                ScheduledStep(
+                    step_id="oven_step",
+                    recipe_name="Roast",
+                    description="Roast until browned",
+                    resource=Resource.OVEN,
+                    duration_minutes=25,
+                    start_at_minute=10,
+                    end_at_minute=35,
+                ),
+                ScheduledStep(
+                    step_id="stove_step",
+                    recipe_name="Sauce",
+                    description="Simmer sauce",
+                    resource=Resource.STOVETOP,
+                    duration_minutes=12,
+                    start_at_minute=35,
+                    end_at_minute=47,
+                    burner_id="burner_2",
+                    burner_position="rear_right",
+                    burner_size="small",
+                    burner_label="Rear Right",
+                    burner=BurnerDescriptor(
+                        burner_id="burner_2",
+                        position="rear_right",
+                        size="small",
+                        label="Rear Right",
+                    ),
+                ),
+            ],
+            total_duration_minutes=47,
+        )
+
+        timeline = _build_timeline(merged)
+        by_id = {entry.step_id: entry for entry in timeline}
+
+        assert by_id["oven_step"].burner_id is None
+        assert by_id["oven_step"].burner is None
+        assert by_id["oven_step"].action == "Roast until browned"
+        assert by_id["stove_step"].burner_id == "burner_2"
+        assert by_id["stove_step"].burner_label == "Rear Right"
+        assert by_id["stove_step"].action == "Simmer sauce"
+
+
+class TestBurnerAllocation:
+    def _make_stovetop_recipe(
+        self,
+        name: str,
+        slug: str,
+        step_id: str,
+        duration: int,
+        description: str | None = None,
+        depends_on: list[str] | None = None,
+    ) -> tuple[RecipeDAG, ValidatedRecipe]:
+        raw = RawRecipe(
+            name=name,
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=duration,
+            ingredients=[],
+            steps=["cook"],
+        )
+        enriched = EnrichedRecipe(
+            source=raw,
+            steps=[
+                RecipeStep(
+                    step_id=step_id,
+                    description=description or f"cook {name}",
+                    duration_minutes=duration,
+                    resource=Resource.STOVETOP,
+                    depends_on=depends_on or [],
+                )
+            ],
+        )
+        dag = RecipeDAG(recipe_name=name, recipe_slug=slug, steps=[], edges=[])
+        validated = ValidatedRecipe(source=enriched, validated_at=datetime.now())
+        return dag, validated
+
+    def test_stovetop_steps_use_descriptor_backed_burners_in_order(self):
+        dag_a, val_a = self._make_stovetop_recipe("Recipe A", "recipe_a", "a_step", 30)
+        dag_b, val_b = self._make_stovetop_recipe("Recipe B", "recipe_b", "b_step", 30)
+
+        kitchen = {
+            "max_burners": 4,
+            "burners": [
+                {
+                    "burner_id": "front_left_large",
+                    "position": "front_left",
+                    "size": "large",
+                    "label": "Front Left",
+                },
+                {
+                    "burner_id": "rear_right_small",
+                    "position": "rear_right",
+                    "size": "small",
+                    "label": "Rear Right",
+                },
+            ],
+        }
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], kitchen)
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["a_step"].burner_id == "front_left_large"
+        assert by_id["a_step"].burner_position == "front_left"
+        assert by_id["a_step"].burner_size == "large"
+        assert by_id["a_step"].burner_label == "Front Left"
+        assert by_id["a_step"].burner is not None
+        assert by_id["a_step"].burner.burner_id == "front_left_large"
+
+        assert by_id["b_step"].burner_id == "rear_right_small"
+        assert by_id["b_step"].burner_label == "Rear Right"
+
+    def test_stovetop_steps_fall_back_to_stable_burner_numbering(self):
+        dag_a, val_a = self._make_stovetop_recipe("Recipe A", "recipe_a", "a_step", 30)
+        dag_b, val_b = self._make_stovetop_recipe("Recipe B", "recipe_b", "b_step", 30)
+
+        result = _merge_dags(
+            [dag_a, dag_b],
+            [val_a, val_b],
+            {"max_burners": 2, "has_second_oven": False},
+        )
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["a_step"].burner_id == "burner_1"
+        assert by_id["a_step"].burner_label == "Burner 1"
+        assert by_id["b_step"].burner_id == "burner_2"
+        assert by_id["b_step"].burner_label == "Burner 2"
+
+    def test_stovetop_waits_for_next_burner_release_when_all_slots_busy(self):
+        dag_a, val_a = self._make_stovetop_recipe("Recipe A", "recipe_a", "a_step", 30)
+        dag_b, val_b = self._make_stovetop_recipe("Recipe B", "recipe_b", "b_step", 30)
+        dag_c, val_c = self._make_stovetop_recipe("Recipe C", "recipe_c", "c_step", 10)
+
+        kitchen = {
+            "max_burners": 2,
+            "burners": [
+                {"burner_id": "burner_a", "label": "Burner A"},
+                {"burner_id": "burner_b", "label": "Burner B"},
+            ],
+        }
+
+        result = _merge_dags([dag_a, dag_b, dag_c], [val_a, val_b, val_c], kitchen)
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["a_step"].start_at_minute == 0
+        assert by_id["b_step"].start_at_minute == 0
+        assert by_id["c_step"].start_at_minute == 30
+        assert by_id["c_step"].burner_id == "burner_a"
+
+    def test_heterogeneous_burners_assign_large_sear_and_avoid_small_for_delicate_step(self):
+        dag_sear, val_sear = self._make_stovetop_recipe(
+            "Sear Steak",
+            "sear_steak",
+            "sear_step",
+            20,
+            description="high-heat sear steak stovetop_heat_f: 500 in a large pan",
+        )
+        dag_sauce, val_sauce = self._make_stovetop_recipe(
+            "Delicate Sauce",
+            "delicate_sauce",
+            "sauce_step",
+            20,
+            description="gentle simmer sauce stovetop_heat_f: 180 on a small pan",
+        )
+
+        kitchen = {
+            "max_burners": 4,
+            "burners": [
+                {"burner_id": "front_left_large", "position": "front_left", "size": "large", "label": "Front Left"},
+                {"burner_id": "front_right_medium", "position": "front_right", "size": "medium", "label": "Front Right"},
+                {"burner_id": "rear_left_medium", "position": "rear_left", "size": "medium", "label": "Rear Left"},
+                {"burner_id": "rear_right_small", "position": "rear_right", "size": "small", "label": "Rear Right"},
+            ],
+        }
+
+        result = _merge_dags([dag_sear, dag_sauce], [val_sear, val_sauce], kitchen)
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["sear_step"].start_at_minute == 0
+        assert by_id["sauce_step"].start_at_minute == 0
+        assert by_id["sear_step"].burner_id == "front_left_large"
+        assert by_id["sear_step"].burner_size == "large"
+        assert by_id["sauce_step"].burner_id == "rear_right_small"
+        assert by_id["sauce_step"].burner_size == "small"
+
+    def test_one_suitable_burner_serializes_overlapping_large_pan_steps(self):
+        dag_a, val_a = self._make_stovetop_recipe(
+            "Large Pan A",
+            "large_pan_a",
+            "large_a",
+            30,
+            description="high-heat sear mushrooms stovetop_heat_f: 450 in a large pan",
+        )
+        dag_b, val_b = self._make_stovetop_recipe(
+            "Large Pan B",
+            "large_pan_b",
+            "large_b",
+            15,
+            description="high-heat sear peppers stovetop_heat_f: 430 in a large pan",
+        )
+
+        kitchen = {
+            "max_burners": 3,
+            "burners": [
+                {"burner_id": "big", "size": "large", "label": "Big Burner"},
+                {"burner_id": "mid", "size": "medium", "label": "Mid Burner"},
+                {"burner_id": "small", "size": "small", "label": "Small Burner"},
+            ],
+        }
+
+        result = _merge_dags([dag_a, dag_b], [val_a, val_b], kitchen)
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["large_a"].burner_id == "big"
+        assert by_id["large_b"].burner_id == "big"
+        assert by_id["large_a"].start_at_minute == 0
+        assert by_id["large_b"].start_at_minute == 30
+        assert by_id["large_b"].end_at_minute == 45
+
+    def test_three_stovetop_recipes_wait_for_constrained_suitable_burners_then_release_deterministically(self):
+        dag_large, val_large = self._make_stovetop_recipe(
+            "Large Sear",
+            "large_sear",
+            "large_step",
+            25,
+            description="high-heat sear tofu stovetop_heat_f: 480 in a large pan",
+        )
+        dag_medium, val_medium = self._make_stovetop_recipe(
+            "Medium Saute",
+            "medium_saute",
+            "medium_step",
+            25,
+            description="saute greens stovetop_heat_f: 340",
+        )
+        dag_delayed, val_delayed = self._make_stovetop_recipe(
+            "Delayed Sear",
+            "delayed_sear",
+            "delayed_step",
+            10,
+            description="high-heat sear scallops stovetop_heat_f: 470 in a large pan",
+        )
+
+        kitchen = {
+            "max_burners": 2,
+            "burners": [
+                {"burner_id": "large_only", "size": "large", "label": "Large Burner"},
+                {"burner_id": "medium_only", "size": "medium", "label": "Medium Burner"},
+            ],
+        }
+
+        result = _merge_dags(
+            [dag_large, dag_medium, dag_delayed],
+            [val_large, val_medium, val_delayed],
+            kitchen,
+        )
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["large_step"].start_at_minute == 0
+        assert by_id["medium_step"].start_at_minute == 0
+        assert by_id["large_step"].burner_id == "large_only"
+        assert by_id["medium_step"].burner_id == "medium_only"
+        assert by_id["delayed_step"].start_at_minute == 25
+        assert by_id["delayed_step"].burner_id == "large_only"
+
+    def test_finish_together_still_composes_with_explicit_burners_and_oven_contention(self):
+        raw_a = RawRecipe(
+            name="Long Braise",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=210,
+            ingredients=[],
+            steps=["prep", "braise"],
+        )
+        raw_b = RawRecipe(
+            name="Quick Sear",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "sear"],
+        )
+        raw_c = RawRecipe(
+            name="Pan Sauce",
+            description="t",
+            servings=2,
+            cuisine="t",
+            estimated_total_minutes=70,
+            ingredients=[],
+            steps=["prep", "simmer"],
+        )
+
+        enriched_a = EnrichedRecipe(
+            source=raw_a,
+            steps=[
+                RecipeStep(step_id="braise_prep", description="prep braise", duration_minutes=20, resource=Resource.HANDS),
+                RecipeStep(
+                    step_id="braise_cook",
+                    description="braise in oven",
+                    duration_minutes=180,
+                    resource=Resource.OVEN,
+                    depends_on=["braise_prep"],
+                ),
+            ],
+        )
+        enriched_b = EnrichedRecipe(
+            source=raw_b,
+            steps=[
+                RecipeStep(step_id="sear_prep", description="prep sear", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(
+                    step_id="sear_cook",
+                    description="high-heat sear chops stovetop_heat_f: 500 in a large pan",
+                    duration_minutes=60,
+                    resource=Resource.STOVETOP,
+                    depends_on=["sear_prep"],
+                ),
+            ],
+        )
+        enriched_c = EnrichedRecipe(
+            source=raw_c,
+            steps=[
+                RecipeStep(step_id="sauce_prep", description="prep sauce", duration_minutes=10, resource=Resource.HANDS),
+                RecipeStep(
+                    step_id="sauce_cook",
+                    description="gentle simmer pan sauce stovetop_heat_f: 180 on a small pan",
+                    duration_minutes=60,
+                    resource=Resource.STOVETOP,
+                    depends_on=["sauce_prep"],
+                ),
+            ],
+        )
+
+        dag_a = RecipeDAG(recipe_name="Long Braise", recipe_slug="long_braise", steps=[], edges=[("braise_prep", "braise_cook")])
+        dag_b = RecipeDAG(recipe_name="Quick Sear", recipe_slug="quick_sear", steps=[], edges=[("sear_prep", "sear_cook")])
+        dag_c = RecipeDAG(recipe_name="Pan Sauce", recipe_slug="pan_sauce", steps=[], edges=[("sauce_prep", "sauce_cook")])
+
+        validated_a = ValidatedRecipe(source=enriched_a, validated_at=datetime.now())
+        validated_b = ValidatedRecipe(source=enriched_b, validated_at=datetime.now())
+        validated_c = ValidatedRecipe(source=enriched_c, validated_at=datetime.now())
+
+        kitchen = {
+            "max_burners": 3,
+            "max_oven_racks": 1,
+            "has_second_oven": False,
+            "burners": [
+                {"burner_id": "front_left_large", "position": "front_left", "size": "large", "label": "Front Left"},
+                {"burner_id": "front_right_medium", "position": "front_right", "size": "medium", "label": "Front Right"},
+                {"burner_id": "rear_right_small", "position": "rear_right", "size": "small", "label": "Rear Right"},
+            ],
+        }
+
+        result = _merge_dags(
+            [dag_a, dag_b, dag_c],
+            [validated_a, validated_b, validated_c],
+            kitchen,
+            serving_time="18:00",
+        )
+        by_id = {step.step_id: step for step in result.scheduled_steps}
+
+        assert by_id["braise_cook"].start_at_minute == 20
+        assert by_id["braise_cook"].end_at_minute == 200
+        assert by_id["sear_cook"].start_at_minute == 120
+        assert by_id["sear_cook"].end_at_minute == 180
+        assert by_id["sauce_cook"].start_at_minute == 120
+        assert by_id["sauce_cook"].end_at_minute == 180
+        assert by_id["sear_cook"].burner_id == "front_left_large"
+        assert by_id["sauce_cook"].burner_id == "rear_right_small"
+        assert by_id["sear_prep"].start_at_minute < by_id["sear_cook"].start_at_minute
+        assert by_id["sauce_prep"].start_at_minute < by_id["sauce_cook"].start_at_minute
 
 
 class TestResourceWarnings:
@@ -1763,6 +2277,12 @@ class TestResourceWarnings:
         )
         assert any("stovetop" in w.lower() for w in result.resource_warnings), (
             f"Warning should mention stovetop: {result.resource_warnings}"
+        )
+        assert any("all burners are occupied" in w.lower() for w in result.resource_warnings), (
+            "Stovetop warning should describe burner occupancy rather than stovetop-wide capacity"
+        )
+        assert not any("shared temperature" in w.lower() or "stovetop heat conflict" in w.lower() for w in result.resource_warnings), (
+            "Stovetop warning should avoid legacy shared-temperature/conflict wording"
         )
 
 
