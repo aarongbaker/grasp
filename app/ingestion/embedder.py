@@ -69,7 +69,6 @@ async def embed_and_upsert_chunks(
     from app.models.ingestion import CookbookChunk
     from app.models.user import UserProfile
 
-    openai_client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0)
     pc = Pinecone(api_key=settings.pinecone_api_key)
     index = pc.Index(settings.pinecone_index_name)
 
@@ -86,70 +85,71 @@ async def embed_and_upsert_chunks(
 
     total_upserted = 0
 
-    for batch_start in range(0, len(chunks), _EMBED_BATCH_SIZE):
-        batch = chunks[batch_start : batch_start + _EMBED_BATCH_SIZE]
-        texts = [c["text"] for c in batch]
+    async with AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0) as openai_client:
+        for batch_start in range(0, len(chunks), _EMBED_BATCH_SIZE):
+            batch = chunks[batch_start : batch_start + _EMBED_BATCH_SIZE]
+            texts = [c["text"] for c in batch]
 
-        # Embed batch — on failure, fall back to per-chunk embedding
-        try:
-            response = await openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=texts,
-            )
-            embeddings = [item.embedding for item in response.data]
-        except Exception as e:
-            logger.warning("Batch embedding failed (%d chunks), falling back to per-chunk: %s", len(batch), e)
-            embeddings = []
-            for i, text in enumerate(texts):
-                try:
-                    resp = await openai_client.embeddings.create(
-                        model="text-embedding-3-small",
-                        input=[text],
-                    )
-                    embeddings.append(resp.data[0].embedding)
-                except Exception as chunk_err:
-                    logger.warning("Skipping chunk %d: %s", batch_start + i, chunk_err)
-                    embeddings.append(None)
-
-        vectors = []
-        for i, (chunk_data, embedding) in enumerate(zip(batch, embeddings)):
-            if embedding is None:
-                continue
-
-            chunk_id = _deterministic_chunk_id(book_id, batch_start + i, chunk_data["text"])
-            chunk_obj = CookbookChunk(
-                chunk_id=chunk_id,
-                book_id=uuid.UUID(book_id),
-                user_id=uuid.UUID(user_id),
-                text=chunk_data["text"],
-                chunk_type=ChunkType(chunk_data["chunk_type"]),
-                chapter=chunk_data.get("chapter", ""),
-                page_number=chunk_data.get("page_number", 0),
-                token_count=len(chunk_data["text"].split()),
-                pinecone_upserted=True,
-            )
-            db.add(chunk_obj)
-
-            vectors.append(
-                {
-                    "id": str(chunk_id),
-                    "values": embedding,
-                    "metadata": {
-                        **chunk_obj.to_pinecone_metadata(),
-                        "rag_owner_key": rag_owner_key,
-                    },
-                }
-            )
-
-        # Upsert to Pinecone then commit DB (correct order: vector store first)
-        if vectors:
-            pinecone_batch = 100
-            for i in range(0, len(vectors), pinecone_batch):
-                await asyncio.wait_for(
-                    asyncio.to_thread(index.upsert, vectors=vectors[i : i + pinecone_batch]),
-                    timeout=60,
+            # Embed batch — on failure, fall back to per-chunk embedding
+            try:
+                response = await openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=texts,
                 )
-            await db.commit()
-            total_upserted += len(vectors)
+                embeddings = [item.embedding for item in response.data]
+            except Exception as e:
+                logger.warning("Batch embedding failed (%d chunks), falling back to per-chunk: %s", len(batch), e)
+                embeddings = []
+                for i, text in enumerate(texts):
+                    try:
+                        resp = await openai_client.embeddings.create(
+                            model="text-embedding-3-small",
+                            input=[text],
+                        )
+                        embeddings.append(resp.data[0].embedding)
+                    except Exception as chunk_err:
+                        logger.warning("Skipping chunk %d: %s", batch_start + i, chunk_err)
+                        embeddings.append(None)
+
+            vectors = []
+            for i, (chunk_data, embedding) in enumerate(zip(batch, embeddings)):
+                if embedding is None:
+                    continue
+
+                chunk_id = _deterministic_chunk_id(book_id, batch_start + i, chunk_data["text"])
+                chunk_obj = CookbookChunk(
+                    chunk_id=chunk_id,
+                    book_id=uuid.UUID(book_id),
+                    user_id=uuid.UUID(user_id),
+                    text=chunk_data["text"],
+                    chunk_type=ChunkType(chunk_data["chunk_type"]),
+                    chapter=chunk_data.get("chapter", ""),
+                    page_number=chunk_data.get("page_number", 0),
+                    token_count=len(chunk_data["text"].split()),
+                    pinecone_upserted=True,
+                )
+                db.add(chunk_obj)
+
+                vectors.append(
+                    {
+                        "id": str(chunk_id),
+                        "values": embedding,
+                        "metadata": {
+                            **chunk_obj.to_pinecone_metadata(),
+                            "rag_owner_key": rag_owner_key,
+                        },
+                    }
+                )
+
+            # Upsert to Pinecone then commit DB (correct order: vector store first)
+            if vectors:
+                pinecone_batch = 100
+                for i in range(0, len(vectors), pinecone_batch):
+                    await asyncio.wait_for(
+                        asyncio.to_thread(index.upsert, vectors=vectors[i : i + pinecone_batch]),
+                        timeout=60,
+                    )
+                await db.commit()
+                total_upserted += len(vectors)
 
     return total_upserted
