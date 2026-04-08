@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-04-08T20:17:16.780Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-04-08T20:22:05.679Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 01 (test-infrastructure) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-04-08
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 7min | 2 tasks | 4 files |
+| Phase 01 P02 | 4min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - Project: Interval-based time-slot search in scheduler — profile before implementing
 - [Phase 01]: Centralized admin-route auth fixtures in tests/conftest.py — Keeps invite route suites on the production JWT/auth path without duplicating per-file setup.
 - [Phase 01]: Removed permanent pytest file ignores for Phase 1 suites — Critical hardening suites need to collect by default so regressions are visible to normal pytest runs and CI.
+- [Phase 01]: Extended MockDBSession narrowly for health and equipment route contracts — Adds only execute/delete/equipment query behavior so route tests stay realistic without growing a fake ORM.
+- [Phase 01]: Asserted degraded /health behavior at the HTTP boundary — Using ASGITransport with raise_app_exceptions=false locks in the real 500 response contract instead of testing Python exception propagation.
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T20:17:16.778Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-04-08T20:22:05.677Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
