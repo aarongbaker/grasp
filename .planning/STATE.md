@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-04-08T20:28:08.132Z"
+status: verifying
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-04-08T20:34:33.349Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 Phase: 01 (test-infrastructure) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-08
 
 Progress: [░░░░░░░░░░] 0%
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 7min | 2 tasks | 4 files |
 | Phase 01 P02 | 4min | 2 tasks | 1 files |
 | Phase 01 P03 | 6min | 2 tasks | 1 files |
+| Phase 01 P04 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Asserted degraded /health behavior at the HTTP boundary — Using ASGITransport with raise_app_exceptions=false locks in the real 500 response contract instead of testing Python exception propagation.
 - [Phase 01]: Patched the exact lazy-import module path in worker task tests — Stubbing app.graph.graph in sys.modules matches how _run_pipeline_async imports build_grasp_graph at runtime.
 - [Phase 01]: Kept ingestion-task assertions unchanged after ignore removal — The existing _ingest_async suite already preserved the required status and rollback coverage once the file collected normally.
+- [Phase 01]: Malformed burner descriptors now fall back to stable burner numbering — Kitchen-config validation noise should not crash direct _merge_dags scheduling when max_burners can still provide a safe fallback.
+- [Phase 01]: Equipment unlock regressions compare overlap timing instead of full snapshots — This keeps the Phase 4 gate stable while still proving the serialization constraint disappears when tracked equipment is absent.
 
 ### Pending Todos
 
@@ -86,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T20:28:08.130Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-04-08T20:34:33.347Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
