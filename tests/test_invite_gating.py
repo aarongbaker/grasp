@@ -1,8 +1,5 @@
-"""tests/test_invite_gating.py
-Tests for invite-gated registration and admin-issued invite consumption.
-"""
+"""Tests for invite-gated registration and admin-issued invite consumption."""
 
-import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -15,17 +12,15 @@ from slowapi.errors import RateLimitExceeded
 from sqlmodel import select
 
 from app.api.routes.admin import router as admin_router
-from app.api.routes.auth import _build_access_token
 from app.api.routes.users import router as users_router
 from app.core.settings import Settings
 from app.db.session import get_session
 from app.models.invite import Invite
-from app.models.user import UserProfile
 
 
 @pytest.fixture
-def invite_contract_settings(admin_user):
-    return Settings(invite_codes_enabled=True, admin_email=admin_user.email)
+def invite_contract_settings(admin_route_settings):
+    return admin_route_settings.model_copy(update={"invite_codes_enabled": True})
 
 
 def _create_invite_app(test_db_session, include_admin: bool = True) -> FastAPI:
@@ -44,21 +39,6 @@ def _create_invite_app(test_db_session, include_admin: bool = True) -> FastAPI:
 
     app.dependency_overrides[get_session] = override_db
     return app
-
-
-@pytest_asyncio.fixture
-async def admin_user(test_db_session):
-    email = f"admin-{uuid.uuid4()}@example.com"
-    user = UserProfile(
-        user_id=uuid.uuid4(),
-        name="Admin User",
-        email=email,
-        rag_owner_key=UserProfile.build_rag_owner_key(email),
-        password_hash="admin-hash",
-    )
-    test_db_session.add(user)
-    await test_db_session.commit()
-    return user
 
 
 @pytest.fixture
@@ -110,13 +90,6 @@ async def client(invite_app, invite_contract_settings):
         ):
             yield async_client
     invite_app.dependency_overrides.clear()
-
-
-def _access_token_for(user: UserProfile, settings: Settings) -> str:
-    token, _expires_in = _build_access_token(str(user.user_id), user.email, settings)
-    return token
-
-
 @pytest.mark.asyncio
 async def test_valid_invite_flow(client, test_db_session, valid_invite):
     response = await client.post(
@@ -142,10 +115,12 @@ async def test_valid_invite_flow(client, test_db_session, valid_invite):
 
 
 @pytest.mark.asyncio
-async def test_admin_issued_invite_can_be_consumed_by_registration(client, test_db_session, admin_user, invite_contract_settings):
+async def test_admin_issued_invite_can_be_consumed_by_registration(
+    client, test_db_session, admin_user, invite_contract_settings, access_token_for
+):
     issue_response = await client.post(
         "/api/v1/admin/invites",
-        headers={"Authorization": f"Bearer {_access_token_for(admin_user, invite_contract_settings)}"},
+        headers={"Authorization": f"Bearer {access_token_for(admin_user, invite_contract_settings)}"},
         json={"email": "issued@example.com"},
     )
 

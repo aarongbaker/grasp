@@ -36,7 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
+from app.api.routes.auth import _build_access_token
 from app.core.settings import get_settings
+from app.models.user import UserProfile
 
 settings = get_settings()
 TEST_DB_SKIP_REASON = "Postgres test database 'grasp_test' is not available locally — skipping DB-backed integration tests"
@@ -336,6 +338,58 @@ async def test_db_session(test_db_engine):
     finally:
         await session.close()
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def admin_user(test_db_session):
+    """Persist the configured admin user for route-contract tests."""
+    email = f"admin-{uuid.uuid4()}@example.com"
+    user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Admin User",
+        email=email,
+        rag_owner_key=UserProfile.build_rag_owner_key(email),
+        password_hash="admin-hash",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+    await test_db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture
+async def non_admin_user(test_db_session):
+    """Persist a non-admin authenticated caller for route-contract tests."""
+    email = f"member-{uuid.uuid4()}@example.com"
+    user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Non Admin User",
+        email=email,
+        rag_owner_key=UserProfile.build_rag_owner_key(email),
+        password_hash="member-hash",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+    await test_db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_route_settings(admin_user):
+    """Settings fixture that marks the persisted admin user as the configured operator."""
+    return get_settings().model_copy(update={"admin_email": admin_user.email})
+
+
+@pytest.fixture
+def access_token_for():
+    """Build a real bearer token using the production JWT helper."""
+
+    def _access_token_for(user: UserProfile, settings_override=None) -> str:
+        active_settings = settings_override or get_settings()
+        token, _expires_in = _build_access_token(str(user.user_id), user.email, active_settings)
+        return token
+
+    return _access_token_for
 
 
 @pytest_asyncio.fixture

@@ -1,12 +1,8 @@
-"""tests/test_admin_invites.py
-Tests for admin invite issuance contract.
-"""
+"""Tests for admin invite issuance contract."""
 
-import uuid
 from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
@@ -14,11 +10,8 @@ from slowapi.errors import RateLimitExceeded
 from sqlmodel import select
 
 from app.api.routes.admin import router as admin_router
-from app.api.routes.auth import _build_access_token
-from app.core.settings import Settings, get_settings
 from app.db.session import get_session
 from app.models.invite import Invite
-from app.models.user import UserProfile
 
 
 @pytest.fixture
@@ -39,57 +32,18 @@ def admin_invite_app(test_db_session):
     return app
 
 
-@pytest_asyncio.fixture
-async def admin_user(test_db_session):
-    """Persist the configured admin user."""
-    email = f"admin-{uuid.uuid4()}@example.com"
-    user = UserProfile(
-        user_id=uuid.uuid4(),
-        name="Admin User",
-        email=email,
-        rag_owner_key=UserProfile.build_rag_owner_key(email),
-        password_hash="admin-hash",
-    )
-    test_db_session.add(user)
-    await test_db_session.commit()
-    return user
-
-
-@pytest_asyncio.fixture
-async def non_admin_user(test_db_session):
-    """Persist a non-admin authenticated caller."""
-    email = f"member-{uuid.uuid4()}@example.com"
-    user = UserProfile(
-        user_id=uuid.uuid4(),
-        name="Non Admin User",
-        email=email,
-        rag_owner_key=UserProfile.build_rag_owner_key(email),
-        password_hash="member-hash",
-    )
-    test_db_session.add(user)
-    await test_db_session.commit()
-    return user
-
-
-def _access_token_for(user: UserProfile, settings: Settings | None = None) -> str:
-    """Create a real access token for the provided user."""
-    active_settings = settings or get_settings()
-    token, _expires_in = _build_access_token(str(user.user_id), user.email, active_settings)
-    return token
-
-
 @pytest.mark.asyncio
-async def test_admin_can_issue_invite_and_persist_email(admin_invite_app, admin_user, test_db_session):
+async def test_admin_can_issue_invite_and_persist_email(
+    admin_invite_app, admin_user, admin_route_settings, access_token_for, test_db_session
+):
     """Configured admin can create an invite that is stored against the requested email."""
-    settings = Settings(admin_email=admin_user.email)
-
     transport = ASGITransport(app=admin_invite_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("app.core.auth.get_settings", lambda: settings)
+            mp.setattr("app.core.auth.get_settings", lambda: admin_route_settings)
             response = await ac.post(
                 "/api/v1/admin/invites",
-                headers={"Authorization": f"Bearer {_access_token_for(admin_user, settings)}"},
+                headers={"Authorization": f"Bearer {access_token_for(admin_user, admin_route_settings)}"},
                 json={"email": "guest@example.com"},
             )
 
@@ -110,17 +64,17 @@ async def test_admin_can_issue_invite_and_persist_email(admin_invite_app, admin_
 
 
 @pytest.mark.asyncio
-async def test_non_admin_cannot_issue_invite(admin_invite_app, non_admin_user, test_db_session):
+async def test_non_admin_cannot_issue_invite(
+    admin_invite_app, non_admin_user, admin_route_settings, access_token_for, test_db_session
+):
     """Authenticated non-admin callers get the stable denial response and no row is created."""
-    settings = Settings(admin_email="admin@example.com")
-
     transport = ASGITransport(app=admin_invite_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("app.core.auth.get_settings", lambda: settings)
+            mp.setattr("app.core.auth.get_settings", lambda: admin_route_settings)
             response = await ac.post(
                 "/api/v1/admin/invites",
-                headers={"Authorization": f"Bearer {_access_token_for(non_admin_user, settings)}"},
+                headers={"Authorization": f"Bearer {access_token_for(non_admin_user, admin_route_settings)}"},
                 json={"email": "blocked@example.com"},
             )
 
