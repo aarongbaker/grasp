@@ -15,6 +15,8 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from app.core.rate_limit import create_session_limit, user_identity_or_ip_key
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Test app factory
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +53,27 @@ def _create_middleware_app(
     @app.get("/test")
     @limiter.limit(rate_limit)
     async def test_endpoint(request: Request):
+        return {"ok": True}
+
+    return app
+
+
+def _create_hybrid_session_limit_app() -> FastAPI:
+    """Create a minimal app that exercises the production hybrid limiter policy."""
+    app = FastAPI()
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        )
+
+    @app.post("/sessions")
+    @limiter.limit(create_session_limit, key_func=user_identity_or_ip_key)
+    async def create_session_like(request: Request):
         return {"ok": True}
 
     return app
@@ -153,5 +176,20 @@ async def test_rate_limit_returns_429_when_exceeded():
 
         # 4th request should be rate-limited
         resp = await ac.get("/test")
+        assert resp.status_code == 429
+        assert "Rate limit exceeded" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_rate_limit_uses_ip_fallback_when_no_authenticated_identity():
+    """Requests without auth identity fall back to the tighter IP-based ceiling."""
+    app = _create_hybrid_session_limit_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        for _ in range(5):
+            resp = await ac.post("/sessions")
+            assert resp.status_code == 200
+
+        resp = await ac.post("/sessions")
         assert resp.status_code == 429
         assert "Rate limit exceeded" in resp.json()["detail"]
