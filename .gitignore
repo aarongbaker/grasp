@@ -8,6 +8,7 @@ build/
 venv/
 .claude/
 .gsd/
+.codex/
 
 # Env
 .env*
