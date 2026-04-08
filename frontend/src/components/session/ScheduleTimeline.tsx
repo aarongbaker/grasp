@@ -1,5 +1,5 @@
-import { AlertTriangleIcon, ClockIcon } from 'lucide-react';
-import { type NaturalLanguageSchedule, type TimelineEntry } from '../../types/api';
+import { AlertTriangleIcon, ClockIcon, InfoIcon, SparklesIcon } from 'lucide-react';
+import { type NaturalLanguageSchedule, type TimelineEntry, type OneOvenConflictSummary } from '../../types/api';
 import { CookingGantt } from './CookingGantt';
 import { LANE_COLORS } from './colors';
 import styles from './ScheduleTimeline.module.css';
@@ -17,6 +17,40 @@ function formatTotalDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
+function formatRecipeList(recipeNames: string[]): string | null {
+  const unique = Array.from(new Set(recipeNames.filter(Boolean)));
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique.slice(0, -1).join(', ')}, and ${unique.at(-1)}`;
+}
+
+function normalizeOneOvenConflict(conflict?: OneOvenConflictSummary): Required<Pick<OneOvenConflictSummary, 'classification' | 'tolerance_f' | 'has_second_oven' | 'temperature_gap_f' | 'blocking_recipe_names' | 'affected_step_ids'>> & {
+  remediation: {
+    requires_resequencing: boolean;
+    suggested_actions: string[];
+    delaying_recipe_names: string[];
+    blocking_recipe_names: string[];
+    notes: string | null;
+  };
+} {
+  return {
+    classification: conflict?.classification ?? 'compatible',
+    tolerance_f: conflict?.tolerance_f ?? 15,
+    has_second_oven: conflict?.has_second_oven ?? false,
+    temperature_gap_f: conflict?.temperature_gap_f ?? null,
+    blocking_recipe_names: conflict?.blocking_recipe_names ?? [],
+    affected_step_ids: conflict?.affected_step_ids ?? [],
+    remediation: {
+      requires_resequencing: conflict?.remediation?.requires_resequencing ?? false,
+      suggested_actions: conflict?.remediation?.suggested_actions ?? [],
+      delaying_recipe_names: conflict?.remediation?.delaying_recipe_names ?? [],
+      blocking_recipe_names: conflict?.remediation?.blocking_recipe_names ?? [],
+      notes: conflict?.remediation?.notes ?? null,
+    },
+  };
+}
+
 function HeadsUpCallout({ text }: { text: string }) {
   return (
     <div className={styles.headsUp}>
@@ -26,17 +60,88 @@ function HeadsUpCallout({ text }: { text: string }) {
   );
 }
 
+function OneOvenGuidance({ schedule }: { schedule: NaturalLanguageSchedule }) {
+  const conflict = normalizeOneOvenConflict(schedule.one_oven_conflict);
+
+  if (conflict.classification !== 'resequence_required') {
+    return null;
+  }
+
+  const delayingRecipes = formatRecipeList(conflict.remediation.delaying_recipe_names);
+  const blockingRecipes = formatRecipeList(
+    conflict.remediation.blocking_recipe_names.length > 0
+      ? conflict.remediation.blocking_recipe_names
+      : conflict.blocking_recipe_names,
+  );
+
+  return (
+    <section className={styles.guidanceCard} aria-label="One-oven guidance">
+      <div className={styles.guidanceHeader}>
+        <div className={styles.guidanceIconWrap}>
+          <SparklesIcon size={16} className={styles.guidanceIcon} />
+        </div>
+        <div>
+          <h3 className={styles.guidanceTitle}>One-oven plan still works</h3>
+          <p className={styles.guidanceSubtitle}>
+            The scheduler already found a workable sequence — stage the oven work instead of trying to bake everything at once.
+          </p>
+        </div>
+      </div>
+
+      <div className={styles.guidanceMeta}>
+        {conflict.temperature_gap_f != null && (
+          <span className={styles.guidanceBadge}>Temperature gap: {conflict.temperature_gap_f}°F</span>
+        )}
+        <span className={styles.guidanceBadge}>One-oven tolerance: ±{conflict.tolerance_f}°F</span>
+      </div>
+
+      {(blockingRecipes || delayingRecipes) && (
+        <div className={styles.guidanceGrid}>
+          {blockingRecipes && (
+            <div className={styles.guidanceFact}>
+              <span className={styles.guidanceFactLabel}>Bake first</span>
+              <span className={styles.guidanceFactValue}>{blockingRecipes}</span>
+            </div>
+          )}
+          {delayingRecipes && (
+            <div className={styles.guidanceFact}>
+              <span className={styles.guidanceFactLabel}>Stage later</span>
+              <span className={styles.guidanceFactValue}>{delayingRecipes}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {conflict.remediation.suggested_actions.length > 0 && (
+        <div>
+          <div className={styles.guidanceListLabel}>What to do</div>
+          <ul className={styles.guidanceList}>
+            {conflict.remediation.suggested_actions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {conflict.remediation.notes && (
+        <div className={styles.guidanceNotes}>
+          <InfoIcon size={14} className={styles.guidanceNotesIcon} />
+          <span>{conflict.remediation.notes}</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEntry; isLast: boolean; stepNum?: number; stepColor?: string }) {
   const isMerged = entry.merged_from && entry.merged_from.length > 0;
   const isPreheat = entry.is_preheat === true;
   const hasOvenTemp = entry.resource === 'oven' && entry.oven_temp_f != null;
-  
+
   return (
     <div className={styles.timelineRow}>
-      {/* Time label */}
       <div className={styles.timeLabel}>{entry.label}</div>
 
-      {/* Content with colored left border */}
       <div
         className={`${styles.rowContent} ${isLast ? styles.rowContentLast : ''} ${isPreheat ? styles.preheatStep : ''}`}
         style={stepColor ? { borderLeftColor: stepColor } : undefined}
@@ -81,21 +186,17 @@ function TimelineRow({ entry, isLast, stepNum, stepColor }: { entry: TimelineEnt
 }
 
 export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedule }) {
-  // Combine timeline with any legacy prep_ahead_entries (backwards compat with old session data)
   const allEntries = (() => {
     const legacyPrepAhead = schedule.prep_ahead_entries ?? [];
     if (legacyPrepAhead.length > 0) {
-      // Old session data: timeline contains day-of only, prep_ahead_entries are separate
       const merged = [...schedule.timeline, ...legacyPrepAhead];
       return merged.sort((a, b) => a.time_offset_minutes - b.time_offset_minutes);
     }
-    // New data: timeline already contains everything
     return schedule.timeline;
   })();
 
   return (
     <div className={styles.timeline}>
-      {/* Total cook time */}
       <div>
         <div className={styles.totalDuration}>
           {formatTotalDuration(schedule.total_duration_minutes)}
@@ -111,15 +212,14 @@ export function ScheduleTimeline({ schedule }: { schedule: NaturalLanguageSchedu
         </div>
       </div>
 
-      {/* Cooking Gantt chart — receives the full timeline */}
+      <OneOvenGuidance schedule={schedule} />
+
       <CookingGantt timeline={allEntries} totalDurationMinutes={schedule.total_duration_minutes} />
 
-      {/* Recipe Steps — single unified section */}
       <section aria-label="Recipe steps">
         <h3 className={styles.sectionTitle}>Recipe Steps</h3>
         <div>
           {(() => {
-            // Build recipe→color map matching the Gantt chart order
             const colorMap = new Map<string, string>();
             for (const entry of allEntries) {
               if (!colorMap.has(entry.recipe_name)) {

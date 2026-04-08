@@ -12,10 +12,36 @@ import { RecipeCard } from '../components/session/RecipeCard';
 import { RecipePDF } from '../components/session/RecipePDF';
 import { getSessionConceptDisplay } from '../components/session/sessionConceptDisplay';
 import { useSessionStatus } from '../hooks/useSessionStatus';
-import { TERMINAL_STATUSES, type SessionResults } from '../types/api';
+import { TERMINAL_STATUSES, type SessionResults, type OneOvenConflictSummary } from '../types/api';
 import styles from './SessionDetailPage.module.css';
 
 type Tab = 'schedule' | 'recipes';
+
+function normalizeOneOvenConflict(conflict?: OneOvenConflictSummary): Required<Pick<OneOvenConflictSummary, 'classification' | 'tolerance_f' | 'has_second_oven' | 'temperature_gap_f' | 'blocking_recipe_names' | 'affected_step_ids'>> & {
+  remediation: {
+    requires_resequencing: boolean;
+    suggested_actions: string[];
+    delaying_recipe_names: string[];
+    blocking_recipe_names: string[];
+    notes: string | null;
+  };
+} {
+  return {
+    classification: conflict?.classification ?? 'compatible',
+    tolerance_f: conflict?.tolerance_f ?? 15,
+    has_second_oven: conflict?.has_second_oven ?? false,
+    temperature_gap_f: conflict?.temperature_gap_f ?? null,
+    blocking_recipe_names: conflict?.blocking_recipe_names ?? [],
+    affected_step_ids: conflict?.affected_step_ids ?? [],
+    remediation: {
+      requires_resequencing: conflict?.remediation?.requires_resequencing ?? false,
+      suggested_actions: conflict?.remediation?.suggested_actions ?? [],
+      delaying_recipe_names: conflict?.remediation?.delaying_recipe_names ?? [],
+      blocking_recipe_names: conflict?.remediation?.blocking_recipe_names ?? [],
+      notes: conflict?.remediation?.notes ?? null,
+    },
+  };
+}
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -32,6 +58,15 @@ export function SessionDetailPage() {
   const isFailed = session?.status === 'failed';
   const isCancelled = session?.status === 'cancelled';
   const conceptDisplay = session ? getSessionConceptDisplay(session.concept_json) : null;
+  const oneOvenConflict = results ? normalizeOneOvenConflict(results.schedule.one_oven_conflict) : null;
+  const shouldShowFailedConflictFallback =
+    isFailed &&
+    !results &&
+    session?.error_summary?.includes('Oven temperature conflict:');
+  const shouldShowPartialConflictFallback =
+    session?.status === 'partial' &&
+    !results &&
+    session.error_summary?.includes('Oven temperature conflict:');
 
   async function handleCancel() {
     if (!sessionId || cancelling) return;
@@ -140,9 +175,13 @@ export function SessionDetailPage() {
           <div className={styles.errorDetail}>
             {session.error_summary || 'An unexpected error occurred. Please try again.'}
           </div>
-          {session.error_summary?.includes('Oven temperature conflict:') && (
+          {shouldShowFailedConflictFallback && (
             <div className={styles.errorHint}>
-              💡 This menu requires different oven temperatures at the same time. Try adding a second oven in your kitchen settings, or select different recipes.
+              <div className={styles.errorHintTitle}>One-oven conflict blocked this menu</div>
+              <p className={styles.errorHintBody}>
+                This menu requires different oven temperatures at the same time. Try adding a second oven in your kitchen
+                settings, moving one bake earlier, or choosing a different recipe mix.
+              </p>
             </div>
           )}
         </div>
@@ -155,15 +194,39 @@ export function SessionDetailPage() {
             <div className={styles.errorBanner}>
               <div className={styles.errorTitle}>Completed with issues</div>
               <div className={styles.errorDetail}>{session.error_summary}</div>
-              {session.error_summary?.includes('Oven temperature conflict:') && (
+              {shouldShowPartialConflictFallback && (
                 <div className={styles.errorHint}>
-                  💡 Some recipes couldn't be scheduled due to oven temperature conflicts. Consider adding a second oven or adjusting your recipe selection.
+                  <div className={styles.errorHintTitle}>One-oven conflict affected the original plan</div>
+                  <p className={styles.errorHintBody}>
+                    Some recipes could not share the oven as originally requested. Review the schedule below to see whether
+                    the planner found a staged sequence, or regenerate with a second oven or different recipe set.
+                  </p>
                 </div>
               )}
             </div>
           )}
 
           <PipelineProgress status={session.status} />
+
+          {oneOvenConflict?.classification === 'resequence_required' && (
+            <div className={styles.infoBanner} role="status" aria-live="polite">
+              <div className={styles.infoTitle}>One-oven schedule needs staging, not a full replan</div>
+              <div className={styles.infoBody}>
+                {oneOvenConflict.remediation.suggested_actions[0] ??
+                  'The scheduler found a workable sequence. Follow the staged oven order shown in the schedule below.'}
+              </div>
+              <ul className={styles.infoList}>
+                {oneOvenConflict.temperature_gap_f != null && (
+                  <li>Temperature gap: {oneOvenConflict.temperature_gap_f}°F</li>
+                )}
+                <li>Next step: Review the timeline and stage the later bake when the oven frees up.</li>
+                <li>If service timing changes, regenerate with a second oven or a different bake mix.</li>
+              </ul>
+              {oneOvenConflict.remediation.notes && (
+                <p className={styles.infoNote}>{oneOvenConflict.remediation.notes}</p>
+              )}
+            </div>
+          )}
 
           {session.schedule_summary && (
             <div className={styles.summary}>{session.schedule_summary}</div>

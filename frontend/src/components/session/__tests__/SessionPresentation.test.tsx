@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCard } from '../SessionCard';
@@ -7,7 +7,7 @@ import { RecipePDF } from '../RecipePDF';
 import { ScheduleTimeline } from '../ScheduleTimeline';
 import { getRecipeProvenanceDisplay, getSessionConceptDisplay } from '../sessionConceptDisplay';
 import { SessionDetailPage } from '../../../pages/SessionDetailPage';
-import type { DinnerConcept, Session, SessionResults, ValidatedRecipe } from '../../../types/api';
+import type { DinnerConcept, NaturalLanguageSchedule, Session, SessionResults, ValidatedRecipe } from '../../../types/api';
 import * as sessionsApi from '../../../api/sessions';
 import * as sessionStatusHook from '../../../hooks/useSessionStatus';
 
@@ -215,6 +215,20 @@ const authoredSession: Session = {
   },
 };
 
+const partialConflictSession: Session = {
+  ...menuSession,
+  session_id: 'session-partial-conflict',
+  status: 'partial',
+  error_summary: 'Oven temperature conflict: dessert must be staged after the braise window.',
+};
+
+const failedConflictSession: Session = {
+  ...menuSession,
+  session_id: 'session-failed-conflict',
+  status: 'failed',
+  error_summary: 'Oven temperature conflict: roast and dessert need incompatible temperatures at the same time.',
+};
+
 const plannerAuthoredAnchorSession: Session = {
   ...menuSession,
   session_id: 'session-planner-authored-anchor',
@@ -259,17 +273,44 @@ const plannerCookbookTargetSession: Session = {
   },
 };
 
+const baseSchedule: NaturalLanguageSchedule = {
+  timeline: [],
+  total_duration_minutes: 95,
+  total_duration_minutes_max: null,
+  active_time_minutes: 70,
+  summary: 'Dinner lands all at once.',
+  error_summary: null,
+};
+
 const results: SessionResults = {
-  schedule: {
-    timeline: [],
-    total_duration_minutes: 95,
-    total_duration_minutes_max: null,
-    active_time_minutes: 70,
-    summary: 'Dinner lands all at once.',
-    error_summary: null,
-  },
+  schedule: baseSchedule,
   recipes: [plannerLibraryRecipe, plannerGeneratedRecipe, plannerCookbookRecipe],
   errors: [],
+};
+
+const resequencedResults: SessionResults = {
+  ...results,
+  schedule: {
+    ...baseSchedule,
+    one_oven_conflict: {
+      classification: 'resequence_required',
+      tolerance_f: 15,
+      has_second_oven: false,
+      temperature_gap_f: 75,
+      blocking_recipe_names: ['Braised Short Ribs', 'Chocolate Fondant'],
+      affected_step_ids: ['ribs-bake', 'fondant-bake'],
+      remediation: {
+        requires_resequencing: true,
+        suggested_actions: [
+          'Bake Chocolate Fondant after Braised Short Ribs finishes.',
+          'Prep the fondant batter earlier so it is ready when the oven frees up.',
+        ],
+        delaying_recipe_names: ['Chocolate Fondant'],
+        blocking_recipe_names: ['Braised Short Ribs'],
+        notes: 'Single-oven schedule remains feasible if dessert is staged after the braise window.',
+      },
+    },
+  },
 };
 
 function renderDetailPage(sessionId: string = menuSession.session_id) {
@@ -554,6 +595,98 @@ describe('session presentation', () => {
     expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
   });
 
+  it('renders structured one-oven guidance on the session detail page when results include resequencing metadata', async () => {
+    vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue(resequencedResults);
+
+    renderDetailPage();
+
+    expect(await screen.findByText('One-oven schedule needs staging, not a full replan')).toBeInTheDocument();
+    expect(screen.getAllByText('Bake Chocolate Fondant after Braised Short Ribs finishes.')).toHaveLength(2);
+    expect(screen.getAllByText('Temperature gap: 75°F').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Next step: Review the timeline and stage the later bake when the oven frees up.')).toBeInTheDocument();
+    expect(screen.getByText('If service timing changes, regenerate with a second oven or a different bake mix.')).toBeInTheDocument();
+    expect(screen.getByText('One-oven plan still works')).toBeInTheDocument();
+    expect(screen.queryByText('One-oven conflict affected the original plan')).not.toBeInTheDocument();
+  });
+
+  it('keeps the session detail page quiet for compatible schedules and legacy schedules without one-oven metadata', async () => {
+    renderDetailPage();
+
+    await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(menuSession.session_id));
+    expect(screen.queryByText('One-oven schedule needs staging, not a full replan')).not.toBeInTheDocument();
+    expect(screen.queryByText('One-oven plan still works')).not.toBeInTheDocument();
+
+    cleanup();
+    vi.restoreAllMocks();
+    vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
+      data: menuSession,
+      error: null,
+      isPolling: false,
+      refresh: vi.fn(),
+    });
+    vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue({
+      ...results,
+      schedule: {
+        ...baseSchedule,
+        timeline: [],
+      },
+    });
+
+    renderDetailPage();
+
+    await waitFor(() => expect(sessionsApi.getSessionResults).toHaveBeenCalledWith(menuSession.session_id));
+    expect(screen.queryByText('One-oven schedule needs staging, not a full replan')).not.toBeInTheDocument();
+    expect(screen.queryByText('One-oven plan still works')).not.toBeInTheDocument();
+  });
+
+  it('keeps the failure fallback banner for irreconcilable sessions when structured results are unavailable', () => {
+    vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
+      data: failedConflictSession,
+      error: null,
+      isPolling: false,
+      refresh: vi.fn(),
+    });
+
+    renderDetailPage(failedConflictSession.session_id);
+
+    expect(screen.getByText('Pipeline failed')).toBeInTheDocument();
+    expect(screen.getByText('One-oven conflict blocked this menu')).toBeInTheDocument();
+    expect(screen.getByText(/moving one bake earlier, or choosing a different recipe mix/i)).toBeInTheDocument();
+    expect(sessionsApi.getSessionResults).not.toHaveBeenCalled();
+  });
+
+  it('uses structured one-oven guidance for partial sessions once results are available', async () => {
+    vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
+      data: partialConflictSession,
+      error: null,
+      isPolling: false,
+      refresh: vi.fn(),
+    });
+    vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue(resequencedResults);
+
+    renderDetailPage(partialConflictSession.session_id);
+
+    expect(await screen.findByText('One-oven schedule needs staging, not a full replan')).toBeInTheDocument();
+    expect(screen.queryByText('One-oven conflict affected the original plan')).not.toBeInTheDocument();
+    expect(screen.getByText('Completed with issues')).toBeInTheDocument();
+  });
+
+  it('falls back to prose conflict guidance on partial sessions only when result loading fails', async () => {
+    vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
+      data: partialConflictSession,
+      error: null,
+      isPolling: false,
+      refresh: vi.fn(),
+    });
+    vi.spyOn(sessionsApi, 'getSessionResults').mockRejectedValue(new Error('Results unavailable'));
+
+    renderDetailPage(partialConflictSession.session_id);
+
+    expect(await screen.findByText('Could not load results')).toBeInTheDocument();
+    expect(screen.getByText('One-oven conflict affected the original plan')).toBeInTheDocument();
+    expect(screen.getByText(/review the schedule below to see whether the planner found a staged sequence/i)).toBeInTheDocument();
+  });
+
   it('keeps the existing detail retry banner when result fetching fails while header metadata stays stable', async () => {
     vi.spyOn(sessionsApi, 'getSessionResults').mockRejectedValue(new Error('Results unavailable'));
 
@@ -582,6 +715,7 @@ describe('session presentation', () => {
     render(
       <ScheduleTimeline
         schedule={{
+          ...baseSchedule,
           timeline: [
             {
               step_id: 'oven-step',
@@ -639,12 +773,6 @@ describe('session presentation', () => {
               },
             },
           ],
-          prep_ahead_entries: [],
-          total_duration_minutes: 47,
-          total_duration_minutes_max: null,
-          active_time_minutes: 37,
-          summary: 'Dinner lands all at once.',
-          error_summary: null,
         }}
       />,
     );
@@ -653,6 +781,167 @@ describe('session presentation', () => {
     expect(screen.getByText('425°F')).toBeInTheDocument();
     expect(screen.getByText('Simmer sauce on burner Rear Right')).toBeInTheDocument();
     expect(screen.queryByText(/burner.*roast until browned/i)).not.toBeInTheDocument();
+  });
+
+  it('renders scheduler-owned resequencing guidance from structured one-oven metadata', () => {
+    render(
+      <ScheduleTimeline
+        schedule={{
+          ...baseSchedule,
+          timeline: [
+            {
+              step_id: 'oven-a',
+              recipe_name: 'Braised Short Ribs',
+              action: 'Bake until fork tender',
+              resource: 'oven',
+              duration_minutes: 120,
+              duration_max: null,
+              label: 'T+0',
+              time_offset_minutes: 0,
+              clock_time: null,
+              buffer_minutes: null,
+              heads_up: null,
+              is_prep_ahead: false,
+              prep_ahead_window: null,
+              prep_ahead_notes: null,
+              merged_from: [],
+              allocation: {},
+              is_preheat: false,
+              oven_temp_f: 325,
+              burner_id: null,
+              burner_position: null,
+              burner_size: null,
+              burner_label: null,
+              burner: null,
+            },
+          ],
+          one_oven_conflict: {
+            classification: 'resequence_required',
+            tolerance_f: 15,
+            has_second_oven: false,
+            temperature_gap_f: 75,
+            blocking_recipe_names: ['Braised Short Ribs', 'Chocolate Fondant'],
+            affected_step_ids: ['ribs-bake', 'fondant-bake'],
+            remediation: {
+              requires_resequencing: true,
+              suggested_actions: [
+                'Bake Chocolate Fondant after Braised Short Ribs finishes.',
+                'Prep the fondant batter earlier so it is ready when the oven frees up.',
+              ],
+              delaying_recipe_names: ['Chocolate Fondant'],
+              blocking_recipe_names: ['Braised Short Ribs'],
+              notes: 'Single-oven schedule remains feasible if dessert is staged after the braise window.',
+            },
+          },
+        }}
+      />,
+    );
+
+    const guidance = screen.getByRole('region', { name: 'One-oven guidance' });
+
+    expect(screen.getByRole('heading', { name: 'One-oven plan still works' })).toBeInTheDocument();
+    expect(screen.getByText(/scheduler already found a workable sequence/i)).toBeInTheDocument();
+    expect(screen.getByText('Temperature gap: 75°F')).toBeInTheDocument();
+    expect(screen.getByText('Bake first')).toBeInTheDocument();
+    expect(within(guidance).getByText('Braised Short Ribs')).toBeInTheDocument();
+    expect(screen.getByText('Stage later')).toBeInTheDocument();
+    expect(within(guidance).getByText('Chocolate Fondant')).toBeInTheDocument();
+    expect(screen.getByText('Bake Chocolate Fondant after Braised Short Ribs finishes.')).toBeInTheDocument();
+    expect(screen.getByText('Prep the fondant batter earlier so it is ready when the oven frees up.')).toBeInTheDocument();
+    expect(screen.getByText('Single-oven schedule remains feasible if dessert is staged after the braise window.')).toBeInTheDocument();
+    expect(screen.queryByText('ribs-bake')).not.toBeInTheDocument();
+  });
+
+  it('stays quiet for compatible schedules and legacy payloads without one-oven metadata', () => {
+    const { rerender } = render(
+      <ScheduleTimeline
+        schedule={{
+          ...baseSchedule,
+          timeline: [
+            {
+              step_id: 'compatible-step',
+              recipe_name: 'Roast Chicken',
+              action: 'Roast until browned',
+              resource: 'oven',
+              duration_minutes: 45,
+              duration_max: null,
+              label: 'T+0',
+              time_offset_minutes: 0,
+              clock_time: null,
+              buffer_minutes: null,
+              heads_up: null,
+              is_prep_ahead: false,
+              prep_ahead_window: null,
+              prep_ahead_notes: null,
+              merged_from: [],
+              allocation: {},
+              is_preheat: false,
+              oven_temp_f: 400,
+              burner_id: null,
+              burner_position: null,
+              burner_size: null,
+              burner_label: null,
+              burner: null,
+            },
+          ],
+          one_oven_conflict: {
+            classification: 'compatible',
+            tolerance_f: 15,
+            has_second_oven: false,
+            temperature_gap_f: 10,
+            blocking_recipe_names: ['Roast Chicken'],
+            affected_step_ids: ['compatible-step'],
+            remediation: {
+              requires_resequencing: false,
+              suggested_actions: ['No action needed'],
+              delaying_recipe_names: [],
+              blocking_recipe_names: [],
+              notes: 'No conflict.',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'One-oven plan still works' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/temperature gap:/i)).not.toBeInTheDocument();
+
+    rerender(
+      <ScheduleTimeline
+        schedule={{
+          ...baseSchedule,
+          timeline: [
+            {
+              step_id: 'legacy-step',
+              recipe_name: 'Salad',
+              action: 'Dress the greens',
+              resource: 'hands',
+              duration_minutes: 5,
+              duration_max: null,
+              label: 'T+5',
+              time_offset_minutes: 5,
+              clock_time: null,
+              buffer_minutes: null,
+              heads_up: null,
+              is_prep_ahead: false,
+              prep_ahead_window: null,
+              prep_ahead_notes: null,
+              merged_from: [],
+              allocation: {},
+              is_preheat: false,
+              oven_temp_f: null,
+              burner_id: null,
+              burner_position: null,
+              burner_size: null,
+              burner_label: null,
+              burner: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'One-oven plan still works' })).not.toBeInTheDocument();
   });
 
   it('uses authored metadata in the PDF surface', () => {

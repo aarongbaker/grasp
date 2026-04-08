@@ -358,6 +358,26 @@ export interface TimelineEntry {
   is_preheat?: boolean;
 }
 
+export type OneOvenConflictClassification = 'compatible' | 'resequence_required' | 'irreconcilable';
+
+export interface OneOvenConflictRemediation {
+  requires_resequencing?: boolean;
+  suggested_actions?: string[];
+  delaying_recipe_names?: string[];
+  blocking_recipe_names?: string[];
+  notes?: string | null;
+}
+
+export interface OneOvenConflictSummary {
+  classification?: OneOvenConflictClassification;
+  tolerance_f?: number;
+  has_second_oven?: boolean;
+  temperature_gap_f?: number | null;
+  blocking_recipe_names?: string[];
+  affected_step_ids?: string[];
+  remediation?: OneOvenConflictRemediation;
+}
+
 export interface NaturalLanguageSchedule {
   timeline: TimelineEntry[];
   prep_ahead_entries?: TimelineEntry[];
@@ -366,6 +386,7 @@ export interface NaturalLanguageSchedule {
   active_time_minutes: number | null;
   summary: string;
   error_summary: string | null;
+  one_oven_conflict?: OneOvenConflictSummary;
 }
 
 export interface NodeError {

@@ -115,6 +115,51 @@
   line-height: 1.5;
 }
 
+.errorHintTitle {
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2xs);
+}
+
+.errorHintBody {
+  margin: 0;
+}
+
+.infoBanner {
+  margin-top: var(--space-md);
+  margin-bottom: var(--space-xl);
+  padding: var(--space-md) var(--space-lg);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+}
+
+.infoTitle {
+  font-size: var(--text-base);
+  font-weight: 500;
+  margin-bottom: var(--space-xs);
+}
+
+.infoBody {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.infoList {
+  margin: var(--space-sm) 0 0;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.infoNote {
+  margin-top: var(--space-sm);
+  margin-bottom: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 .progressRow {
   display: flex;
   align-items: center;
