@@ -420,6 +420,61 @@ async def test_update_kitchen_accepts_optional_burner_descriptors(app_with_overr
     ]
 
 
+async def test_update_kitchen_rejects_burner_capacity_above_locked_ceiling(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.patch(
+            f"/api/v1/users/{test_user.user_id}/kitchen",
+            json={"max_burners": 11},
+        )
+
+    assert response.status_code == 422
+
+
+async def test_update_kitchen_rejects_more_burners_than_capacity(app_with_overrides, test_user, mock_db):
+    kitchen = KitchenConfig(
+        kitchen_config_id=uuid.uuid4(),
+        max_burners=2,
+        max_oven_racks=2,
+        has_second_oven=False,
+        burners=[],
+    )
+    test_user.kitchen_config_id = kitchen.kitchen_config_id
+    mock_db.exec_result = MagicMock()
+    mock_db.exec_result.first.return_value = kitchen
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.patch(
+            f"/api/v1/users/{test_user.user_id}/kitchen",
+            json={
+                "max_burners": 1,
+                "burners": [
+                    {"burner_id": "front_left_large"},
+                    {"burner_id": "front_right_medium"},
+                ],
+            },
+        )
+
+    assert response.status_code == 422
+    assert "burners count cannot exceed max_burners" in str(response.json()["detail"])
+
+
+async def test_update_kitchen_rejects_second_oven_racks_without_second_oven(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.patch(
+            f"/api/v1/users/{test_user.user_id}/kitchen",
+            json={
+                "has_second_oven": False,
+                "max_second_oven_racks": 2,
+            },
+        )
+
+    assert response.status_code == 422
+    assert "max_second_oven_racks requires has_second_oven=true" in str(response.json()["detail"])
+
+
 @pytest.mark.asyncio
 async def test_kitchen_config_burners_round_trip_through_real_db(db_session_for_routes):
     kitchen = KitchenConfig(
@@ -578,6 +633,32 @@ async def test_add_equipment_returns_201_and_persists_row(app_with_overrides, te
     assert equipment is not None
     assert equipment.name == "Stand Mixer"
     assert equipment.unlocks_techniques == ["laminated_dough", "meringue"]
+
+
+async def test_add_equipment_rejects_more_than_twenty_items(app_with_overrides, test_user, mock_db):
+    for index in range(20):
+        equipment = Equipment(
+            equipment_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            name=f"Equipment {index}",
+            category="prep",
+            unlocks_techniques=[],
+        )
+        mock_db.seed(Equipment, equipment.equipment_id, equipment)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            f"/api/v1/users/{test_user.user_id}/equipment",
+            json={
+                "name": "Overflow Mixer",
+                "category": "prep",
+                "unlocks_techniques": ["laminated_dough"],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Equipment limit exceeded: maximum 20 items"
 
 
 async def test_delete_equipment_returns_204_and_removes_row(app_with_overrides, test_user, mock_db):

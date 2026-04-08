@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from sqlalchemy import JSON
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -58,15 +58,21 @@ class KitchenConfig(SQLModel, table=True):
     __tablename__ = "kitchen_configs"
 
     kitchen_config_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    max_burners: int = Field(default=4)
-    max_oven_racks: int = Field(default=2)
+    max_burners: int = Field(default=4, ge=1, le=10)
+    max_oven_racks: int = Field(default=2, ge=1, le=6)
     has_second_oven: bool = Field(default=False)
-    max_second_oven_racks: int = Field(default=2)
+    max_second_oven_racks: int = Field(default=2, ge=1, le=6)
     # Optional ordered explicit burner descriptors. When absent, max_burners still
     # defines a fungible fallback pool and later scheduling code synthesizes burner_1..N.
     burners: list[BurnerDescriptor] = Field(default_factory=list, sa_column=Column(JSON))
 
     user: Optional["UserProfile"] = Relationship(back_populates="kitchen_config")
+
+    @model_validator(mode="after")
+    def _validate_burner_count(self):
+        if len(self.burners) > self.max_burners:
+            raise ValueError("burners count cannot exceed max_burners")
+        return self
 
 
 class UserProfile(SQLModel, table=True):

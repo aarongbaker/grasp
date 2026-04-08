@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime, timezone
 
 import bcrypt
+from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -53,6 +54,12 @@ class UpdateKitchenRequest(BaseModel):
     has_second_oven: bool | None = None
     max_second_oven_racks: int | None = Field(default=None, ge=1, le=6)
     burners: list[BurnerDescriptor] | None = None
+
+    @model_validator(mode="after")
+    def _validate_second_oven_rack_fields(self):
+        if self.has_second_oven is False and self.max_second_oven_racks is not None:
+            raise ValueError("max_second_oven_racks requires has_second_oven=true")
+        return self
 
 
 class UpdateDietaryDefaultsRequest(BaseModel):
@@ -198,16 +205,18 @@ async def update_kitchen(user_id: uuid.UUID, body: UpdateKitchenRequest, db: DBS
         await db.flush()
         current_user.kitchen_config_id = kc.kitchen_config_id
 
-    if body.max_burners is not None:
-        kc.max_burners = body.max_burners
-    if body.max_oven_racks is not None:
-        kc.max_oven_racks = body.max_oven_racks
-    if body.has_second_oven is not None:
-        kc.has_second_oven = body.has_second_oven
-    if body.max_second_oven_racks is not None:
-        kc.max_second_oven_racks = body.max_second_oven_racks
-    if body.burners is not None:
-        kc.burners = body.burners
+    updated_kitchen = kc.model_dump(exclude={"user"})
+    updated_kitchen.update(body.model_dump(exclude_unset=True))
+    try:
+        validated_kitchen = KitchenConfig.model_validate(updated_kitchen)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+
+    kc.max_burners = validated_kitchen.max_burners
+    kc.max_oven_racks = validated_kitchen.max_oven_racks
+    kc.has_second_oven = validated_kitchen.has_second_oven
+    kc.max_second_oven_racks = validated_kitchen.max_second_oven_racks
+    kc.burners = validated_kitchen.burners
 
     await db.commit()
     await db.refresh(kc)
@@ -235,6 +244,10 @@ async def update_dietary_defaults(user_id: uuid.UUID, body: UpdateDietaryDefault
 async def add_equipment(user_id: uuid.UUID, body: EquipmentRequest, db: DBSession, current_user: CurrentUser):
     if current_user.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
+
+    existing_equipment = await db.exec(select(Equipment).where(Equipment.user_id == user_id))
+    if len(existing_equipment.all()) >= 20:
+        raise HTTPException(status_code=400, detail="Equipment limit exceeded: maximum 20 items")
 
     eq = Equipment(user_id=user_id, name=body.name, category=body.category, unlocks_techniques=body.unlocks_techniques)
     db.add(eq)
