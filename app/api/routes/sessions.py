@@ -125,7 +125,7 @@ async def _resolve_authored_selection(
         "concept_source": "authored",
         "free_text": body.free_text,
         "selected_authored_recipe": {
-            "recipe_id": authored_recipe.recipe_id,
+            "recipe_id": str(authored_recipe.recipe_id),
             "title": authored_recipe.title,
         },
     }
@@ -147,7 +147,7 @@ async def _resolve_planner_authored_anchor(
         "concept_source": "planner_authored_anchor",
         "free_text": body.free_text,
         "planner_authored_recipe_anchor": {
-            "recipe_id": authored_recipe.recipe_id,
+            "recipe_id": str(authored_recipe.recipe_id),
             "title": authored_recipe.title,
         },
     }
@@ -169,10 +169,10 @@ async def _resolve_planner_cookbook_target(
         "concept_source": "planner_cookbook_target",
         "free_text": body.free_text,
         "planner_cookbook_target": {
-            "cookbook_id": cookbook.cookbook_id,
+            "cookbook_id": str(cookbook.cookbook_id),
             "name": cookbook.name,
             "description": cookbook.description,
-            "mode": body.planner_cookbook_target.mode,
+            "mode": body.planner_cookbook_target.mode.value,
         },
     }
 

@@ -55,6 +55,37 @@ def _make_mock_graph_error():
     return graph
 
 
+@pytest.mark.asyncio
+async def test_build_session_initial_state_normalizes_uuid_and_enum_planner_payloads_for_checkpoint():
+    concept_payload = {
+        "free_text": "Build a dinner around my braise.",
+        "guest_count": 4,
+        "meal_type": MealType.DINNER.value,
+        "occasion": Occasion.DINNER_PARTY.value,
+        "dietary_restrictions": [],
+        "serving_time": "19:00",
+        "concept_source": "planner_cookbook_target",
+        "planner_cookbook_target": {
+            "cookbook_id": str(uuid.uuid4()),
+            "name": "Sunday Suppers",
+            "description": "Braises and sides",
+            "mode": "strict",
+        },
+    }
+
+    concept, initial_state = build_session_initial_state(
+        concept_payload=concept_payload,
+        user_id=str(uuid.uuid4()),
+        rag_owner_key="email:test-chef",
+        kitchen_config={"max_burners": 4},
+        equipment=[],
+    )
+
+    assert isinstance(initial_state["concept"]["planner_cookbook_target"]["cookbook_id"], str)
+    assert initial_state["concept"]["planner_cookbook_target"]["mode"] == "strict"
+    assert concept.model_dump(mode="json")["planner_cookbook_target"]["mode"] == "strict"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Derivation rules
 # ─────────────────────────────────────────────────────────────────────────────
