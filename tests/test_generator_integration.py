@@ -270,6 +270,36 @@ def test_build_retry_human_prompt_names_conflict_shape(dinner_concept):
     assert "does not repeat that conflict pattern" in prompt
 
 
+def test_build_retry_prompt_degrades_gracefully_when_optional_conflict_metadata_is_missing(dinner_concept):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=False,
+        ),
+        detail="Scheduler reported a single-oven temperature conflict.",
+        attempt=1,
+    )
+
+    system_prompt = _build_retry_system_prompt(
+        concept=dinner_concept,
+        kitchen_config={"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        equipment=[],
+        recipe_count=3,
+        retry_reason=retry_reason,
+    )
+    human_prompt = _build_retry_human_prompt(3, dinner_concept, retry_reason)
+
+    assert "Allowed oven temperature tolerance: 15°F" in system_prompt
+    assert "Blocking recipe names:" not in system_prompt
+    assert "Affected scheduler step ids:" not in system_prompt
+    assert "Reported conflicting temperature gap:" not in system_prompt
+    assert "the conflicting dishes" in human_prompt
+    assert "does not repeat that conflict pattern" in human_prompt
+
+
 @pytest.fixture
 def compatible_candidate_menu() -> RecipeGenerationOutput:
     return RecipeGenerationOutput(
@@ -717,6 +747,79 @@ async def test_generator_node_records_initial_attempt_history_without_retry_cont
         }
     ]
     assert result["token_usage"] == [{"prompt_tokens": 10, "completion_tokens": 20}]
+    assert result["generation_retry_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_generator_node_records_retry_attempt_history_without_overwriting_prior_attempts(
+    dinner_concept,
+    compatible_candidate_menu,
+):
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=OneOvenConflictSummary(
+            classification="irreconcilable",
+            tolerance_f=15,
+            has_second_oven=False,
+            temperature_gap_f=50,
+            blocking_recipe_names=["Braised Short Ribs", "Chocolate Souffle"],
+        ),
+        detail="Braised Short Ribs at 300°F conflicts with Chocolate Souffle at 425°F.",
+        attempt=1,
+    )
+    state = {
+        "concept": dinner_concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+        "generation_attempt": 2,
+        "generation_retry_reason": retry_reason.model_dump(mode="json"),
+        "generation_history": [
+            {
+                "attempt": 1,
+                "trigger": "initial",
+                "recipe_names": ["Braised Short Ribs", "Chocolate Souffle", "Frisee Salad"],
+                "retry_reason": None,
+            }
+        ],
+    }
+
+    with patch(
+        "app.graph.nodes.generator._generate_ranked_recipe_candidates",
+        AsyncMock(
+            return_value=(
+                compatible_candidate_menu,
+                [
+                    {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                    {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+                    {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34},
+                ],
+                {},
+            )
+        ),
+    ):
+        result = await recipe_generator_node(state)
+
+    assert result["generation_history"] == [
+        {
+            "attempt": 1,
+            "trigger": "initial",
+            "recipe_names": ["Braised Short Ribs", "Chocolate Souffle", "Frisee Salad"],
+            "retry_reason": None,
+        },
+        {
+            "attempt": 2,
+            "trigger": "auto_repair",
+            "recipe_names": ["Roast Chicken", "Apple Tart", "Frisee Salad"],
+            "retry_reason": retry_reason.model_dump(mode="json"),
+        },
+    ]
+    assert result["token_usage"] == [
+        {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+        {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34},
+    ]
     assert result["generation_retry_reason"] is None
 
 
