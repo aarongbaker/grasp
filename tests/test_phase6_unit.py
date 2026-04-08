@@ -13,6 +13,7 @@ no mocks. They verify:
 from datetime import datetime
 
 import pytest
+from pydantic import ValidationError
 
 from app.graph.nodes.dag_builder import _build_single_dag, _generate_recipe_slug
 from app.graph.nodes.dag_merger import (
@@ -1615,6 +1616,19 @@ class TestBurnerDescriptorModels:
 
         assert [burner.burner_id for burner in config.burners] == ["front_left_large", "rear_right_small"]
         assert config.max_burners == 4
+
+    def test_kitchen_config_rejects_burner_descriptors_above_capacity(self):
+        """KitchenConfig should reject impossible burner cardinality before scheduling sees it."""
+        with pytest.raises(ValidationError, match="burners count cannot exceed max_burners"):
+            KitchenConfig.model_validate(
+                {
+                    "max_burners": 1,
+                    "burners": [
+                        {"burner_id": "front_left_large"},
+                        {"burner_id": "front_right_medium"},
+                    ],
+                }
+            )
 
 
 class TestRendererBurnerOutput:
