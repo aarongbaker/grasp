@@ -933,6 +933,29 @@ class TestEquipmentContention:
         assert steps[0].start_at_minute == 0
         assert steps[1].start_at_minute == 0
 
+    def test_missing_equipment_removes_serialization_constraint(self):
+        """Removing the tracked equipment from kitchen_config should allow overlap again."""
+        dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["stand_mixer"])
+        dag_b, val_b = self._make_recipe("B", "b", "b_step_1", Resource.STOVETOP, 20, ["stand_mixer"])
+
+        constrained = _merge_dags(
+            [dag_a, dag_b],
+            [val_a, val_b],
+            {"max_burners": 4, "equipment": ["stand_mixer"]},
+        )
+        unconstrained = _merge_dags(
+            [dag_a, dag_b],
+            [val_a, val_b],
+            {"max_burners": 4},
+        )
+
+        constrained_steps = sorted(constrained.scheduled_steps, key=lambda step: step.start_at_minute)
+        unconstrained_steps = sorted(unconstrained.scheduled_steps, key=lambda step: step.start_at_minute)
+
+        assert constrained_steps[0].end_at_minute <= constrained_steps[1].start_at_minute
+        assert unconstrained_steps[0].start_at_minute == 0
+        assert unconstrained_steps[1].start_at_minute == 0
+
     def test_equipment_utilisation_populated(self):
         """equipment_utilisation records intervals for used equipment."""
         dag_a, val_a = self._make_recipe("A", "a", "a_step_1", Resource.STOVETOP, 30, ["stand_mixer"])
