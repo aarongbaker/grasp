@@ -58,7 +58,7 @@ Each task will be represented by the same docs-only closure commit for this plan
 1. **Task 1: Add a repeatable scheduler benchmark and capture the Phase 4 profile** - `ab8746e` (`docs`)
 2. **Task 2: Close the phase with either a docs-only proof or a narrow hot-path fix** - `ab8746e` (`docs`, docs-only proof path)
 
-**Plan metadata:** pending completion commit for this summary/state update.
+**Plan metadata:** `c3aaf4f` (`docs`)
 
 ## Files Created/Modified
 - `.planning/phases/04-performance/benchmark_dag_merger.py` - rerunnable benchmark harness for realistic `_merge_dags()` workloads
