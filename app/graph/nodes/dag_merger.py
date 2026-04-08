@@ -680,17 +680,21 @@ def _build_burner_slots(kitchen_config: dict[str, Any]) -> list[_BurnerSlot]:
     slots: list[_BurnerSlot] = []
 
     if raw_burners:
-        descriptors = _BURNER_DESCRIPTOR_ADAPTER.validate_python(raw_burners)
-        for descriptor in descriptors:
-            slots.append(
-                _BurnerSlot(
-                    burner_id=descriptor.burner_id,
-                    position=descriptor.position,
-                    size=descriptor.size,
-                    label=descriptor.label,
+        try:
+            descriptors = _BURNER_DESCRIPTOR_ADAPTER.validate_python(raw_burners)
+        except ValidationError:
+            logger.warning("Malformed burner descriptors in kitchen_config; falling back to max_burners numbering")
+        else:
+            for descriptor in descriptors:
+                slots.append(
+                    _BurnerSlot(
+                        burner_id=descriptor.burner_id,
+                        position=descriptor.position,
+                        size=descriptor.size,
+                        label=descriptor.label,
+                    )
                 )
-            )
-        return slots
+            return slots
 
     burner_count = max(int(kitchen_config.get("max_burners", 4) or 0), 0)
     for index in range(burner_count):
