@@ -6,8 +6,8 @@ The backend pipeline is complete. This milestone hardens it for production by cl
 
 ## Phases
 
-- [ ] **Phase 1: Test Infrastructure** - Add missing test coverage for admin routes, health endpoint, and Celery task failure paths; extract shared test helper
-- [ ] **Phase 2: Correctness Fixes** - Fix AsyncOpenAI connection leak and finalise_session() race condition; parallelize embedding fallback
+- [x] **Phase 1: Test Infrastructure** - Add missing test coverage for admin routes, health endpoint, and Celery task failure paths; extract shared test helper (completed 2026-04-08)
+- [x] **Phase 2: Correctness Fixes** - Fix AsyncOpenAI connection leak and finalise_session() race condition; parallelize embedding fallback (completed 2026-04-08)
 - [ ] **Phase 3: Security Surface Closure** - Add rate limiting, kitchen config bounds validators, and RAG user_id assertion; cache RAG context
 - [ ] **Phase 4: Performance** - Profile scheduler O(n²) and resolve if confirmed; gate on Phase 1 kitchen edge case tests
 
@@ -23,7 +23,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
   3. Health check endpoint test confirms liveness under normal DB connection and the degraded/failure path
   4. `_run_pipeline_async` task early-exit, graph exception, and ValidationError paths each have a dedicated test that runs without a real Celery broker
   5. Kitchen edge case tests (zero burners, missing config, invalid descriptors) exist and pass, serving as regression gate for Phase 4 scheduler work
-**Plans**: 0/4 plans executed
+**Plans**: 4/4 plans complete
 
 ### Phase 2: Correctness Fixes
 **Goal**: The two confirmed production bugs are closed — AsyncOpenAI connections no longer accumulate in Celery workers, and finalise_session() cannot double-write via a TOCTOU race; embedding fallback is parallelized as a co-located improvement
@@ -34,7 +34,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
   2. `finalise_session()` issues a single `SELECT ... FOR UPDATE` as its only DB read; a concurrent-writer test confirms the CANCELLED guard holds under race conditions
   3. Embedding fallback loop uses `asyncio.gather(return_exceptions=True)` with `Semaphore(10)`; a test with a partial-failure mock confirms failed chunks are isolated and do not abort the batch
   4. All 99 pre-existing tests remain green
-**Plans**: TBD
+**Plans**: 2/2 plans complete
 
 ### Phase 3: Security Surface Closure
 **Goal**: The three security gaps are closed — `POST /sessions` is rate-limited per authenticated user, kitchen config inputs are bounds-validated before reaching the scheduler, and RAG chunk retrieval asserts ownership before use; RAG context is cached to eliminate N+1 queries
@@ -60,7 +60,7 @@ The backend pipeline is complete. This milestone hardens it for production by cl
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Infrastructure | 0/4 | Planned | - |
-| 2. Correctness Fixes | 0/TBD | Not started | - |
+| 1. Test Infrastructure | 4/4 | Complete    | 2026-04-08 |
+| 2. Correctness Fixes | 2/2 | Complete    | 2026-04-08 |
 | 3. Security Surface Closure | 0/TBD | Not started | - |
 | 4. Performance | 0/TBD | Not started | - |

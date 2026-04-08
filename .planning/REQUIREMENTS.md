@@ -7,12 +7,12 @@
 
 ### Test Coverage
 
-- [ ] **TEST-01**: Admin route endpoints tested — invite flow endpoints in admin.py, used in production, zero current coverage
-- [ ] **TEST-02**: Health check endpoint tested — DB query liveness contract in health.py, critical for monitoring
-- [ ] **TEST-03**: Celery `_run_pipeline_async` unit tested — failure callbacks and timeout handling without real broker
-- [ ] **TEST-04**: Celery `_ingest_async` unit tested — failure behavior and error propagation
-- [ ] **TEST-05**: Equipment CRUD operations tested — create/delete routes and scheduler constraint unlock in dag_merger
-- [ ] **TEST-06**: Kitchen config edge cases tested — zero burners, missing config, invalid descriptors serve as regression suite for scheduler
+- [x] **TEST-01**: Admin route endpoints tested — invite flow endpoints in admin.py, used in production, zero current coverage
+- [x] **TEST-02**: Health check endpoint tested — DB query liveness contract in health.py, critical for monitoring
+- [x] **TEST-03**: Celery `_run_pipeline_async` unit tested — failure callbacks and timeout handling without real broker
+- [x] **TEST-04**: Celery `_ingest_async` unit tested — failure behavior and error propagation
+- [x] **TEST-05**: Equipment CRUD operations tested — create/delete routes and scheduler constraint unlock in dag_merger
+- [x] **TEST-06**: Kitchen config edge cases tested — zero burners, missing config, invalid descriptors serve as regression suite for scheduler
 
 ### Security
 
@@ -22,12 +22,12 @@
 
 ### Bug Fixes
 
-- [ ] **BUG-01**: `AsyncOpenAI` client resource leak fixed — `async with AsyncOpenAI(...) as client:` wraps entire `embed_and_upsert_chunks` function body in `app/ingestion/embedder.py` (line 72)
-- [ ] **BUG-02**: `finalise_session()` race condition fixed — single `select(...).with_for_update()` replaces `db.get()` + `db.refresh()` pair in `app/core/status.py`; same locking applied to cancellation PATCH handler in `app/api/routes/sessions.py`
+- [x] **BUG-01**: `AsyncOpenAI` client resource leak fixed — `async with AsyncOpenAI(...) as client:` wraps entire `embed_and_upsert_chunks` function body in `app/ingestion/embedder.py` (line 72)
+- [x] **BUG-02**: `finalise_session()` race condition fixed — single `select(...).with_for_update()` replaces `db.get()` + `db.refresh()` pair in `app/core/status.py`; same locking applied to cancellation PATCH handler in `app/api/routes/sessions.py`
 
 ### Performance
 
-- [ ] **PERF-01**: Embedding fallback parallelized — `asyncio.gather` with `asyncio.Semaphore` and `return_exceptions=True` replaces sequential per-chunk fallback loop in `app/ingestion/embedder.py` (lines 103–112); done alongside BUG-01
+- [x] **PERF-01**: Embedding fallback parallelized — `asyncio.gather` with `asyncio.Semaphore` and `return_exceptions=True` replaces sequential per-chunk fallback loop in `app/ingestion/embedder.py` (lines 103–112); done alongside BUG-01
 - [ ] **PERF-02**: RAG context cache added in enricher — Pinecone retrieval results cached per session/recipe combination to eliminate N+1 queries in `app/graph/nodes/enricher.py` (lines 338–358)
 - [ ] **PERF-03**: Scheduler O(n²) investigated and resolved — profile stovetop slot scan in `app/graph/nodes/dag_merger.py`; replace linear `burner_intervals` scan with `_IntervalIndex` per burner if profiling confirms O(n²) remains; kitchen edge case tests (TEST-06) serve as regression suite
 
@@ -59,15 +59,15 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 1 | Pending |
-| TEST-04 | Phase 1 | Pending |
-| TEST-05 | Phase 1 | Pending |
-| TEST-06 | Phase 1 | Pending |
-| BUG-01 | Phase 2 | Pending |
-| BUG-02 | Phase 2 | Pending |
-| PERF-01 | Phase 2 | Pending |
+| TEST-01 | Phase 1 | Complete |
+| TEST-02 | Phase 1 | Complete |
+| TEST-03 | Phase 1 | Complete |
+| TEST-04 | Phase 1 | Complete |
+| TEST-05 | Phase 1 | Complete |
+| TEST-06 | Phase 1 | Complete |
+| BUG-01 | Phase 2 | Complete |
+| BUG-02 | Phase 2 | Complete |
+| PERF-01 | Phase 2 | Complete |
 | SEC-01 | Phase 3 | Pending |
 | SEC-02 | Phase 3 | Pending |
 | SEC-03 | Phase 3 | Pending |
@@ -81,4 +81,4 @@
 
 ---
 *Requirements defined: 2026-04-08*
-*Last updated: 2026-04-08 after initial definition*
+*Last updated: 2026-04-08 after Phase 02 completion*
