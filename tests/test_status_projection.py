@@ -536,6 +536,76 @@ async def test_planner_cookbook_target_raw_recipes_still_project_enriching_witho
 
 
 @pytest.mark.asyncio
+async def test_retry_generation_checkpoint_projects_generating_without_direct_in_progress_status_writes():
+    graph = _make_mock_graph(
+        {
+            "generation_attempt": 2,
+            "generation_attempt_limit": 3,
+            "generation_retry_reason": {
+                "node_name": "dag_merger",
+                "error_type": "resource_conflict",
+                "summary": {
+                    "classification": "irreconcilable",
+                    "tolerance_f": 15,
+                    "has_second_oven": False,
+                    "temperature_gap_f": 20,
+                    "blocking_recipe_names": ["A", "B"],
+                    "affected_step_ids": ["a", "b"],
+                    "remediation": {
+                        "requires_resequencing": False,
+                        "suggested_actions": ["Use a second oven or change recipes."],
+                        "delaying_recipe_names": [],
+                        "blocking_recipe_names": ["A", "B"],
+                        "notes": "retryable one-oven conflict",
+                    },
+                },
+                "detail": "retryable one-oven conflict",
+                "attempt": 1,
+            },
+            "generation_history": [
+                {
+                    "attempt": 2,
+                    "trigger": "auto_repair",
+                    "recipe_names": ["A", "B"],
+                    "retry_reason": {
+                        "node_name": "dag_merger",
+                        "error_type": "resource_conflict",
+                        "summary": {
+                            "classification": "irreconcilable",
+                            "tolerance_f": 15,
+                            "has_second_oven": False,
+                            "temperature_gap_f": 20,
+                            "blocking_recipe_names": ["A", "B"],
+                            "affected_step_ids": ["a", "b"],
+                            "remediation": {
+                                "requires_resequencing": False,
+                                "suggested_actions": ["Use a second oven or change recipes."],
+                                "delaying_recipe_names": [],
+                                "blocking_recipe_names": ["A", "B"],
+                                "notes": "retryable one-oven conflict",
+                            },
+                        },
+                        "detail": "retryable one-oven conflict",
+                        "attempt": 1,
+                    },
+                }
+            ],
+            "raw_recipes": [],
+            "enriched_recipes": [],
+            "validated_recipes": [],
+            "recipe_dags": [],
+            "merged_dag": None,
+            "schedule": None,
+            "errors": [],
+        }
+    )
+
+    status = await status_projection(uuid.uuid4(), graph)
+
+    assert status == SessionStatus.GENERATING
+
+
+@pytest.mark.asyncio
 async def test_most_advanced_field_wins():
     """When multiple fields populated, the most advanced one determines status."""
     graph = _make_mock_graph(

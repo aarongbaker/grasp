@@ -29,6 +29,7 @@ final_router: runs after schedule_renderer only.
 from app.models.enums import ErrorType
 from app.models.pipeline import (
     GRASPState,
+    GenerationAttemptRecord,
     GenerationRetryEligibility,
     GenerationRetryReason,
 )
@@ -122,6 +123,69 @@ def normalize_generation_retry_reason(state: GRASPState) -> GenerationRetryReaso
     if not eligibility.eligible:
         return None
     return eligibility.retry_reason
+
+
+def dag_merger_router(state: GRASPState) -> str:
+    """Route dag_merger outcomes to continue, retry_generation, or fatal.
+
+    This seam is intentionally narrow: only typed one-oven irreconcilable
+    RESOURCE_CONFLICT failures from dag_merger can trigger corrective
+    regeneration, and only while the graph-local attempt budget remains.
+    Session row status ownership stays unchanged because this router only
+    inspects checkpoint state.
+    """
+    errors = state.get("errors", [])
+    if not errors:
+        return "continue"
+
+    last_error = errors[-1]
+    if last_error.get("node_name") != "dag_merger":
+        return "fatal" if not last_error.get("recoverable", False) else "continue"
+
+    eligibility = normalize_generation_retry_eligibility(state)
+    if eligibility.eligible and eligibility.retry_reason is not None:
+        return "retry_generation"
+
+    return "fatal"
+
+
+def build_generation_retry_state(state: GRASPState) -> dict:
+    """Return the graph-local state patch that records one corrective retry.
+
+    The retry patch deliberately resets downstream graph products so the next
+    generation run starts from a clean checkpoint seam, while preserving prior
+    errors/token history via LangGraph reducers. No session status writes occur
+    here.
+    """
+    eligibility = normalize_generation_retry_eligibility(state)
+    if eligibility.retry_reason is None:
+        return {}
+
+    next_attempt = eligibility.current_attempt + 1
+    retry_reason = eligibility.retry_reason.model_dump(mode="json")
+    history = list(state.get("generation_history", []))
+    history.append(
+        GenerationAttemptRecord(
+            attempt=next_attempt,
+            trigger="auto_repair",
+            recipe_names=[*eligibility.retry_reason.summary.blocking_recipe_names],
+            retry_reason=eligibility.retry_reason,
+        ).model_dump(mode="json")
+    )
+
+    return {
+        "generation_attempt": next_attempt,
+        "generation_retry_reason": retry_reason,
+        "generation_retry_exhausted": False,
+        "generation_history": history,
+        "raw_recipes": [],
+        "enriched_recipes": [],
+        "validated_recipes": [],
+        "recipe_dags": [],
+        "merged_dag": None,
+        "schedule": None,
+        "errors": [],
+    }
 
 
 def final_router(state: GRASPState) -> str:

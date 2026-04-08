@@ -7,9 +7,10 @@ Each later phase only swaps one import line (mock → real node).
 Graph topology (linear with conditional error routing):
   START → recipe_generator → [error_router] → fatal? → handle_fatal_error → END
                                              → continue → rag_enricher
-        → [error_router] → ... → dag_merger → [error_router]
-        → schedule_renderer → [final_router] → mark_complete → END
-                                              → mark_partial  → END
+        → [error_router] → ... → dag_merger → [dag_merger_router]
+        → retry_generation? → recipe_generator
+        → continue → schedule_renderer → [final_router] → mark_complete → END
+                                                           → mark_partial  → END
 
 CRITICAL import pattern for Phases 4-7:
   Phase 4: from app.graph.nodes.generator import recipe_generator_node  (delete mock)
@@ -30,7 +31,12 @@ from app.graph.nodes.enricher import rag_enricher_node  # Phase 5: real
 from app.graph.nodes.generator import recipe_generator_node  # Phase 4: real
 from app.graph.nodes.renderer import schedule_renderer_node  # Phase 7: real
 from app.graph.nodes.validator import validator_node  # Phase 5: real (Pydantic)
-from app.graph.router import error_router, final_router
+from app.graph.router import (
+    build_generation_retry_state,
+    dag_merger_router,
+    error_router,
+    final_router,
+)
 from app.models.pipeline import GRASPState
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +61,11 @@ async def mark_partial_node(state: GRASPState) -> dict:
     return {"errors": []}
 
 
+async def retry_generation_node(state: GRASPState) -> dict:
+    """Checkpoint-local corrective retry seam for eligible dag_merger failures."""
+    return build_generation_retry_state(state)
+
+
 def build_grasp_graph(checkpointer) -> StateGraph:
     """
     Compiles and returns the LangGraph state machine.
@@ -77,13 +88,12 @@ def build_grasp_graph(checkpointer) -> StateGraph:
     workflow.add_node("handle_fatal_error", handle_fatal_error_node)
     workflow.add_node("mark_complete", mark_complete_node)
     workflow.add_node("mark_partial", mark_partial_node)
+    workflow.add_node("retry_generation", retry_generation_node)
 
     # ── Entry point ───────────────────────────────────────────────────────────
     workflow.set_entry_point("recipe_generator")
 
     # ── Conditional edges after each non-terminal node ────────────────────────
-    # error_router runs after every node except schedule_renderer.
-    # The mapping: "fatal" → handle_fatal_error, "continue" → next_node
     workflow.add_conditional_edges(
         "recipe_generator",
         error_router,
@@ -106,9 +116,14 @@ def build_grasp_graph(checkpointer) -> StateGraph:
     )
     workflow.add_conditional_edges(
         "dag_merger",
-        error_router,
-        {"fatal": "handle_fatal_error", "continue": "schedule_renderer"},
+        dag_merger_router,
+        {
+            "fatal": "handle_fatal_error",
+            "continue": "schedule_renderer",
+            "retry_generation": "retry_generation",
+        },
     )
+    workflow.add_edge("retry_generation", "recipe_generator")
 
     # ── Final router after schedule_renderer ─────────────────────────────────
     workflow.add_conditional_edges(
