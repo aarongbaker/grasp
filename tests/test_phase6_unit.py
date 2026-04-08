@@ -34,7 +34,13 @@ from app.models.recipe import (
     RecipeStep,
     ValidatedRecipe,
 )
-from app.models.scheduling import MergedDAG, RecipeDAG, ScheduledStep
+from app.models.scheduling import (
+    MergedDAG,
+    OneOvenConflictRemediation,
+    OneOvenConflictSummary,
+    RecipeDAG,
+    ScheduledStep,
+)
 from app.models.user import BurnerDescriptor, KitchenConfig
 from tests.fixtures.recipes import (
     CYCLIC_STEPS_SHORT_RIBS,
@@ -127,6 +133,74 @@ class TestSlugGeneration:
 
 
 # ── DAG Merger Tests ─────────────────────────────────────────────────────────
+
+
+class TestSchedulingModelOvenConflictMetadata:
+    def test_merged_dag_defaults_one_oven_conflict_for_legacy_payload(self):
+        merged = MergedDAG.model_validate(
+            {
+                "scheduled_steps": [
+                    {
+                        "step_id": "legacy_oven",
+                        "recipe_name": "Legacy Bake",
+                        "description": "Bake until set",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 30,
+                        "start_at_minute": 0,
+                        "end_at_minute": 30,
+                        "oven_temp_f": None,
+                    }
+                ],
+                "total_duration_minutes": 30,
+            }
+        )
+
+        assert merged.one_oven_conflict.classification == "compatible"
+        assert merged.one_oven_conflict.remediation.requires_resequencing is False
+
+    def test_merged_dag_accepts_resequence_required_contract(self):
+        merged = MergedDAG.model_validate(
+            {
+                "scheduled_steps": [
+                    {
+                        "step_id": "a_step_1",
+                        "recipe_name": "Recipe A",
+                        "description": "Bake at 375F",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 60,
+                        "start_at_minute": 0,
+                        "end_at_minute": 60,
+                        "oven_temp_f": 375,
+                    },
+                    {
+                        "step_id": "b_step_1",
+                        "recipe_name": "Recipe B",
+                        "description": "Bake at 450F",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 60,
+                        "start_at_minute": 60,
+                        "end_at_minute": 120,
+                        "oven_temp_f": 450,
+                    },
+                ],
+                "total_duration_minutes": 120,
+                "one_oven_conflict": {
+                    "classification": "resequence_required",
+                    "temperature_gap_f": 75,
+                    "blocking_recipe_names": ["Recipe A", "Recipe B"],
+                    "affected_step_ids": ["a_step_1", "b_step_1"],
+                    "remediation": {
+                        "requires_resequencing": True,
+                        "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+                        "delaying_recipe_names": ["Recipe B"],
+                    },
+                },
+            }
+        )
+
+        assert merged.one_oven_conflict.classification == "resequence_required"
+        assert merged.one_oven_conflict.temperature_gap_f == 75
+        assert merged.one_oven_conflict.remediation.suggested_actions == ["Bake Recipe B after Recipe A finishes."]
 
 
 class TestCriticalPath:

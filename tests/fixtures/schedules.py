@@ -43,6 +43,8 @@ from app.models.enums import Resource
 from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
+    OneOvenConflictRemediation,
+    OneOvenConflictSummary,
     RecipeDAG,
     ScheduledStep,
     TimelineEntry,
@@ -269,6 +271,11 @@ MERGED_DAG_FULL = MergedDAG(
         "hands": [(20, 30), (30, 45), (45, 55), (55, 65), (65, 80)],
         "oven": [(30, 180), (180, 192)],
     },
+    one_oven_conflict=OneOvenConflictSummary(
+        classification="compatible",
+        tolerance_f=15,
+        has_second_oven=False,
+    ),
 )
 
 
@@ -364,6 +371,11 @@ MERGED_DAG_TWO_RECIPE = MergedDAG(
         "hands": [(20, 30), (30, 40), (40, 55)],
         "oven": [(30, 180)],
     },
+    one_oven_conflict=OneOvenConflictSummary(
+        classification="compatible",
+        tolerance_f=15,
+        has_second_oven=False,
+    ),
 )
 
 
@@ -413,6 +425,11 @@ NATURAL_LANGUAGE_SCHEDULE_FULL = NaturalLanguageSchedule(
         "Fondants bake in 12–14 minutes at service while ribs rest. "
         "Total active time: approximately 90 minutes. Total elapsed: 3 hours 15 minutes."
     ),
+    one_oven_conflict=OneOvenConflictSummary(
+        classification="compatible",
+        tolerance_f=15,
+        has_second_oven=False,
+    ),
 )
 
 _TIMELINE_TWO = _build_unified_timeline(_SCHEDULED_STEPS_TWO)
@@ -429,6 +446,11 @@ NATURAL_LANGUAGE_SCHEDULE_TWO_RECIPE = NaturalLanguageSchedule(
         "Total elapsed: 3 hours 15 minutes."
     ),
     error_summary="Chocolate Fondant dropped: RAG retrieval returned zero results.",
+    one_oven_conflict=OneOvenConflictSummary(
+        classification="compatible",
+        tolerance_f=15,
+        has_second_oven=False,
+    ),
 )
 
 

@@ -50,6 +50,7 @@ from app.models.pipeline import (
 from app.models.scheduling import (
     MergedDAG,
     NaturalLanguageSchedule,
+    OneOvenConflictSummary,
     ScheduledStep,
     TimelineEntry,
 )
@@ -1087,6 +1088,75 @@ class TestBuildSummaryPrompt:
 
 
 # ── Node Function ───────────────────────────────────────────────────────────
+
+
+class TestOneOvenConflictRendererContract:
+    def test_schedule_model_defaults_one_oven_conflict_for_legacy_payload(self):
+        schedule = NaturalLanguageSchedule.model_validate(
+            {
+                "timeline": [
+                    {
+                        "time_offset_minutes": 0,
+                        "label": "T+0",
+                        "step_id": "oven_step",
+                        "recipe_name": "Roast",
+                        "action": "Roast until browned",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 25,
+                        "oven_temp_f": 425,
+                    }
+                ],
+                "prep_ahead_entries": [],
+                "total_duration_minutes": 25,
+                "summary": "Legacy schedule",
+            }
+        )
+
+        assert schedule.one_oven_conflict.classification == "compatible"
+        assert schedule.one_oven_conflict.remediation.suggested_actions == []
+
+    def test_schedule_model_preserves_explicit_one_oven_conflict_payload(self):
+        schedule = NaturalLanguageSchedule.model_validate(
+            {
+                "timeline": [
+                    {
+                        "time_offset_minutes": 0,
+                        "label": "T+0",
+                        "step_id": "a_step_1",
+                        "recipe_name": "Recipe A",
+                        "action": "Bake at 375F",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 60,
+                        "oven_temp_f": 375,
+                    },
+                    {
+                        "time_offset_minutes": 60,
+                        "label": "T+60",
+                        "step_id": "b_step_1",
+                        "recipe_name": "Recipe B",
+                        "action": "Bake at 450F",
+                        "resource": Resource.OVEN,
+                        "duration_minutes": 60,
+                        "oven_temp_f": 450,
+                    },
+                ],
+                "prep_ahead_entries": [],
+                "total_duration_minutes": 120,
+                "summary": "Typed oven conflict schedule",
+                "one_oven_conflict": {
+                    "classification": "resequence_required",
+                    "temperature_gap_f": 75,
+                    "affected_step_ids": ["a_step_1", "b_step_1"],
+                    "remediation": {
+                        "requires_resequencing": True,
+                        "suggested_actions": ["Stagger the bakes."],
+                    },
+                },
+            }
+        )
+
+        assert schedule.one_oven_conflict.classification == "resequence_required"
+        assert schedule.one_oven_conflict.remediation.requires_resequencing is True
 
 
 class TestScheduleRendererNode:

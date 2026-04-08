@@ -8,13 +8,53 @@ Other steps can run concurrently during PASSIVE windows. This is the primary
 source of time savings in multi-course schedules.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from app.models.enums import Resource
 from app.models.recipe import RecipeStep
 from app.models.user import BurnerDescriptor
+
+
+class OneOvenConflictRemediation(BaseModel):
+    """Machine-readable remediation hints for one-oven menus.
+
+    All fields default to conservative/empty values so legacy persisted schedules
+    without remediation metadata still validate cleanly.
+    """
+
+    requires_resequencing: bool = False
+    suggested_actions: list[str] = []
+    delaying_recipe_names: list[str] = []
+    blocking_recipe_names: list[str] = []
+    notes: Optional[str] = None
+
+
+class OneOvenConflictSummary(BaseModel):
+    """Typed schedule-level summary of one-oven temperature feasibility.
+
+    Classification contract for future dag_merger slices:
+    - compatible: single-oven usage is already compatible, either because all
+      overlapping oven work shares temperature within the 15°F tolerance,
+      temperatures are unknown, or extra oven capacity makes the distinction moot.
+    - resequence_required: a single-oven plan remains feasible, but only by
+      explicitly staging incompatible oven work into separate windows.
+    - irreconcilable: the menu should fail with RESOURCE_CONFLICT because one
+      oven cannot satisfy the required temperature windows without a second oven
+      or recipe changes.
+
+    Defaults preserve backward compatibility for persisted schedules generated
+    before this metadata existed.
+    """
+
+    classification: Literal["compatible", "resequence_required", "irreconcilable"] = "compatible"
+    tolerance_f: int = 15
+    has_second_oven: bool = False
+    temperature_gap_f: Optional[int] = None
+    blocking_recipe_names: list[str] = []
+    affected_step_ids: list[str] = []
+    remediation: OneOvenConflictRemediation = Field(default_factory=OneOvenConflictRemediation)
 
 
 class ScheduledStep(BaseModel):
@@ -75,6 +115,7 @@ class MergedDAG(BaseModel):
     # Same JSON round-trip caveat as RecipeDAG.edges — model_validate() to get tuples.
     equipment_utilisation: dict[str, list[tuple[int, int]]] = {}
     resource_warnings: list[str] = []  # warnings surfaced by finish-together scheduling
+    one_oven_conflict: OneOvenConflictSummary = Field(default_factory=OneOvenConflictSummary)
     # equipment_name → list of (start, end) windows.
 
 
@@ -124,3 +165,4 @@ class NaturalLanguageSchedule(BaseModel):
     active_time_minutes: Optional[int] = None  # non-PASSIVE step durations
     summary: str  # one-paragraph overview for session list view
     error_summary: Optional[str] = None  # populated on PARTIAL outcome
+    one_oven_conflict: OneOvenConflictSummary = Field(default_factory=OneOvenConflictSummary)

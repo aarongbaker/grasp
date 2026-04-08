@@ -277,7 +277,7 @@ def _build_human_prompt(recipe_count: int, concept: DinnerConcept) -> str:
 
 def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRecipe) -> str:
     return (
-        f"Generate exactly {complement_count} complementary recipes around the fixed anchor recipe {anchor_recipe.name!r}. "
+        f"Generate {complement_count} complementary recipes around the anchored dish {anchor_recipe.name!r}. "
         "Do not repeat the anchor recipe and return only the structured recipe payload."
     )
 
@@ -790,13 +790,20 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 complement_count,
                 anchor_recipe.name,
             )
-            result, usages, _score_details = await _generate_ranked_recipe_candidates(
-                system_prompt=system_prompt,
-                human_prompt=human_prompt,
-                kitchen_config=kitchen_config,
-                anchor_recipes=anchor_recipes,
-            )
-            all_recipes = [anchor_recipe, *result.recipes]
+            if complement_count == 1 and len(anchor_recipes) > 1:
+                result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+                usages = [usage]
+            elif anchor_recipe.provenance.kind == "generated":
+                result, usages, _score_details = await _generate_ranked_recipe_candidates(
+                    system_prompt=system_prompt,
+                    human_prompt=human_prompt,
+                    kitchen_config=kitchen_config,
+                    anchor_recipes=anchor_recipes,
+                )
+            else:
+                result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+                usages = [usage]
+            all_recipes = [*anchor_recipes, *result.recipes]
             logger.info(
                 "Seeded planner-authored anchor %r and selected %d complementary recipes: %s",
                 anchor_recipe.name,
@@ -824,13 +831,13 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                     "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
                 }
 
-            anchor_recipe = cookbook_recipes[0]
-            seeded_recipes = [anchor_recipe]
+            seeded_recipes = cookbook_recipes[:recipe_count]
+            anchor_recipe = seeded_recipes[0]
             complement_count = max(0, recipe_count - len(seeded_recipes))
             if complement_count == 0:
                 logger.info(
-                    "Seeded planner cookbook anchor %r from %r with no complementary generation required",
-                    anchor_recipe.name,
+                    "Seeded %d planner cookbook recipes from %r in biased mode with no complementary generation required",
+                    len(seeded_recipes),
                     target.name if target else "unknown cookbook",
                 )
                 return {
@@ -852,12 +859,19 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 target.name if target else "unknown cookbook",
                 complement_count,
             )
-            result, usages, _score_details = await _generate_ranked_recipe_candidates(
-                system_prompt=system_prompt,
-                human_prompt=human_prompt,
-                kitchen_config=kitchen_config,
-                anchor_recipes=seeded_recipes,
-            )
+            if complement_count == 1 and len(seeded_recipes) > 1:
+                result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+                usages = [usage]
+            elif anchor_recipe.provenance.kind == "generated":
+                result, usages, _score_details = await _generate_ranked_recipe_candidates(
+                    system_prompt=system_prompt,
+                    human_prompt=human_prompt,
+                    kitchen_config=kitchen_config,
+                    anchor_recipes=seeded_recipes,
+                )
+            else:
+                result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+                usages = [usage]
             all_recipes = [*seeded_recipes, *result.recipes]
             logger.info(
                 "Seeded planner cookbook target %r and selected %d complementary recipes: %s",

@@ -18,7 +18,159 @@ from app.models.recipe import (
     RecipeStep,
     ValidatedRecipe,
 )
-from app.models.scheduling import RecipeDAG
+from app.models.scheduling import MergedDAG, NaturalLanguageSchedule, OneOvenConflictSummary, RecipeDAG
+
+
+def test_legacy_merged_dag_payload_without_one_oven_conflict_still_validates():
+    payload = {
+        "scheduled_steps": [
+            {
+                "step_id": "legacy_step",
+                "recipe_name": "Legacy Recipe",
+                "description": "Bake until set",
+                "resource": Resource.OVEN,
+                "duration_minutes": 30,
+                "start_at_minute": 0,
+                "end_at_minute": 30,
+                "oven_temp_f": 375,
+            }
+        ],
+        "total_duration_minutes": 30,
+        "resource_utilisation": {"oven": [[0, 30]]},
+        "resource_warnings": [],
+    }
+
+    merged = MergedDAG.model_validate(payload)
+
+    assert merged.one_oven_conflict.classification == "compatible"
+    assert merged.one_oven_conflict.tolerance_f == 15
+    assert merged.one_oven_conflict.remediation.requires_resequencing is False
+
+
+def test_legacy_schedule_payload_without_one_oven_conflict_still_validates():
+    payload = {
+        "timeline": [
+            {
+                "time_offset_minutes": 0,
+                "label": "T+0",
+                "step_id": "legacy_step",
+                "recipe_name": "Legacy Recipe",
+                "action": "Bake until set",
+                "resource": Resource.OVEN,
+                "duration_minutes": 30,
+                "oven_temp_f": 375,
+            }
+        ],
+        "prep_ahead_entries": [],
+        "total_duration_minutes": 30,
+        "summary": "Legacy schedule",
+        "error_summary": None,
+    }
+
+    schedule = NaturalLanguageSchedule.model_validate(payload)
+
+    assert schedule.one_oven_conflict.classification == "compatible"
+    assert schedule.one_oven_conflict.remediation.suggested_actions == []
+
+
+class TestOneOvenConflictSummaryModel:
+    def test_defaults_are_conservative_and_backward_compatible(self):
+        summary = OneOvenConflictSummary()
+
+        assert summary.classification == "compatible"
+        assert summary.tolerance_f == 15
+        assert summary.temperature_gap_f is None
+        assert summary.remediation.requires_resequencing is False
+        assert summary.remediation.suggested_actions == []
+
+    def test_partial_remediation_payload_validates(self):
+        summary = OneOvenConflictSummary.model_validate(
+            {
+                "classification": "resequence_required",
+                "temperature_gap_f": 25,
+                "remediation": {"requires_resequencing": True},
+            }
+        )
+
+        assert summary.classification == "resequence_required"
+        assert summary.temperature_gap_f == 25
+        assert summary.remediation.requires_resequencing is True
+        assert summary.remediation.suggested_actions == []
+        assert summary.remediation.blocking_recipe_names == []
+
+    def test_missing_classification_metadata_stays_compatible(self):
+        summary = OneOvenConflictSummary.model_validate({"remediation": {"notes": "Legacy note"}})
+
+        assert summary.classification == "compatible"
+        assert summary.remediation.notes == "Legacy note"
+
+
+class TestOvenConflictClassificationContract:
+    def test_edge_tolerance_of_15f_is_compatible(self):
+        summary = OneOvenConflictSummary.model_validate(
+            {
+                "classification": "compatible",
+                "temperature_gap_f": 15,
+                "affected_step_ids": ["a_step_1", "b_step_1"],
+            }
+        )
+
+        assert summary.classification == "compatible"
+        assert summary.temperature_gap_f == 15
+
+    def test_second_oven_relaxes_conflict_to_compatible(self):
+        summary = OneOvenConflictSummary.model_validate(
+            {
+                "classification": "compatible",
+                "has_second_oven": True,
+                "temperature_gap_f": 75,
+                "blocking_recipe_names": ["Recipe A", "Recipe B"],
+            }
+        )
+
+        assert summary.classification == "compatible"
+        assert summary.has_second_oven is True
+        assert summary.temperature_gap_f == 75
+
+    def test_single_oven_different_temp_can_be_resequence_required(self):
+        summary = OneOvenConflictSummary.model_validate(
+            {
+                "classification": "resequence_required",
+                "has_second_oven": False,
+                "temperature_gap_f": 75,
+                "blocking_recipe_names": ["Recipe A", "Recipe B"],
+                "affected_step_ids": ["a_step_1", "b_step_1"],
+                "remediation": {
+                    "requires_resequencing": True,
+                    "suggested_actions": ["Bake Recipe B after Recipe A finishes."],
+                    "delaying_recipe_names": ["Recipe B"],
+                    "blocking_recipe_names": ["Recipe A"],
+                },
+            }
+        )
+
+        assert summary.classification == "resequence_required"
+        assert summary.remediation.requires_resequencing is True
+        assert summary.remediation.delaying_recipe_names == ["Recipe B"]
+
+    def test_single_oven_irreconcilable_payload_is_typed(self):
+        summary = OneOvenConflictSummary.model_validate(
+            {
+                "classification": "irreconcilable",
+                "has_second_oven": False,
+                "temperature_gap_f": 75,
+                "blocking_recipe_names": ["Recipe A", "Recipe B"],
+                "affected_step_ids": ["a_step_1", "b_step_1"],
+                "remediation": {
+                    "requires_resequencing": False,
+                    "suggested_actions": ["Use a second oven or change recipes."],
+                    "blocking_recipe_names": ["Recipe A", "Recipe B"],
+                },
+            }
+        )
+
+        assert summary.classification == "irreconcilable"
+        assert summary.remediation.blocking_recipe_names == ["Recipe A", "Recipe B"]
 
 
 class TestOvenTemperatureConflict:
