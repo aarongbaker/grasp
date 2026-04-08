@@ -340,6 +340,7 @@ export interface TimelineEntry {
   heads_up: string | null;
   is_prep_ahead: boolean;
   prep_ahead_window: string | null;
+  prep_ahead_notes: string | null;
   burner_id?: string | null;
   burner_position?: string | null;
   burner_size?: string | null;

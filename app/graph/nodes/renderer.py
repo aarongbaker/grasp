@@ -140,6 +140,7 @@ def _build_timeline_entry(
         heads_up=heads_up,
         is_prep_ahead=_is_meaningful_prep_ahead(step),
         prep_ahead_window=step.prep_ahead_window,
+        prep_ahead_notes=step.prep_ahead_notes,
         burner_id=step.burner_id,
         burner_position=step.burner_position,
         burner_size=step.burner_size,

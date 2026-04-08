@@ -94,6 +94,7 @@ class TimelineEntry(BaseModel):
     heads_up: Optional[str] = None  # e.g. "Bake 10–14 min depending on oven"
     is_prep_ahead: bool = False
     prep_ahead_window: Optional[str] = None
+    prep_ahead_notes: Optional[str] = None
     # Burner-aware contract: renderer passes through scheduler-owned burner metadata
     # verbatim for stovetop entries; consumers must not infer burner identity from
     # action text or kitchen config.
