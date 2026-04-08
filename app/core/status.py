@@ -68,7 +68,7 @@ async def finalise_session(
         schedule = NaturalLanguageSchedule.model_validate(schedule_dict)
         result.schedule_summary = schedule.summary
         result.total_duration_minutes = schedule.total_duration_minutes
-        result.status = SessionStatus.PARTIAL if has_errors else SessionStatus.COMPLETE
+        result.status = SessionStatus.COMPLETE
         # Persist full results for fast reads (avoids checkpoint lookups).
         # Serialize through Pydantic to ensure JSON-safe types (e.g. datetime → str).
         result.result_schedule = schedule.model_dump(mode="json")
