@@ -123,9 +123,11 @@ def test_build_system_prompt_prefers_single_oven_compatible_menus(dinner_concept
     )
 
     assert "single-oven kitchens" in prompt
+    assert "can actually be executed on one oven without temperature-conflict overlap" in prompt
     assert "within about 15°F" in prompt
     assert "long low braises with high-heat bakes or desserts" in prompt
     assert "one oven-heavy dish plus stovetop/passive complements" in prompt
+    assert "choose different dishes or cooking methods instead of returning an impossible plan" in prompt
 
 
 def test_build_mixed_origin_system_prompt_prefers_anchor_compatible_oven_load(dinner_concept):
@@ -154,9 +156,11 @@ def test_build_mixed_origin_system_prompt_prefers_anchor_compatible_oven_load(di
 
     assert "fixed anchor recipe" in prompt.lower()
     assert "single-oven kitchens" in prompt
+    assert "can actually be executed on one oven without temperature-conflict overlap" in prompt
     assert "within about 15°F" in prompt
     assert "long low braises with high-heat bakes or desserts" in prompt
     assert "one oven-heavy dish plus stovetop/passive complements" in prompt
+    assert "choose different dishes or cooking methods instead of returning an impossible plan" in prompt
 
 
 def test_build_system_prompt_relaxes_parallel_temp_guidance_with_second_oven(dinner_concept):

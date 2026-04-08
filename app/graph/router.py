@@ -16,12 +16,23 @@ error_router: runs after every node EXCEPT schedule_renderer.
   contains only errors from PREVIOUS nodes (all recoverable, since we
   already passed their routers). So checking [-1].recoverable is safe.
 
+normalize_generation_retry_reason: narrows dag_merger resource conflicts into
+  the single-oven auto-repair seam. It only returns a retry reason when the
+  scheduler proved a one-oven irreconcilable temperature conflict beyond the
+  existing tolerance contract and retry budget remains.
+
 final_router: runs after schedule_renderer only.
   Any errors in state.errors (even recoverable) → "partial"
   No errors → "complete"
 """
 
-from app.models.pipeline import GRASPState
+from app.models.enums import ErrorType
+from app.models.pipeline import (
+    GRASPState,
+    GenerationRetryEligibility,
+    GenerationRetryReason,
+)
+from app.models.scheduling import OneOvenConflictSummary
 
 
 def error_router(state: GRASPState) -> str:
@@ -40,6 +51,77 @@ def error_router(state: GRASPState) -> str:
         return "fatal"
 
     return "continue"
+
+
+def normalize_generation_retry_eligibility(state: GRASPState) -> GenerationRetryEligibility:
+    """Return a typed retry-routing view for dag_merger repair decisions.
+
+    Policy contract:
+    - Only `dag_merger` `RESOURCE_CONFLICT` failures are considered.
+    - Metadata must validate as `OneOvenConflictSummary`.
+    - Single-oven auto-repair applies only when `has_second_oven` is false and
+      the scheduler classified the overlap as `irreconcilable`.
+    - `compatible` means oven windows are already within the tolerance contract
+      (or otherwise safe), so there is nothing to repair.
+    - `resequence_required` is intentionally non-retryable here because the
+      scheduler already found a single-oven plan without needing regeneration.
+    - Attempt exhaustion is tracked in graph state only; no session row writes
+      are involved in this normalization step.
+    """
+    current_attempt = max(1, int(state.get("generation_attempt", 1)))
+    attempt_limit = max(1, int(state.get("generation_attempt_limit", 1)))
+
+    eligibility = GenerationRetryEligibility(
+        eligible=False,
+        exhausted=current_attempt >= attempt_limit,
+        current_attempt=current_attempt,
+        attempt_limit=max(current_attempt, attempt_limit),
+        retry_reason=None,
+    )
+
+    errors = state.get("errors", [])
+    if not errors:
+        return eligibility
+
+    last_error = errors[-1]
+    if last_error.get("node_name") != "dag_merger":
+        return eligibility
+    if last_error.get("error_type") != ErrorType.RESOURCE_CONFLICT.value:
+        return eligibility
+
+    metadata = last_error.get("metadata") or {}
+    try:
+        summary = OneOvenConflictSummary.model_validate(metadata)
+    except Exception:
+        return eligibility
+
+    if summary.has_second_oven:
+        return eligibility
+    if summary.classification != "irreconcilable":
+        return eligibility
+
+    retry_reason = GenerationRetryReason(
+        node_name="dag_merger",
+        error_type=ErrorType.RESOURCE_CONFLICT,
+        summary=summary,
+        detail=metadata.get("detail") or last_error.get("message", "Resource conflict"),
+        attempt=current_attempt,
+    )
+
+    return eligibility.model_copy(
+        update={
+            "eligible": not eligibility.exhausted,
+            "retry_reason": retry_reason,
+        }
+    )
+
+
+def normalize_generation_retry_reason(state: GRASPState) -> GenerationRetryReason | None:
+    """Backward-compatible shim returning only the typed retry reason when eligible."""
+    eligibility = normalize_generation_retry_eligibility(state)
+    if not eligibility.eligible:
+        return None
+    return eligibility.retry_reason
 
 
 def final_router(state: GRASPState) -> str:

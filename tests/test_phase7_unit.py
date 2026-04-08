@@ -36,16 +36,22 @@ from app.graph.nodes.renderer import (
     _fallback_summary,
     schedule_renderer_node,
 )
+from app.graph.router import (
+    normalize_generation_retry_eligibility,
+    normalize_generation_retry_reason,
+)
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
 from app.models.recipe import RecipeProvenance
 from app.models.enums import ErrorType, MealType, Occasion, Resource
 from app.models.pipeline import (
     DinnerConcept,
+    GenerationRetryEligibility,
     PlannerLibraryAuthoredRecipeAnchor,
     PlannerLibraryCookbookPlanningMode,
     PlannerLibraryCookbookTarget,
     SelectedAuthoredRecipe,
     SelectedCookbookRecipe,
+    build_initial_pipeline_state,
 )
 from app.models.scheduling import (
     MergedDAG,
@@ -233,6 +239,200 @@ def _cookbook_authored_record(
         authored_payload=payload,
         updated_at=updated_at,
     )
+
+
+def test_build_initial_pipeline_state_sets_retry_defaults_for_checkpoint_state():
+    concept = DinnerConcept.model_validate(CONCEPT_DICT)
+
+    state = build_initial_pipeline_state(
+        concept=concept,
+        user_id="user-123",
+        rag_owner_key="rag-owner-123",
+        kitchen_config=KITCHEN_CONFIG,
+        equipment=[],
+    )
+
+    assert state["generation_attempt"] == 1
+    assert state["generation_attempt_limit"] == 3
+    assert state["generation_retry_reason"] is None
+    assert state["generation_retry_exhausted"] is False
+    assert state["generation_history"] == []
+
+
+def test_normalize_generation_retry_eligibility_defaults_to_ineligible_without_errors():
+    eligibility = normalize_generation_retry_eligibility({})
+
+    assert eligibility == GenerationRetryEligibility(
+        eligible=False,
+        exhausted=True,
+        current_attempt=1,
+        attempt_limit=1,
+        retry_reason=None,
+    )
+
+
+def test_normalize_generation_retry_eligibility_returns_typed_reason_for_single_oven_irreconcilable_conflict():
+    state = {
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "recoverable": False,
+                "message": "Oven temperature conflict",
+                "metadata": {
+                    "classification": "irreconcilable",
+                    "tolerance_f": 15,
+                    "has_second_oven": False,
+                    "temperature_gap_f": 17,
+                    "blocking_recipe_names": ["Ratatouille Tian", "Tarte Tatin aux Pommes"],
+                    "affected_step_ids": ["r1", "r2"],
+                    "remediation": {
+                        "requires_resequencing": False,
+                        "suggested_actions": ["Use a second oven or change recipes."],
+                        "delaying_recipe_names": [],
+                        "blocking_recipe_names": ["Ratatouille Tian", "Tarte Tatin aux Pommes"],
+                        "notes": "Single oven cannot support this beyond-tolerance overlap.",
+                    },
+                    "detail": "Ratatouille Tian at 375°F conflicts with Tarte Tatin aux Pommes at 392°F.",
+                },
+            }
+        ],
+    }
+
+    eligibility = normalize_generation_retry_eligibility(state)
+    retry_reason = normalize_generation_retry_reason(state)
+
+    assert eligibility.eligible is True
+    assert eligibility.exhausted is False
+    assert eligibility.current_attempt == 1
+    assert eligibility.attempt_limit == 3
+    assert eligibility.retry_reason is not None
+    assert retry_reason == eligibility.retry_reason
+    assert retry_reason is not None
+    assert retry_reason.node_name == "dag_merger"
+    assert retry_reason.error_type == ErrorType.RESOURCE_CONFLICT
+    assert retry_reason.summary.classification == "irreconcilable"
+    assert retry_reason.summary.has_second_oven is False
+    assert retry_reason.summary.tolerance_f == 15
+    assert retry_reason.summary.temperature_gap_f == 17
+    assert retry_reason.detail == "Ratatouille Tian at 375°F conflicts with Tarte Tatin aux Pommes at 392°F."
+    assert retry_reason.attempt == 1
+
+
+def test_normalize_generation_retry_reason_rejects_second_oven_or_non_irreconcilable_conflicts():
+    base_metadata = {
+        "classification": "irreconcilable",
+        "tolerance_f": 15,
+        "has_second_oven": False,
+        "temperature_gap_f": 20,
+        "blocking_recipe_names": ["A", "B"],
+        "affected_step_ids": ["a", "b"],
+        "remediation": {
+            "requires_resequencing": False,
+            "suggested_actions": ["Use a second oven or change recipes."],
+            "delaying_recipe_names": [],
+            "blocking_recipe_names": ["A", "B"],
+            "notes": "conflict",
+        },
+    }
+
+    second_oven_state = {
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "metadata": {**base_metadata, "has_second_oven": True},
+            }
+        ],
+    }
+    resequence_state = {
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "metadata": {**base_metadata, "classification": "resequence_required"},
+            }
+        ],
+    }
+    within_tolerance_state = {
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "metadata": {**base_metadata, "classification": "compatible", "temperature_gap_f": 12},
+            }
+        ],
+    }
+
+    second_oven_eligibility = normalize_generation_retry_eligibility(second_oven_state)
+    resequence_eligibility = normalize_generation_retry_eligibility(resequence_state)
+    within_tolerance_eligibility = normalize_generation_retry_eligibility(within_tolerance_state)
+
+    assert second_oven_eligibility.eligible is False
+    assert second_oven_eligibility.exhausted is False
+    assert second_oven_eligibility.retry_reason is None
+    assert resequence_eligibility.eligible is False
+    assert resequence_eligibility.exhausted is False
+    assert resequence_eligibility.retry_reason is None
+    assert within_tolerance_eligibility.eligible is False
+    assert within_tolerance_eligibility.exhausted is False
+    assert within_tolerance_eligibility.retry_reason is None
+    assert normalize_generation_retry_reason(second_oven_state) is None
+    assert normalize_generation_retry_reason(resequence_state) is None
+    assert normalize_generation_retry_reason(within_tolerance_state) is None
+
+
+def test_normalize_generation_retry_reason_rejects_exhausted_attempt_budget_or_malformed_metadata():
+    exhausted_state = {
+        "generation_attempt": 3,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "metadata": {
+                    "classification": "irreconcilable",
+                    "tolerance_f": 15,
+                    "has_second_oven": False,
+                    "temperature_gap_f": 30,
+                    "blocking_recipe_names": ["A", "B"],
+                    "affected_step_ids": ["a", "b"],
+                    "remediation": {},
+                },
+            }
+        ],
+    }
+    malformed_state = {
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "errors": [
+            {
+                "node_name": "dag_merger",
+                "error_type": ErrorType.RESOURCE_CONFLICT.value,
+                "metadata": {"detail": "untyped conflict"},
+            }
+        ],
+    }
+
+    exhausted_eligibility = normalize_generation_retry_eligibility(exhausted_state)
+    malformed_eligibility = normalize_generation_retry_eligibility(malformed_state)
+
+    assert exhausted_eligibility.eligible is False
+    assert exhausted_eligibility.exhausted is True
+    assert exhausted_eligibility.retry_reason is not None
+    assert malformed_eligibility.eligible is False
+    assert malformed_eligibility.exhausted is False
+    assert malformed_eligibility.retry_reason is None
+    assert normalize_generation_retry_reason(exhausted_state) is None
+    assert normalize_generation_retry_reason(malformed_state) is None
 
 
 class TestCookbookGeneratorSeeding:

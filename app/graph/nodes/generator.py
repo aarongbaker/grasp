@@ -260,10 +260,11 @@ def _build_oven_compatibility_prompt_guidance(*, has_second_oven: bool) -> str:
         )
 
     return (
-        "For single-oven kitchens, prefer recipe combinations whose oven-temperature windows are naturally compatible. "
-        "Treat oven temperatures within about 15°F of each other as compatible, avoid pairing overlapping long low braises "
-        "with high-heat bakes or desserts unless timing can be serialized cleanly, and if tension remains, prefer menus with "
-        "only one oven-heavy dish plus stovetop/passive complements."
+        "For single-oven kitchens, generate only menus whose oven-temperature windows can actually be executed on one oven without "
+        "temperature-conflict overlap. Treat oven temperatures within about 15°F of each other as compatible, avoid pairing overlapping "
+        "long low braises with high-heat bakes or desserts unless timing can be serialized cleanly, and if tension remains, prefer menus with "
+        "only one oven-heavy dish plus stovetop/passive complements. If a requested menu shape would otherwise force overlapping incompatible "
+        "oven temperatures, choose different dishes or cooking methods instead of returning an impossible plan."
     )
 
 

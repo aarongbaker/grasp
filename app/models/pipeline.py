@@ -26,7 +26,8 @@ from typing import Annotated, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
-from app.models.enums import MealType, Occasion
+from app.models.enums import ErrorType, MealType, Occasion
+from app.models.scheduling import OneOvenConflictSummary
 
 
 class PlannerLibraryCookbookPlanningMode(str, Enum):
@@ -259,6 +260,49 @@ class CreateSessionPlannerAuthoredAnchor(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
+class GenerationRetryReason(BaseModel):
+    """Normalized retry context stored in checkpoint state.
+
+    Single-oven auto-repair is intentionally narrow: only typed dag_merger
+    `RESOURCE_CONFLICT` failures with one-oven `irreconcilable` metadata are
+    retryable. Within-tolerance overlap stays compatible, and second-oven
+    kitchens remain outside this retry seam.
+    """
+
+    node_name: str
+    error_type: ErrorType
+    summary: OneOvenConflictSummary
+    detail: str
+    attempt: int = Field(ge=1)
+
+
+class GenerationRetryEligibility(BaseModel):
+    """Typed router-facing view of whether dag_merger can trigger auto-repair.
+
+    This model keeps retry-routing policy in checkpoint-local state instead of
+    implicit conditionals. The one-oven contract is stable and explicit:
+    when `has_second_oven` is false, overlapping oven work is only considered
+    retryable when the scheduler classified it as `irreconcilable`, meaning the
+    required temperatures exceed the configured tolerance and cannot be repaired
+    by simple resequencing inside a single oven.
+    """
+
+    eligible: bool = False
+    exhausted: bool = False
+    current_attempt: int = Field(ge=1, default=1)
+    attempt_limit: int = Field(ge=1, default=1)
+    retry_reason: Optional[GenerationRetryReason] = None
+
+
+class GenerationAttemptRecord(BaseModel):
+    """Lightweight checkpoint-visible record of generation attempts."""
+
+    attempt: int = Field(ge=1)
+    trigger: Literal["initial", "auto_repair"] = "initial"
+    recipe_names: list[str] = []
+    retry_reason: Optional[GenerationRetryReason] = None
+
+
 class CreateSessionPlannerCookbookTarget(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -342,6 +386,11 @@ class InitialPipelineState(TypedDict):
     merged_dag: Optional[dict]
     schedule: Optional[dict]
     errors: list[dict]
+    generation_attempt: int
+    generation_attempt_limit: int
+    generation_retry_reason: Optional[dict]
+    generation_retry_exhausted: bool
+    generation_history: list[dict]
 
 
 def build_initial_pipeline_state(
@@ -365,6 +414,11 @@ def build_initial_pipeline_state(
         "merged_dag": None,
         "schedule": None,
         "errors": [],
+        "generation_attempt": 1,
+        "generation_attempt_limit": 3,
+        "generation_retry_reason": None,
+        "generation_retry_exhausted": False,
+        "generation_history": [],
     }
 
 
@@ -418,3 +472,8 @@ class GRASPState(TypedDict, total=False):
     schedule: Optional[dict]  # NaturalLanguageSchedule.model_dump() | None
     errors: Annotated[list[dict], operator.add]  # ACCUMULATOR — NodeError.model_dump()
     token_usage: Annotated[list[dict], operator.add]  # ACCUMULATOR — per-node LLM token counts
+    generation_attempt: int  # current generation attempt number (1-indexed)
+    generation_attempt_limit: int  # bounded retry ceiling for corrective regeneration
+    generation_retry_reason: Optional[dict]  # GenerationRetryReason.model_dump() | None
+    generation_retry_exhausted: bool  # set when an eligible retry path has no attempts left
+    generation_history: list[dict]  # List[GenerationAttemptRecord.model_dump()]
