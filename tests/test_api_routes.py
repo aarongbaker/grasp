@@ -19,12 +19,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel, select
 
+from app.api.routes.auth import _build_access_token
+from app.core.settings import get_settings
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
@@ -41,6 +45,7 @@ from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
+    from app.api.routes import sessions as sessions_routes
     from app.api.routes.authored_recipes import router as authored_recipes_router
     from app.api.routes.health import router as health_router
     from app.api.routes.ingest import router as ingest_router
@@ -49,6 +54,15 @@ def _create_test_app() -> FastAPI:
     from app.api.routes.users import router as users_router
 
     app = FastAPI()
+    app.state.limiter = sessions_routes.limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        )
+
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
@@ -248,6 +262,19 @@ class MockDBSession:
             mock_result.all.return_value = rows
             return mock_result
 
+        if "from user_profiles" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is UserProfile
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
         mock_result = MagicMock()
         mock_result.first.return_value = None
         mock_result.all.return_value = []
@@ -325,6 +352,20 @@ def authored_recipe_payload(test_user):
         "plating_notes": "Finish with pistachio dukkah.",
         "chef_notes": "Keep the labneh cold for contrast.",
     }
+
+
+@pytest.fixture(autouse=True)
+def reset_session_route_limiter():
+    from app.api.routes.sessions import limiter as sessions_limiter
+
+    sessions_limiter._storage.reset()
+    yield
+    sessions_limiter._storage.reset()
+
+
+def _auth_headers_for(user: UserProfile) -> dict[str, str]:
+    token, _expires_in = _build_access_token(str(user.user_id), user.email, get_settings())
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -626,6 +667,44 @@ async def test_create_session_201(app_with_overrides, test_user):
     assert concept["selected_authored_recipe"] is None
     assert "gluten-free" in concept["dietary_restrictions"]
     assert "nut-free" in concept["dietary_restrictions"]
+
+
+@pytest.mark.asyncio
+async def test_create_session_rate_limit_isolated_by_authenticated_user(mock_db):
+    from app.db.session import get_session
+
+    app = _create_test_app()
+    first_user = _make_test_user()
+    second_user = _make_test_user()
+    mock_db.seed(UserProfile, first_user.user_id, first_user)
+    mock_db.seed(UserProfile, second_user.user_id, second_user)
+
+    async def _override_session():
+        yield mock_db
+
+    app.dependency_overrides[get_session] = _override_session
+
+    payload = {
+        "free_text": "Dinner party with lamb and rosemary.",
+        "guest_count": 4,
+        "meal_type": "dinner",
+        "occasion": "dinner_party",
+        "dietary_restrictions": ["nut-free"],
+    }
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        for _ in range(10):
+            resp = await ac.post("/api/v1/sessions", json=payload, headers=_auth_headers_for(first_user))
+            assert resp.status_code == 201
+
+        limited = await ac.post("/api/v1/sessions", json=payload, headers=_auth_headers_for(first_user))
+        assert limited.status_code == 429
+        assert "Rate limit exceeded" in limited.json()["detail"]
+
+        other_user = await ac.post("/api/v1/sessions", json=payload, headers=_auth_headers_for(second_user))
+        assert other_user.status_code == 201
+
+    app.dependency_overrides.clear()
 
 
 async def test_create_session_with_authored_recipe_201(app_with_overrides, mock_db, test_user):

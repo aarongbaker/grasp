@@ -22,6 +22,7 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.core.rate_limit import create_session_limit, user_identity_or_ip_key
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
@@ -194,7 +195,7 @@ async def resolve_planner_reference(
 
 
 @router.post("", status_code=201)
-@limiter.limit("30/minute")
+@limiter.limit(create_session_limit, key_func=user_identity_or_ip_key)
 async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
     # Merge chef's dietary_defaults into every session automatically
     merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
