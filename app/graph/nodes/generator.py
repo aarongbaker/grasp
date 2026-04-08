@@ -267,6 +267,22 @@ def _build_oven_compatibility_prompt_guidance(*, has_second_oven: bool) -> str:
     )
 
 
+def _build_human_prompt(recipe_count: int, concept: DinnerConcept) -> str:
+    return (
+        f"Generate exactly {recipe_count} recipes for this menu. "
+        f"The menu should satisfy the concept {concept.free_text!r} and return only the structured recipe payload."
+    )
+
+
+
+def _build_mixed_origin_human_prompt(complement_count: int, anchor_recipe: RawRecipe) -> str:
+    return (
+        f"Generate exactly {complement_count} complementary recipes around the fixed anchor recipe {anchor_recipe.name!r}. "
+        "Do not repeat the anchor recipe and return only the structured recipe payload."
+    )
+
+
+
 def _extract_oven_step_temperatures(recipe: RawRecipe) -> list[int]:
     temperatures: list[int] = []
     for step in recipe.steps:
@@ -642,6 +658,73 @@ async def _invoke_recipe_generation(
     return result, usage
 
 
+async def _invoke_recipe_generation_candidates(
+    *,
+    system_prompt: str,
+    human_prompt: str,
+    candidate_count: int,
+) -> tuple[list[RecipeGenerationOutput], list[dict]]:
+    """Generate a bounded set of candidate menus while preserving per-call token usage."""
+    candidate_results: list[RecipeGenerationOutput] = []
+    usages: list[dict] = []
+
+    for _ in range(candidate_count):
+        result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+        candidate_results.append(result)
+        usages.append(usage)
+
+    return candidate_results, usages
+
+
+
+def _select_best_recipe_generation_candidate(
+    *,
+    candidate_results: list[RecipeGenerationOutput],
+    anchor_recipes: list[RawRecipe] | None,
+    has_second_oven: bool,
+) -> tuple[RecipeGenerationOutput, dict]:
+    if not candidate_results:
+        raise ValueError("Recipe generation did not return any candidate menus")
+
+    seeded_anchor_recipes = list(anchor_recipes or [])
+    scored_candidates: list[tuple[int, int, RecipeGenerationOutput, dict]] = []
+    for index, candidate in enumerate(candidate_results):
+        recipes = [*seeded_anchor_recipes, *candidate.recipes]
+        score_details = _score_menu_oven_compatibility(recipes=recipes, has_second_oven=has_second_oven)
+        scored_candidates.append((score_details["score"], index, candidate, score_details))
+
+    best_score, _, best_candidate, best_details = min(scored_candidates, key=lambda item: (item[0], item[1]))
+    logger.info(
+        "Selected generator candidate %d/%d with oven score=%d incompatible_pairs=%s oven_heavy=%d",
+        next(index for _, index, candidate, _ in scored_candidates if candidate is best_candidate) + 1,
+        len(scored_candidates),
+        best_score,
+        best_details["incompatible_pairs"],
+        best_details["oven_heavy_recipe_count"],
+    )
+    return best_candidate, best_details
+
+
+async def _generate_ranked_recipe_candidates(
+    *,
+    system_prompt: str,
+    human_prompt: str,
+    kitchen_config: dict,
+    anchor_recipes: list[RawRecipe] | None = None,
+) -> tuple[RecipeGenerationOutput, list[dict], dict]:
+    candidate_results, usages = await _invoke_recipe_generation_candidates(
+        system_prompt=system_prompt,
+        human_prompt=human_prompt,
+        candidate_count=3,
+    )
+    best_candidate, score_details = _select_best_recipe_generation_candidate(
+        candidate_results=candidate_results,
+        anchor_recipes=anchor_recipes,
+        has_second_oven=kitchen_config.get("has_second_oven", False),
+    )
+    return best_candidate, usages, score_details
+
+
 # ── Node function ────────────────────────────────────────────────────────────
 
 
@@ -703,30 +786,35 @@ async def recipe_generator_node(state: GRASPState) -> dict:
             human_prompt = _build_mixed_origin_human_prompt(complement_count, anchor_recipe)
 
             logger.info(
-                "Generating %d complementary recipes around planner-authored anchor %r",
+                "Generating %d complementary recipe candidates around planner-authored anchor %r",
                 complement_count,
                 anchor_recipe.name,
             )
-            result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+            result, usages, _score_details = await _generate_ranked_recipe_candidates(
+                system_prompt=system_prompt,
+                human_prompt=human_prompt,
+                kitchen_config=kitchen_config,
+                anchor_recipes=anchor_recipes,
+            )
             all_recipes = [anchor_recipe, *result.recipes]
             logger.info(
-                "Seeded planner-authored anchor %r and generated %d complementary recipes: %s",
+                "Seeded planner-authored anchor %r and selected %d complementary recipes: %s",
                 anchor_recipe.name,
                 len(result.recipes),
                 [r.name for r in result.recipes],
             )
             return {
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in all_recipes],
-                "token_usage": [usage],
+                "token_usage": usages,
             }
 
         if concept.concept_source == "planner_cookbook_target":
             target = concept.planner_cookbook_target
             cookbook_recipes = await build_planner_cookbook_target_raw_recipes(concept)
-            seeded_recipes = cookbook_recipes[:recipe_count]
             cookbook_mode = target.mode if target is not None else PlannerLibraryCookbookPlanningMode.STRICT
 
             if cookbook_mode == PlannerLibraryCookbookPlanningMode.STRICT:
+                seeded_recipes = cookbook_recipes[:recipe_count]
                 logger.info(
                     "Seeded %d planner cookbook recipes from %r in strict mode",
                     len(seeded_recipes),
@@ -736,18 +824,19 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                     "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
                 }
 
+            anchor_recipe = cookbook_recipes[0]
+            seeded_recipes = [anchor_recipe]
             complement_count = max(0, recipe_count - len(seeded_recipes))
             if complement_count == 0:
                 logger.info(
-                    "Seeded %d planner cookbook recipes from %r with no complementary generation required",
-                    len(seeded_recipes),
+                    "Seeded planner cookbook anchor %r from %r with no complementary generation required",
+                    anchor_recipe.name,
                     target.name if target else "unknown cookbook",
                 )
                 return {
                     "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
                 }
 
-            anchor_recipe = seeded_recipes[0]
             system_prompt = _build_mixed_origin_system_prompt(
                 concept=concept,
                 kitchen_config=kitchen_config,
@@ -758,36 +847,45 @@ async def recipe_generator_node(state: GRASPState) -> dict:
             human_prompt = _build_mixed_origin_human_prompt(complement_count, anchor_recipe)
 
             logger.info(
-                "Seeded %d planner cookbook recipes from %r and generating %d complementary recipes",
-                len(seeded_recipes),
+                "Seeded planner cookbook anchor %r from %r and generating %d complementary candidates",
+                anchor_recipe.name,
                 target.name if target else "unknown cookbook",
                 complement_count,
             )
-            result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+            result, usages, _score_details = await _generate_ranked_recipe_candidates(
+                system_prompt=system_prompt,
+                human_prompt=human_prompt,
+                kitchen_config=kitchen_config,
+                anchor_recipes=seeded_recipes,
+            )
             all_recipes = [*seeded_recipes, *result.recipes]
             logger.info(
-                "Seeded planner cookbook target %r and generated %d complementary recipes: %s",
+                "Seeded planner cookbook target %r and selected %d complementary recipes: %s",
                 target.name if target else "unknown cookbook",
                 len(result.recipes),
                 [r.name for r in result.recipes],
             )
             return {
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in all_recipes],
-                "token_usage": [usage],
+                "token_usage": usages,
             }
 
         # Derive recipe count from concept
         system_prompt = _build_system_prompt(concept, kitchen_config, equipment, recipe_count)
         human_prompt = _build_human_prompt(recipe_count, concept)
 
-        logger.info("Generating %d recipes for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
-        result, usage = await _invoke_recipe_generation(system_prompt=system_prompt, human_prompt=human_prompt)
+        logger.info("Generating %d recipe candidates for %s %s", recipe_count, concept.occasion.value, concept.meal_type.value)
+        result, usages, _score_details = await _generate_ranked_recipe_candidates(
+            system_prompt=system_prompt,
+            human_prompt=human_prompt,
+            kitchen_config=kitchen_config,
+        )
 
-        logger.info("Generated %d recipes: %s", len(result.recipes), [r.name for r in result.recipes])
+        logger.info("Selected %d generated recipes: %s", len(result.recipes), [r.name for r in result.recipes])
         # Return raw_recipes as dicts (replace semantics)
         return {
             "raw_recipes": [r.model_dump() for r in result.recipes],
-            "token_usage": [usage],
+            "token_usage": usages,
         }
 
     except Exception as exc:

@@ -10,6 +10,8 @@ Skipped automatically if ANTHROPIC_API_KEY is not set.
 """
 
 import os
+import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -22,7 +24,12 @@ from app.graph.nodes.generator import (
     recipe_generator_node,
 )
 from app.models.enums import MealType, Occasion
-from app.models.pipeline import DinnerConcept
+from app.models.pipeline import (
+    DinnerConcept,
+    PlannerLibraryAuthoredRecipeAnchor,
+    PlannerLibraryCookbookPlanningMode,
+    PlannerLibraryCookbookTarget,
+)
 from app.models.recipe import Ingredient, RawRecipe
 
 SKIP_REASON = "ANTHROPIC_API_KEY not set — skipping integration test"
@@ -163,6 +170,349 @@ def test_build_system_prompt_relaxes_parallel_temp_guidance_with_second_oven(din
 
     assert "second oven means parallel dishes may use meaningfully different temperatures" in prompt
     assert "single-oven kitchens" not in prompt
+
+
+@pytest.fixture
+def compatible_candidate_menu() -> RecipeGenerationOutput:
+    return RecipeGenerationOutput(
+        recipes=[
+            RawRecipe(
+                name="Roast Chicken",
+                description="Fixture compatible main.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=75,
+                ingredients=[Ingredient(name="chicken", quantity="1 whole")],
+                steps=[
+                    "Season the chicken.",
+                    "Roast in a 375°F oven for 50 minutes.",
+                    "Rest and carve.",
+                ],
+            ),
+            RawRecipe(
+                name="Apple Tart",
+                description="Fixture compatible dessert.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=55,
+                ingredients=[Ingredient(name="apples", quantity="4")],
+                steps=[
+                    "Roll the pastry.",
+                    "Bake in a 380°F oven until browned.",
+                    "Cool slightly before serving.",
+                ],
+            ),
+            RawRecipe(
+                name="Frisee Salad",
+                description="Fixture salad.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=15,
+                ingredients=[Ingredient(name="frisee", quantity="1 head")],
+                steps=[
+                    "Wash the frisee.",
+                    "Dress lightly.",
+                    "Serve immediately.",
+                ],
+            ),
+        ]
+    )
+
+
+@pytest.fixture
+def incompatible_candidate_menu() -> RecipeGenerationOutput:
+    return RecipeGenerationOutput(
+        recipes=[
+            RawRecipe(
+                name="Short Rib Braise",
+                description="Fixture incompatible main.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=220,
+                ingredients=[Ingredient(name="short ribs", quantity="2 kg")],
+                steps=[
+                    "Brown the short ribs.",
+                    "Braise in a 300°F oven for 3 hours.",
+                    "Rest before serving.",
+                ],
+            ),
+            RawRecipe(
+                name="Molten Cake",
+                description="Fixture incompatible dessert.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=35,
+                ingredients=[Ingredient(name="dark chocolate", quantity="200 g")],
+                steps=[
+                    "Prepare the batter.",
+                    "Bake in a 425°F oven for 12 minutes.",
+                    "Serve immediately.",
+                ],
+            ),
+            RawRecipe(
+                name="Green Bean Salad",
+                description="Fixture salad.",
+                servings=4,
+                cuisine="French",
+                estimated_total_minutes=20,
+                ingredients=[Ingredient(name="green beans", quantity="500 g")],
+                steps=[
+                    "Blanch the beans.",
+                    "Dress with shallot vinaigrette.",
+                    "Serve warm.",
+                ],
+            ),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_generator_node_prefers_compatible_candidate_in_single_oven_free_text_flow(
+    dinner_concept,
+    compatible_candidate_menu,
+    incompatible_candidate_menu,
+):
+    state = {
+        "concept": dinner_concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    invoke_mock = AsyncMock(
+        side_effect=[
+            (incompatible_candidate_menu, {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}),
+            (compatible_candidate_menu, {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32}),
+            (incompatible_candidate_menu, {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34}),
+        ]
+    )
+
+    with patch("app.graph.nodes.generator._invoke_recipe_generation", invoke_mock):
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Roast Chicken",
+        "Apple Tart",
+        "Frisee Salad",
+    ]
+    assert result["token_usage"] == [
+        {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+        {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34},
+    ]
+    assert invoke_mock.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generator_node_relaxes_candidate_bias_with_second_oven(
+    dinner_concept,
+    compatible_candidate_menu,
+    incompatible_candidate_menu,
+):
+    state = {
+        "concept": dinner_concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": True},
+        "equipment": [],
+        "errors": [],
+    }
+
+    invoke_mock = AsyncMock(
+        side_effect=[
+            (incompatible_candidate_menu, {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}),
+            (compatible_candidate_menu, {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32}),
+            (compatible_candidate_menu, {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34}),
+        ]
+    )
+
+    with patch("app.graph.nodes.generator._invoke_recipe_generation", invoke_mock):
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Short Rib Braise",
+        "Molten Cake",
+        "Green Bean Salad",
+    ]
+    assert invoke_mock.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generator_node_prefers_compatible_complements_for_planner_authored_anchor(
+    dinner_concept,
+    compatible_candidate_menu,
+    incompatible_candidate_menu,
+):
+    anchor_recipe = RawRecipe(
+        name="Anchored Duck Confit",
+        description="Authored fixture anchor.",
+        servings=4,
+        cuisine="French",
+        estimated_total_minutes=180,
+        ingredients=[Ingredient(name="duck legs", quantity="4")],
+        steps=[
+            "Cure the duck overnight.",
+            "Slow-roast in a 325°F oven until tender.",
+            "Crisp before serving.",
+        ],
+    )
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_authored_anchor",
+        planner_authored_recipe_anchor=PlannerLibraryAuthoredRecipeAnchor(
+            recipe_id=uuid.uuid4(),
+            title=anchor_recipe.name,
+        ),
+    )
+    state = {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    invoke_mock = AsyncMock(
+        side_effect=[
+            (
+                RecipeGenerationOutput(recipes=incompatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            ),
+            (
+                RecipeGenerationOutput(recipes=compatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+            ),
+            (
+                RecipeGenerationOutput(recipes=incompatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34},
+            ),
+        ]
+    )
+
+    with (
+        patch("app.graph.nodes.generator.build_planner_authored_anchor_raw_recipes", AsyncMock(return_value=[anchor_recipe])),
+        patch("app.graph.nodes.generator._invoke_recipe_generation", invoke_mock),
+    ):
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Anchored Duck Confit",
+        "Roast Chicken",
+        "Apple Tart",
+    ]
+    assert invoke_mock.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generator_node_keeps_planner_cookbook_strict_mode_seed_only(dinner_concept):
+    seeded_recipe = RawRecipe(
+        name="Cookbook Cassoulet",
+        description="Cookbook seed.",
+        servings=4,
+        cuisine="French",
+        estimated_total_minutes=150,
+        ingredients=[Ingredient(name="beans", quantity="500 g")],
+        steps=["Soak the beans.", "Bake in a 350°F oven until tender.", "Rest before serving."],
+    )
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_cookbook_target",
+        planner_cookbook_target=PlannerLibraryCookbookTarget(
+            cookbook_id=uuid.uuid4(),
+            name="French Classics",
+            mode=PlannerLibraryCookbookPlanningMode.STRICT,
+        ),
+    )
+    state = {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    with (
+        patch("app.graph.nodes.generator.build_planner_cookbook_target_raw_recipes", AsyncMock(return_value=[seeded_recipe])),
+        patch("app.graph.nodes.generator._invoke_recipe_generation", AsyncMock()) as invoke_mock,
+    ):
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == ["Cookbook Cassoulet"]
+    invoke_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generator_node_prefers_compatible_complements_for_planner_cookbook_biased_mode(
+    dinner_concept,
+    compatible_candidate_menu,
+    incompatible_candidate_menu,
+):
+    anchor_recipe = RawRecipe(
+        name="Cookbook Duck Legs",
+        description="Cookbook-authored seed anchor.",
+        servings=4,
+        cuisine="French",
+        estimated_total_minutes=180,
+        ingredients=[Ingredient(name="duck legs", quantity="4")],
+        steps=[
+            "Cure the duck overnight.",
+            "Slow-roast in a 325°F oven until tender.",
+            "Crisp before serving.",
+        ],
+    )
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_cookbook_target",
+        planner_cookbook_target=PlannerLibraryCookbookTarget(
+            cookbook_id=uuid.uuid4(),
+            name="French Classics",
+            mode=PlannerLibraryCookbookPlanningMode.COOKBOOK_BIASED,
+        ),
+    )
+    state = {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    invoke_mock = AsyncMock(
+        side_effect=[
+            (
+                RecipeGenerationOutput(recipes=incompatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            ),
+            (
+                RecipeGenerationOutput(recipes=compatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 11, "completion_tokens": 21, "total_tokens": 32},
+            ),
+            (
+                RecipeGenerationOutput(recipes=incompatible_candidate_menu.recipes[:2]),
+                {"prompt_tokens": 12, "completion_tokens": 22, "total_tokens": 34},
+            ),
+        ]
+    )
+
+    with (
+        patch("app.graph.nodes.generator.build_planner_cookbook_target_raw_recipes", AsyncMock(return_value=[anchor_recipe])),
+        patch("app.graph.nodes.generator._invoke_recipe_generation", invoke_mock),
+    ):
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Cookbook Duck Legs",
+        "Roast Chicken",
+        "Apple Tart",
+    ]
+    assert invoke_mock.await_count == 3
 
 
 # ── Integration tests (real Claude API) ──────────────────────────────────────
