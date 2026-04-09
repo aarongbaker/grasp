@@ -580,7 +580,8 @@ For each step, extract the oven temperature if the step involves oven cooking. P
 2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures, visual cues, timing details) but preserve the original intent.
 3. For oven steps, populate oven_temp_f according to the oven extraction rules above.
 4. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
-5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering")."""
+5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering").
+6. Do NOT include oven preheating instructions ("Preheat oven to X°F") in step descriptions. Oven preheating is injected as a separate step by the pipeline. Write oven steps assuming the oven is already at temperature (e.g. "Transfer to the preheated oven. Braise for 45 minutes..." not "Preheat oven to 325°F. Transfer to oven...")."""
 
 
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
@@ -600,6 +601,26 @@ def _create_llm() -> ChatAnthropic:
 
 
 # ── Per-recipe enrichment ────────────────────────────────────────────────────
+
+
+def _strip_preheat_from_descriptions(steps: list[RecipeStep]) -> list[RecipeStep]:
+    """
+    Remove leading preheat-oven sentences from step descriptions.
+
+    The pipeline injects synthetic preheat steps via _inject_preheat_steps(),
+    so embedded preheat instructions in step descriptions are redundant and
+    cause parallel temperature conflicts when two recipes start simultaneously.
+
+    Strips sentences matching "Preheat oven to ..." at the start of a description.
+    """
+    pattern = re.compile(r'^Preheat oven[^.]*\.\s*', re.IGNORECASE)
+    result = []
+    for step in steps:
+        stripped = pattern.sub('', step.description).strip()
+        if stripped != step.description:
+            step = step.model_copy(update={"description": stripped})
+        result.append(step)
+    return result
 
 
 def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep]:
@@ -650,6 +671,12 @@ def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep
         ingredient_uses=[],
     )
     
+    # Wire the first oven step to depend on the preheat step
+    first_oven_step = steps[first_oven_idx]
+    steps[first_oven_idx] = first_oven_step.model_copy(
+        update={"depends_on": [preheat_step.step_id] + first_oven_step.depends_on}
+    )
+
     # Inject at the beginning
     return [preheat_step] + steps
 
@@ -704,7 +731,11 @@ async def _enrich_single_recipe(
 
     # Link LLM-tagged ingredients to normalized metadata
     linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
-    
+
+    # Strip any preheat instructions the LLM embedded in step descriptions —
+    # the pipeline injects its own synthetic preheat step below
+    linked_steps = _strip_preheat_from_descriptions(linked_steps)
+
     # Inject preheat step before first oven usage
     steps_with_preheat = _inject_preheat_steps(linked_steps, slug)
 

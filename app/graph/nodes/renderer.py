@@ -121,7 +121,7 @@ def _build_timeline_entry(
         action = f"{step.description} ({allocation_text})"
 
     # Detect preheat steps by step_id pattern (injected by enricher)
-    is_preheat = step.step_id.startswith("preheat_")
+    is_preheat = "_preheat_" in step.step_id
 
     # Use oven temperature from ScheduledStep (preserved from RecipeStep by merger)
     oven_temp_f = step.oven_temp_f
