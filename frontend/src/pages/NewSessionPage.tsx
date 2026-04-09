@@ -294,10 +294,10 @@ export function NewSessionPage() {
         <div className={styles.hero}>
           <div className={styles.heroMain}>
             <div>
-              <h1 className={styles.title}>Plan a Dinner</h1>
+              <h1 className={styles.title}>Plan Your Meal Plan</h1>
               <p className={styles.subtitle}>
-                Describe the meal you want to cook. GRASP will turn that menu intent into a paced dinner service with
-                timing, equipment flow, and a finished schedule.
+                Describe the meal you want to cook from Generation, pre-existing cookbook recipes, or even your own recipes. 
+                GRASP will turn that menu intent into a paced dinner service with timing, equipment flow, and a finished schedule.
               </p>
             </div>
 
