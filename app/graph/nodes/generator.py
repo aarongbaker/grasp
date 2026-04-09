@@ -573,15 +573,21 @@ def _build_cookbook_raw_recipe(selection: SelectedCookbookRecipe, guest_count: i
     if not ingredients:
         ingredients = [Ingredient(name="See cookbook source text", quantity="as needed")]
 
+    # Cookbook text doesn't reliably state original yield, so use a
+    # conservative default rather than claiming guest_count (which would
+    # imply ingredients are already scaled when they aren't).
+    cookbook_default_servings = 4
+
     return RawRecipe(
         name=_extract_recipe_name(selection),
         description=(
             f"Cookbook-selected recipe from {selection.book_title}"
             + (f", chapter {selection.chapter}" if selection.chapter else "")
             + (f", page {selection.page_number}" if selection.page_number else "")
-            + "."
+            + f". Original yield ~{cookbook_default_servings} servings; scale to {guest_count} guests."
         ),
-        servings=guest_count,
+        servings=cookbook_default_servings,
+        course=getattr(selection, "course", None),
         cuisine=f"Cookbook: {selection.book_title}"[:200],
         estimated_total_minutes=_estimate_minutes(len(steps)),
         ingredients=ingredients,
@@ -878,6 +884,9 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
         if concept.concept_source == "cookbook":
             cookbook_recipes = build_cookbook_raw_recipes(concept)
+            # Ensure first recipe is tagged as entree for downstream conflict detection
+            if cookbook_recipes and cookbook_recipes[0].course is None:
+                cookbook_recipes[0] = cookbook_recipes[0].model_copy(update={"course": "entree"})
             logger.info("Seeded %d cookbook recipes from persisted selections", len(cookbook_recipes))
             return {
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in cookbook_recipes],
@@ -885,6 +894,9 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
         if concept.concept_source == "authored":
             authored_recipes = await build_authored_raw_recipes(concept)
+            # Ensure authored recipe is tagged as entree for downstream conflict detection
+            if authored_recipes and authored_recipes[0].course is None:
+                authored_recipes[0] = authored_recipes[0].model_copy(update={"course": "entree"})
             selected = concept.selected_authored_recipe
             logger.info(
                 "Seeded %d authored recipe from persisted selection %s",
@@ -900,6 +912,10 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         if concept.concept_source == "planner_authored_anchor":
             anchor_recipes = await build_planner_authored_anchor_raw_recipes(concept)
             anchor_recipe = anchor_recipes[0]
+            # Ensure anchor recipe is tagged as entree for downstream conflict detection
+            if anchor_recipe.course is None:
+                anchor_recipe = anchor_recipe.model_copy(update={"course": "entree"})
+                anchor_recipes[0] = anchor_recipe
             complement_count = max(0, recipe_count - len(anchor_recipes))
 
             if complement_count == 0:
@@ -957,6 +973,9 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
             if cookbook_mode == PlannerLibraryCookbookPlanningMode.STRICT:
                 seeded_recipes = cookbook_recipes[:recipe_count]
+                # Ensure first recipe is tagged as entree for downstream conflict detection
+                if seeded_recipes and seeded_recipes[0].course is None:
+                    seeded_recipes[0] = seeded_recipes[0].model_copy(update={"course": "entree"})
                 logger.info(
                     "Seeded %d planner cookbook recipes from %r in strict mode",
                     len(seeded_recipes),
@@ -968,6 +987,10 @@ async def recipe_generator_node(state: GRASPState) -> dict:
 
             seeded_recipes = cookbook_recipes[:recipe_count]
             anchor_recipe = seeded_recipes[0]
+            # Ensure anchor recipe is tagged as entree for downstream conflict detection
+            if anchor_recipe.course is None:
+                anchor_recipe = anchor_recipe.model_copy(update={"course": "entree"})
+                seeded_recipes[0] = anchor_recipe
             complement_count = max(0, recipe_count - len(seeded_recipes))
             if complement_count == 0:
                 logger.info(
@@ -1062,6 +1085,12 @@ async def recipe_generator_node(state: GRASPState) -> dict:
         )
 
         logger.info("Selected %d generated recipes: %s", len(result.recipes), [r.name for r in result.recipes])
+        if len(result.recipes) < recipe_count:
+            logger.warning(
+                "LLM returned %d recipes but %d were requested — menu may be incomplete",
+                len(result.recipes),
+                recipe_count,
+            )
         history_record = _build_generation_attempt_record(
             attempt=generation_attempt,
             recipes=result.recipes,

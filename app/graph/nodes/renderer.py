@@ -408,9 +408,11 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
             metadata={"exception_type": type(exc).__name__},
         )
 
+        prep_ahead = [e for e in timeline if e.is_prep_ahead]
+
         schedule = NaturalLanguageSchedule(
             timeline=timeline,
-            prep_ahead_entries=[],
+            prep_ahead_entries=prep_ahead,
             total_duration_minutes=merged_dag.total_duration_minutes,
             total_duration_minutes_max=merged_dag.total_duration_minutes_max,
             active_time_minutes=merged_dag.active_time_minutes,
@@ -423,9 +425,11 @@ async def schedule_renderer_node(state: GRASPState) -> dict:
             "errors": [render_error.model_dump()],
         }
 
+    prep_ahead = [e for e in timeline if e.is_prep_ahead]
+
     schedule = NaturalLanguageSchedule(
         timeline=timeline,
-        prep_ahead_entries=[],
+        prep_ahead_entries=prep_ahead,
         total_duration_minutes=merged_dag.total_duration_minutes,
         total_duration_minutes_max=merged_dag.total_duration_minutes_max,
         active_time_minutes=merged_dag.active_time_minutes,

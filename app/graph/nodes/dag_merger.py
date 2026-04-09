@@ -115,7 +115,7 @@ def _compute_critical_paths(
     Bottom-up critical path: duration of longest path from each step to any
     sink node within its recipe. Used for scheduling priority.
     """
-    dur = {s.step_id: s.duration_minutes for s in steps}
+    dur = {s.step_id: (s.duration_max or s.duration_minutes) for s in steps}
 
     G = nx.DiGraph()
     G.add_nodes_from(dur.keys())
@@ -944,12 +944,24 @@ def _create_merged_steps(
             step_id_rewiring[step_id] = merged_step_id
             steps_to_remove.add(step_id)
 
-        # Find one of the original steps to copy metadata from (use first match)
-        original_step_id = matches[0][0]
-        original_step = next((s for s in all_steps if s.step_id == original_step_id), None)
+        # Collect all original steps to aggregate metadata
+        original_steps = [
+            s for s in all_steps
+            if s.step_id in {step_id for step_id, _, _, _ in matches}
+        ]
 
-        if original_step is None:
+        if not original_steps:
             continue
+
+        original_step = original_steps[0]  # For fields where first match is fine
+
+        # Use max duration across all matched steps — merged prep handles
+        # the combined quantity, so it takes at least as long as the slowest original
+        max_duration = max(s.duration_minutes for s in original_steps)
+        max_duration_max = max(
+            (s.duration_max for s in original_steps if s.duration_max is not None),
+            default=None,
+        )
 
         # Create merged step with aggregated description
         merged_description = f"Prep {total_quantity} {unit} {prep_method} {ingredient}"
@@ -960,8 +972,8 @@ def _create_merged_steps(
             recipe_slug="merged",
             description=merged_description,
             resource=original_step.resource,
-            duration_minutes=original_step.duration_minutes,
-            duration_max=original_step.duration_max,
+            duration_minutes=max_duration,
+            duration_max=max_duration_max,
             required_equipment=original_step.required_equipment.copy(),
             can_be_done_ahead=original_step.can_be_done_ahead,
             prep_ahead_window=original_step.prep_ahead_window,
@@ -1083,6 +1095,17 @@ def _merge_dags(
     if merge_candidates:
         all_steps, step_id_rewiring = _create_merged_steps(merge_candidates, all_steps)
         all_edges = _rewire_dependencies(all_edges, step_id_rewiring)
+
+        # Rebuild depends_on for ALL steps from the authoritative rewired edge list.
+        # This ensures: (a) merged steps inherit aggregated inbound dependencies,
+        # (b) steps that depended on now-merged originals point to the merged step ID,
+        # (c) stale pre-merge step IDs are eliminated.
+        deps_from_edges: dict[str, list[str]] = {s.step_id: [] for s in all_steps}
+        for src, dst in all_edges:
+            if dst in deps_from_edges:
+                deps_from_edges[dst].append(src)
+        for s in all_steps:
+            s.depends_on = sorted(set(deps_from_edges.get(s.step_id, [])))
     else:
         step_id_rewiring = {}
 
@@ -1260,6 +1283,7 @@ def _merge_dags(
                 depends_on=step.depends_on,
                 merged_from=step.merged_from,
                 allocation=step.allocation,
+                oven_temp_f=step.oven_temp_f,
                 burner_id=assigned_burner.burner_id if assigned_burner else None,
                 burner_position=assigned_burner.position if assigned_burner else None,
                 burner_size=assigned_burner.size if assigned_burner else None,

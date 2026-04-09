@@ -1533,7 +1533,7 @@ class TestScheduleRendererNode:
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
         assert len(schedule.timeline) == 12  # all entries unified (10 day-of + 2 prep-ahead)
-        assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
+        assert len(schedule.prep_ahead_entries) == 2  # prep-ahead steps extracted from timeline
         assert sum(1 for e in schedule.timeline if e.is_prep_ahead) == 2
         assert schedule.total_duration_minutes == 195
         assert schedule.total_duration_minutes_max == 210
@@ -1573,7 +1573,7 @@ class TestScheduleRendererNode:
 
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
         assert len(schedule.timeline) == 7  # all entries unified (6 day-of + 1 prep-ahead)
-        assert len(schedule.prep_ahead_entries) == 0  # empty — all entries in timeline
+        assert len(schedule.prep_ahead_entries) == 1  # prep-ahead steps extracted from timeline
         assert schedule.error_summary == "Chocolate Fondant dropped due to enrichment failure."
         assert schedule.one_oven_conflict == MERGED_DAG_TWO_RECIPE.one_oven_conflict
 
@@ -1608,7 +1608,7 @@ class TestScheduleRendererNode:
         assert "schedule" in result
         schedule = NaturalLanguageSchedule.model_validate(result["schedule"])
         assert len(schedule.timeline) == 12  # all entries unified
-        assert len(schedule.prep_ahead_entries) == 0
+        assert len(schedule.prep_ahead_entries) == 2  # prep-ahead steps extracted from timeline
         assert "3 course(s)" in schedule.summary
 
         # Should have a recoverable error
