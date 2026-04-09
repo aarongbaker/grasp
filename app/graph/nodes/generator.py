@@ -196,7 +196,8 @@ Your recipes are written for experienced home cooks who value precision, techniq
 8. Provide realistic estimated_total_minutes for each recipe (prep through plating).
 9. Use the available equipment to unlock advanced techniques where appropriate.
 10. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
-11. {oven_guidance}'''
+11. {oven_guidance}
+12. Assign a 'course' value to every recipe using one of: appetizer, soup, salad, entree, side, dessert, other. Every multi-course menu must include exactly one recipe with course='entree'.'''
 
 
 def _build_mixed_origin_system_prompt(
@@ -256,7 +257,8 @@ Your recipes are written for experienced home cooks who value precision, techniq
 8. Include cuisine attribution for each generated recipe.
 9. Provide realistic estimated_total_minutes for each generated recipe (prep through plating).
 10. Each generated recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
-11. {oven_guidance}'''
+11. {oven_guidance}
+12. Assign a 'course' value to every generated recipe using one of: appetizer, soup, salad, entree, side, dessert, other. The anchor recipe above is the entree — generated complements should use appropriate course values.'''
 
 
 def _build_oven_compatibility_prompt_guidance(*, has_second_oven: bool) -> str:
@@ -271,7 +273,10 @@ def _build_oven_compatibility_prompt_guidance(*, has_second_oven: bool) -> str:
         "temperature-conflict overlap. Treat oven temperatures within about 15°F of each other as compatible, avoid pairing overlapping "
         "long low braises with high-heat bakes or desserts unless timing can be serialized cleanly, and if tension remains, prefer menus with "
         "only one oven-heavy dish plus stovetop/passive complements. If a requested menu shape would otherwise force overlapping incompatible "
-        "oven temperatures, choose different dishes or cooking methods instead of returning an impossible plan."
+        "oven temperatures, choose different dishes or cooking methods instead of returning an impossible plan. "
+        "The entree's oven temperature anchors the entire menu — other dishes that use the oven while the entree cooks must use a compatible "
+        "temperature (within 15°F), or they must complete their oven work before the entree goes in or after it comes out. "
+        "Prefer stovetop, passive, or hands-based techniques for non-entree dishes when oven temperature compatibility is uncertain."
     )
 
 
@@ -331,9 +336,10 @@ def _build_retry_system_prompt(
     oven_guidance = _build_oven_compatibility_prompt_guidance(has_second_oven=has_second_oven)
 
     single_oven_retry_rule = (
-        "This is a corrective retry for a one-oven conflict. If more than one oven-using dish would overlap in a single-oven kitchen, "
-        "their required oven temperatures must stay within the allowed tolerance. If they cannot stay within tolerance, you MUST change the menu "
-        "before proceeding: choose different dishes, change cooking methods, or shift one dish away from oven use entirely. Do not keep the same oven shape and hope scheduling fixes it later."
+        "This is a corrective retry for a one-oven conflict. The entree's oven temperature is the fixed anchor for the entire menu. "
+        "All other dishes must either: (a) use a temperature within 15°F of the entree's oven temperature, "
+        "(b) complete their oven work before the entree goes in, or (c) switch to stovetop or passive methods instead. "
+        "Do not keep the same temperature conflict shape — if the conflicting dish cannot match the entree's oven temperature, change its cooking method."
         if not has_second_oven
         else "This is a corrective retry informed by scheduler conflict context. Use the conflict details to avoid repeating the same failure shape, but parallel oven dishes may use meaningfully different temperatures because a second oven is available."
     )
@@ -378,7 +384,8 @@ Your task is to produce a NEW feasible multi-course menu, not to restate the fai
 10. Provide realistic estimated_total_minutes for each recipe (prep through plating).
 11. Each recipe must have at least 3 steps. Steps should be detailed enough for an intermediate cook.
 12. {oven_guidance}
-13. {single_oven_retry_rule}'''
+13. {single_oven_retry_rule}
+14. Assign a 'course' value to every recipe using one of: appetizer, soup, salad, entree, side, dessert, other. Include exactly one recipe with course='entree'.'''
 
 
 def _build_retry_human_prompt(recipe_count: int, concept: DinnerConcept, retry_reason: GenerationRetryReason) -> str:

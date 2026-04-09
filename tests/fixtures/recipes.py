@@ -62,6 +62,7 @@ RAW_SHORT_RIBS = RawRecipe(
     servings=4,
     cuisine="French-American",
     estimated_total_minutes=210,
+    course="entree",
     ingredients=[
         Ingredient(name="bone-in short ribs", quantity="2kg", preparation="trimmed of excess fat"),
         Ingredient(name="red wine", quantity="500ml", preparation="Burgundy or Côtes du Rhône"),
@@ -90,6 +91,7 @@ RAW_POMMES_PUREE = RawRecipe(
     servings=4,
     cuisine="French",
     estimated_total_minutes=55,
+    course="side",
     ingredients=[
         Ingredient(name="Yukon Gold potatoes", quantity="1kg", preparation="peeled, cut into even chunks"),
         Ingredient(name="unsalted butter", quantity="200g", preparation="cold, cubed"),
@@ -111,6 +113,7 @@ RAW_CHOCOLATE_FONDANT = RawRecipe(
     servings=4,
     cuisine="French-British",
     estimated_total_minutes=75,
+    course="dessert",
     ingredients=[
         Ingredient(name="dark chocolate 70%", quantity="200g", preparation="roughly chopped"),
         Ingredient(name="unsalted butter", quantity="150g", preparation="cubed, plus extra for ramekins"),

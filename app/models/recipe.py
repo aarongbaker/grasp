@@ -101,6 +101,7 @@ class RawRecipe(BaseModel):
     ingredients: list[Ingredient]
     steps: list[str]  # flat strings — EnrichedRecipe converts to RecipeStep
     provenance: RecipeProvenance = RecipeProvenance(kind="generated")
+    course: Optional[Literal["appetizer", "soup", "salad", "entree", "side", "dessert", "other"]] = None
 
 
 class EnrichedRecipe(BaseModel):

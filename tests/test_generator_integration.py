@@ -230,8 +230,8 @@ def test_build_retry_system_prompt_includes_typed_single_oven_conflict_context(d
     assert "Blocking recipe names: Braised Short Ribs, Chocolate Souffle" in prompt
     assert "Affected scheduler step ids: short_ribs_braise, souffle_bake" in prompt
     assert "Do NOT reproduce the same beyond-tolerance overlap shape" in prompt
-    assert "If more than one oven-using dish would overlap in a single-oven kitchen" in prompt
-    assert "you MUST change the menu before proceeding" in prompt
+    assert "entree's oven temperature is the fixed anchor" in prompt
+    assert "complete their oven work before the entree goes in" in prompt
 
 
 def test_build_retry_system_prompt_relaxes_parallel_temperature_rule_with_second_oven(dinner_concept):

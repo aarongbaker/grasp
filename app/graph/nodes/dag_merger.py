@@ -83,6 +83,7 @@ class _OvenInterval:
     temp_f: Optional[int]
     recipe_name: str
     step_id: str
+    course: Optional[str] = None  # recipe course — used for entree-anchor conflict classification
 
 
 @dataclass(frozen=True)
@@ -391,6 +392,11 @@ def _format_oven_conflict_message(
     )
 
 
+def _involves_entree(a: _OvenInterval, b: _OvenInterval) -> bool:
+    """Return True if either oven interval belongs to the entree recipe."""
+    return a.course == "entree" or b.course == "entree"
+
+
 def _build_one_oven_conflict_metadata(
     oven_intervals: list[_OvenInterval],
     has_second_oven: bool,
@@ -448,7 +454,7 @@ def _build_one_oven_conflict_metadata(
             if overlaps:
                 if irreconcilable_pair is None:
                     irreconcilable_pair = (interval_a, interval_b, gap)
-                if not treat_overlap_as_irreconcilable and resequence_pair is None:
+                if (not treat_overlap_as_irreconcilable or _involves_entree(interval_a, interval_b)) and resequence_pair is None:
                     earlier, later = (interval_a, interval_b)
                     if interval_b.start < interval_a.start:
                         earlier, later = interval_b, interval_a
@@ -462,7 +468,7 @@ def _build_one_oven_conflict_metadata(
     if max_gap is not None:
         summary["temperature_gap_f"] = max_gap
 
-    if irreconcilable_pair is not None and treat_overlap_as_irreconcilable:
+    if irreconcilable_pair is not None and treat_overlap_as_irreconcilable and not _involves_entree(*irreconcilable_pair[:2]):
         left, right, gap = irreconcilable_pair
         overlap_start = max(left.start, right.start)
         overlap_end = min(left.end, right.end)
@@ -517,6 +523,7 @@ def _build_planned_oven_intervals(
     all_steps: list[_StepInfo],
     all_edges: list[tuple[str, str]],
     finish_offsets: dict[str, int],
+    course_by_recipe: Optional[dict[str, Optional[str]]] = None,
 ) -> list[_OvenInterval]:
     """Build conservative oven demand windows before resource-capacity placement.
 
@@ -557,6 +564,7 @@ def _build_planned_oven_intervals(
                 temp_f=step.oven_temp_f,
                 recipe_name=step.recipe_name,
                 step_id=step.step_id,
+                course=(course_by_recipe or {}).get(step.recipe_name),
             )
         )
     return planned
@@ -1034,6 +1042,12 @@ def _merge_dags(
     # Build lookup: recipe_name → ValidatedRecipe
     vr_by_name = {vr.source.source.name: vr for vr in validated_recipes}
 
+    # Build lookup: recipe_name → course (for entree-anchor oven conflict classification)
+    course_by_recipe: dict[str, Optional[str]] = {
+        name: vr.source.source.course
+        for name, vr in vr_by_name.items()
+    }
+
     # Build unified step list
     all_steps: list[_StepInfo] = []
     all_edges: list[tuple[str, str]] = []
@@ -1082,7 +1096,7 @@ def _merge_dags(
 
     # Compute finish-together offsets (empty dict if serving_time is None)
     finish_offsets = _compute_finish_together_offsets(all_steps, all_edges, serving_time)
-    planned_oven_intervals = _build_planned_oven_intervals(all_steps, all_edges, finish_offsets)
+    planned_oven_intervals = _build_planned_oven_intervals(all_steps, all_edges, finish_offsets, course_by_recipe)
     planned_one_oven_conflict = _build_one_oven_conflict_metadata(
         planned_oven_intervals,
         has_second_oven=has_second_oven,
@@ -1219,6 +1233,7 @@ def _merge_dags(
                 temp_f=step.oven_temp_f,
                 recipe_name=step.recipe_name,
                 step_id=step.step_id,
+                course=course_by_recipe.get(step.recipe_name),
             ))
 
         # Record equipment intervals
