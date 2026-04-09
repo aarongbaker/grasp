@@ -734,6 +734,7 @@ async def test_create_session_201(app_with_overrides, test_user):
             json={
                 "free_text": "Dinner party with lamb and rosemary.",
                 "guest_count": 4,
+                "dish_count": 4,
                 "meal_type": "dinner",
                 "occasion": "dinner_party",
                 "dietary_restrictions": ["nut-free"],
@@ -745,6 +746,7 @@ async def test_create_session_201(app_with_overrides, test_user):
     # dietary_defaults merged: gluten-free from user + nut-free from request
     concept = data["concept_json"]
     assert concept["concept_source"] == "free_text"
+    assert concept["dish_count"] == 4
     assert concept["selected_authored_recipe"] is None
     assert "gluten-free" in concept["dietary_restrictions"]
     assert "nut-free" in concept["dietary_restrictions"]

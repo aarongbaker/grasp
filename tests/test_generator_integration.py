@@ -23,6 +23,7 @@ from app.graph.nodes.generator import (
     _build_retry_system_prompt,
     _build_system_prompt,
     _derive_recipe_count,
+    _resolve_recipe_count,
     recipe_generator_node,
 )
 from app.models.enums import ErrorType, MealType, Occasion
@@ -69,6 +70,18 @@ def test_derive_recipe_count():
     assert _derive_recipe_count(MealType.DINNER, Occasion.DINNER_PARTY) == 3
     assert _derive_recipe_count(MealType.LUNCH, Occasion.CASUAL) == 1
     assert _derive_recipe_count(MealType.DINNER, Occasion.TASTING_MENU) == 5
+
+
+def test_resolve_recipe_count_prefers_explicit_dish_count(dinner_concept):
+    concept = dinner_concept.model_copy(update={"dish_count": 4})
+
+    assert _resolve_recipe_count(concept) == 4
+
+
+def test_resolve_recipe_count_falls_back_to_meal_occasion_default(dinner_concept):
+    concept = dinner_concept.model_copy(update={"dish_count": None})
+
+    assert _resolve_recipe_count(concept) == 3
 
 
 def test_build_system_prompt_includes_concept(dinner_concept):

@@ -159,6 +159,7 @@ export interface PlannerReferenceResolutionResponse {
 export interface DinnerConcept {
   free_text: string;
   guest_count: number;
+  dish_count?: number | null;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions: string[];
@@ -174,6 +175,7 @@ export interface CreateFreeTextSessionRequest {
   concept_source?: 'free_text';
   free_text: string;
   guest_count: number;
+  dish_count?: number;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];
@@ -205,6 +207,7 @@ export interface CreateCookbookSessionRequest {
   free_text: string;
   selected_recipes: CreateSessionCookbookSelection[];
   guest_count: number;
+  dish_count?: number;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];
@@ -216,6 +219,7 @@ export interface CreateAuthoredSessionRequest {
   free_text: string;
   selected_authored_recipe: CreateSessionAuthoredSelection;
   guest_count: number;
+  dish_count?: number;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];
@@ -227,6 +231,7 @@ export interface CreatePlannerAuthoredAnchorSessionRequest {
   free_text: string;
   planner_authored_recipe_anchor: CreateSessionPlannerAuthoredAnchor;
   guest_count: number;
+  dish_count?: number;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];
@@ -238,6 +243,7 @@ export interface CreatePlannerCookbookTargetSessionRequest {
   free_text: string;
   planner_cookbook_target: CreateSessionPlannerCookbookTarget;
   guest_count: number;
+  dish_count?: number;
   meal_type: MealType;
   occasion: Occasion;
   dietary_restrictions?: string[];

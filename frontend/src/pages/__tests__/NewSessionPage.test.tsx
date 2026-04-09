@@ -23,6 +23,7 @@ const createdSession: Session = {
   concept_json: {
     free_text: 'A bright spring dinner',
     guest_count: 4,
+    dish_count: 3,
     meal_type: 'dinner',
     occasion: 'dinner_party',
     dietary_restrictions: [],
@@ -101,6 +102,7 @@ describe('NewSessionPage', () => {
     expect(screen.getByRole('link', { name: /Browse Recipe Library/i })).toHaveAttribute('href', '/recipes');
     expect(screen.getByRole('link', { name: /Start a Recipe Draft/i })).toHaveAttribute('href', '/recipes/new');
     expect(screen.getByLabelText('Planner anchor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dishes')).toHaveValue(3);
     expect(
       screen.getByText(/No owned reference is required unless you want the planner anchored/i),
     ).toBeInTheDocument();
@@ -122,19 +124,24 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
+    await userEvent.clear(screen.getByLabelText('Dishes'));
+    await userEvent.paste('4');
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Around my chicken piccata');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     await waitFor(() =>
-      expect(createSessionSpy).toHaveBeenCalledWith({
-        concept_source: 'free_text',
-        free_text: 'Around my chicken piccata',
-        guest_count: 4,
-        meal_type: 'dinner',
-        occasion: 'dinner_party',
-        dietary_restrictions: [],
-        serving_time: undefined,
-      }),
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'free_text',
+          free_text: 'Around my chicken piccata',
+          guest_count: 4,
+          dish_count: 4,
+          meal_type: 'dinner',
+          occasion: 'dinner_party',
+          dietary_restrictions: [],
+          serving_time: undefined,
+        }),
+      ),
     );
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_authored_recipe_anchor');
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_cookbook_target');
@@ -224,20 +231,23 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     await waitFor(() =>
-      expect(createSessionSpy).toHaveBeenCalledWith({
-        concept_source: 'planner_cookbook_target',
-        free_text: 'Vegetarian lunch from my vegetarian cookbook',
-        planner_cookbook_target: {
-          cookbook_id: 'cookbook-vegetarian',
-          name: 'Vegetarian Cookbook',
-          mode: 'cookbook_biased',
-        },
-        guest_count: 4,
-        meal_type: 'dinner',
-        occasion: 'dinner_party',
-        dietary_restrictions: [],
-        serving_time: undefined,
-      }),
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'planner_cookbook_target',
+          free_text: 'Vegetarian lunch from my vegetarian cookbook',
+          planner_cookbook_target: {
+            cookbook_id: 'cookbook-vegetarian',
+            name: 'Vegetarian Cookbook',
+            mode: 'cookbook_biased',
+          },
+          guest_count: 4,
+          dish_count: 3,
+          meal_type: 'dinner',
+          occasion: 'dinner_party',
+          dietary_restrictions: [],
+          serving_time: undefined,
+        }),
+      ),
     );
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('selected_authored_recipe');
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_authored_recipe_anchor');
@@ -275,19 +285,22 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
     await waitFor(() =>
-      expect(createSessionSpy).toHaveBeenCalledWith({
-        concept_source: 'planner_authored_anchor',
-        free_text: 'Around my chicken piccata',
-        planner_authored_recipe_anchor: {
-          recipe_id: 'recipe-piccata',
-          title: 'Chicken Piccata',
-        },
-        guest_count: 4,
-        meal_type: 'dinner',
-        occasion: 'dinner_party',
-        dietary_restrictions: [],
-        serving_time: undefined,
-      }),
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'planner_authored_anchor',
+          free_text: 'Around my chicken piccata',
+          planner_authored_recipe_anchor: {
+            recipe_id: 'recipe-piccata',
+            title: 'Chicken Piccata',
+          },
+          guest_count: 4,
+          dish_count: 3,
+          meal_type: 'dinner',
+          occasion: 'dinner_party',
+          dietary_restrictions: [],
+          serving_time: undefined,
+        }),
+      ),
     );
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('selected_authored_recipe');
   });
@@ -397,7 +410,7 @@ describe('NewSessionPage', () => {
 
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A festive brunch');
     await userEvent.clear(screen.getByLabelText('Guests'));
-    await userEvent.type(screen.getByLabelText('Guests'), '8');
+    await userEvent.paste('8');
     await userEvent.selectOptions(screen.getByLabelText('Meal type'), 'lunch');
     await userEvent.type(screen.getByLabelText('Serving time'), '12:30');
 
@@ -408,6 +421,7 @@ describe('NewSessionPage', () => {
         concept_source: 'free_text',
         free_text: 'A festive brunch',
         guest_count: 8,
+        dish_count: 3,
         meal_type: 'lunch',
         occasion: 'dinner_party',
         dietary_restrictions: [],

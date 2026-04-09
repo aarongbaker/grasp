@@ -124,6 +124,7 @@ class DinnerConcept(BaseModel):
 
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
@@ -236,6 +237,7 @@ class CreateSessionLegacyRequest(BaseModel):
     concept_source: Literal["free_text"] = "free_text"
     free_text: str = Field(max_length=2000)
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
@@ -318,6 +320,7 @@ class CreateSessionCookbookRequest(BaseModel):
     free_text: str = Field(max_length=2000)
     selected_recipes: list[CreateSessionCookbookSelection] = Field(min_length=1)
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
@@ -331,6 +334,7 @@ class CreateSessionAuthoredRequest(BaseModel):
     free_text: str = Field(max_length=2000)
     selected_authored_recipe: CreateSessionAuthoredSelection
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
@@ -344,6 +348,7 @@ class CreateSessionPlannerAuthoredAnchorRequest(BaseModel):
     free_text: str = Field(max_length=2000)
     planner_authored_recipe_anchor: CreateSessionPlannerAuthoredAnchor
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []
@@ -357,6 +362,7 @@ class CreateSessionPlannerCookbookTargetRequest(BaseModel):
     free_text: str = Field(max_length=2000)
     planner_cookbook_target: CreateSessionPlannerCookbookTarget
     guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
     meal_type: MealType
     occasion: Occasion
     dietary_restrictions: list[str] = []

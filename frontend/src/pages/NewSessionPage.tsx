@@ -68,6 +68,7 @@ export function NewSessionPage() {
   const navigate = useNavigate();
   const [freeText, setFreeText] = useState('');
   const [guestCount, setGuestCount] = useState(4);
+  const [dishCount, setDishCount] = useState(3);
   const [mealType, setMealType] = useState<MealType>('dinner');
   const [occasion, setOccasion] = useState<Occasion>('dinner_party');
   const [restrictions, setRestrictions] = useState<string[]>([]);
@@ -205,6 +206,7 @@ export function NewSessionPage() {
     const sharedFields = {
       free_text: freeText,
       guest_count: guestCount,
+      dish_count: dishCount,
       meal_type: mealType,
       occasion,
       dietary_restrictions: restrictions,
@@ -294,7 +296,7 @@ export function NewSessionPage() {
         <div className={styles.hero}>
           <div className={styles.heroMain}>
             <div>
-              <h1 className={styles.title}>Plan Your Meal Plan</h1>
+              <h1 className={styles.title}>Plan a Dinner</h1>
               <p className={styles.subtitle}>
                 Describe the meal you want to cook from Generation, pre-existing cookbook recipes, or even your own recipes. 
                 GRASP will turn that menu intent into a paced dinner service with timing, equipment flow, and a finished schedule.
@@ -515,7 +517,15 @@ export function NewSessionPage() {
             min={1}
             max={100}
             value={guestCount}
-            onChange={(e) => setGuestCount(Number(e.target.value))}
+            onChange={(e) => setGuestCount(Math.min(100, Math.max(1, Number(e.target.value) || 1)))}
+          />
+          <Input
+            label="Dishes"
+            type="number"
+            min={1}
+            max={12}
+            value={dishCount}
+            onChange={(e) => setDishCount(Math.min(12, Math.max(1, Number(e.target.value) || 1)))}
           />
           <Select
             label="Meal type"

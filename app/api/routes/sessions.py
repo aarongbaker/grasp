@@ -202,6 +202,7 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
 
     concept_fields: dict = {
         "guest_count": body.guest_count,
+        "dish_count": body.dish_count,
         "meal_type": body.meal_type,
         "occasion": body.occasion,
         "dietary_restrictions": merged_restrictions,

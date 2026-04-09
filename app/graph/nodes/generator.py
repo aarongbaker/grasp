@@ -118,6 +118,11 @@ def _derive_recipe_count(meal_type: MealType, occasion: Occasion) -> int:
     return RECIPE_COUNT_MAP.get((meal_type, occasion), DEFAULT_RECIPE_COUNT)
 
 
+def _resolve_recipe_count(concept: DinnerConcept) -> int:
+    """Prefer explicit user dish count; fall back to meal/occasion defaults."""
+    return concept.dish_count or _derive_recipe_count(concept.meal_type, concept.occasion)
+
+
 # ── Prompt builders ──────────────────────────────────────────────────────────
 
 
@@ -883,7 +888,7 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 "raw_recipes": [recipe.model_dump(mode="json") for recipe in authored_recipes],
             }
 
-        recipe_count = _derive_recipe_count(concept.meal_type, concept.occasion)
+        recipe_count = _resolve_recipe_count(concept)
 
         if concept.concept_source == "planner_authored_anchor":
             anchor_recipes = await build_planner_authored_anchor_raw_recipes(concept)
