@@ -290,46 +290,48 @@ export function NewSessionPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.hero}>
-        <div>
-          <h1 className={styles.title}>Plan a Dinner</h1>
-          <p className={styles.subtitle}>
-            Describe the meal you want to cook. GRASP will turn that menu intent into a paced dinner service with
-            timing, equipment flow, and a finished schedule.
-          </p>
-        </div>
-
-        <aside className={styles.guidanceCard} aria-labelledby="planner-lane-heading">
-          <p className={styles.guidanceEyebrow}>Planner lane</p>
-          <h2 id="planner-lane-heading" className={styles.guidanceTitle}>
-            Start here when service timing leads.
-          </h2>
-          <p className={styles.guidanceText}>
-            Keep this route for menu-intent planning. It stays focused on a single dinner brief and does not switch into
-            cookbook browsing or authored drafting.
-          </p>
-          <div className={styles.guidanceLinks}>
-            {crossLinks.map((link) => (
-              <Link key={link.to} to={link.to} className={styles.guidanceLink}>
-                <span className={styles.guidanceLinkLabel}>{link.label}</span>
-                <span className={styles.guidanceLinkText}>{link.description}</span>
-              </Link>
-            ))}
-          </div>
-        </aside>
-      </div>
-
       <form className={styles.form} onSubmit={handleSubmit}>
-        {error && <div className={styles.error}>{error}</div>}
+        <div className={styles.hero}>
+          <div className={styles.heroMain}>
+            <div>
+              <h1 className={styles.title}>Plan a Dinner</h1>
+              <p className={styles.subtitle}>
+                Describe the meal you want to cook. GRASP will turn that menu intent into a paced dinner service with
+                timing, equipment flow, and a finished schedule.
+              </p>
+            </div>
 
-        <Textarea
-          label="What are you cooking?"
-          placeholder="A rustic Italian dinner with handmade pasta, seasonal vegetables, and something decadent for dessert..."
-          value={freeText}
-          onChange={(e) => setFreeText(e.target.value)}
-          maxLength={2000}
-          required
-        />
+            {error && <div className={styles.error}>{error}</div>}
+
+            <Textarea
+              label="What are you cooking?"
+              placeholder="A rustic Italian dinner with handmade pasta, seasonal vegetables, and something decadent for dessert..."
+              value={freeText}
+              onChange={(e) => setFreeText(e.target.value)}
+              maxLength={2000}
+              required
+            />
+          </div>
+
+          <aside className={styles.guidanceCard} aria-labelledby="planner-lane-heading">
+            <p className={styles.guidanceEyebrow}>Planner lane</p>
+            <h2 id="planner-lane-heading" className={styles.guidanceTitle}>
+              Start here when service timing leads.
+            </h2>
+            <p className={styles.guidanceText}>
+              Keep this route for menu-intent planning. It stays focused on a single dinner brief and does not switch into
+              cookbook browsing or authored drafting.
+            </p>
+            <div className={styles.guidanceLinks}>
+              {crossLinks.map((link) => (
+                <Link key={link.to} to={link.to} className={styles.guidanceLink}>
+                  <span className={styles.guidanceLinkLabel}>{link.label}</span>
+                  <span className={styles.guidanceLinkText}>{link.description}</span>
+                </Link>
+              ))}
+            </div>
+          </aside>
+        </div>
 
         <section className={styles.anchorCard} aria-labelledby="planner-anchor-heading">
           <div className={styles.anchorHeader}>
