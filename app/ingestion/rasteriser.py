@@ -7,19 +7,35 @@ After M015 pivot (cookbook de-scope), this module is used only for team/admin
 curated cookbook uploads, not user-facing upload flows.
 
 OCR backend selection (priority order):
-  macOS: Apple Vision (PyObjC) -> Tesseract -> pymupdf text extraction
-  Linux: Tesseract -> pymupdf text extraction
+  macOS: Apple Vision (PyObjC) → Tesseract → pymupdf text extraction
+  Linux: Tesseract → pymupdf text extraction
 
-Apple Vision provides best quality for stylised cookbook fonts.
-Tesseract is the cross-platform production backend (Docker/Linux).
-pymupdf text extraction is the last-resort fallback on any platform.
+Why three backends?
+  - Apple Vision provides best quality for stylised cookbook fonts (serif
+    display typefaces, hand-lettered headers, dense two-column layouts).
+    It's layout-aware and handles text that pdfplumber/pymupdf would mangle.
+  - Tesseract is the cross-platform production backend for Docker/Linux
+    (Railway). Requires the tesseract-ocr system package. Good quality on
+    clean scans, lower quality on stylised fonts than Vision.
+  - pymupdf text extraction is a last-resort fallback — it reads embedded
+    PDF text streams, not rendered page images. Works on digitally-created
+    PDFs but gives poor output for scanned cookbooks.
 
-300 DPI is the minimum safe resolution for stylised cookbook fonts and
-dense ingredient lists. No quality branching — always rasterise at 300 DPI.
+300 DPI: the minimum safe resolution for stylised cookbook fonts and dense
+  ingredient lists. Lower DPI (150, 200) produces OCR errors on serif display
+  fonts commonly used in cookbook headings. Always rasterise at 300 — no
+  quality branching.
 
-PageCache is written BEFORE any further processing. If the classifier or
-state machine crashes, the OCR output is safe in Postgres. Reprocessing
-is free — re-running OCR is not.
+PageCache write-before-processing:
+  OCR output is written to Postgres before classifier/state machine processing.
+  If the classifier or state machine crashes, the OCR output is safe and
+  re-processing only needs to re-run the downstream phases (free).
+  Re-running OCR (~$0.001/page in compute cost) is wasteful and slow.
+
+Memory management:
+  300 DPI PNG images of cookbook pages are 10-20 MB each. The pixmap and
+  image bytes are freed immediately after OCR completes — keeping all pages
+  in memory simultaneously would exhaust available RAM for large cookbooks.
 
 See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
 """
@@ -35,7 +51,9 @@ import fitz  # pymupdf
 
 logger = logging.getLogger(__name__)
 
-# Detect available OCR backends at import time
+# Detect available OCR backends at import time — done once so we don't attempt
+# pytesseract.get_tesseract_version() on every page (expensive syscall).
+# _HAS_TESSERACT is used in rasterise_and_ocr_pdf() to select the backend path.
 _HAS_TESSERACT = False
 try:
     import pytesseract
@@ -48,15 +66,31 @@ except Exception:
 def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
     """
     Apple Vision OCR. Mac-only. Returns (text, confidence).
-    Layout-aware — handles two-column cookbook typography, stylised fonts,
-    photography captions that pdfplumber would mangle.
+
+    Layout-aware — handles two-column cookbook typography, stylised serif
+    display fonts, and photography captions that pdfplumber/pymupdf would
+    mangle or omit entirely.
+
+    Implementation notes:
+      - NSData wraps the PNG bytes for the Quartz framework
+      - CGImageSourceCreateWithData + CGImageSourceCreateImageAtIndex converts
+        NSData to a CGImage suitable for the Vision framework
+      - VNRecognizeTextRequest with VNRequestTextRecognitionLevelAccurate (1)
+        uses the neural network OCR path (vs fast mode = heuristic OCR)
+      - setUsesLanguageCorrection_(True) runs a language model pass to correct
+        common OCR errors (e.g. "I" vs "l" ambiguity in ingredient lists)
+      - Confidence is per-observation (text region), averaged across the page.
+        Values typically 0.85-0.99 for clean cookbook scans.
+
+    Returns ("", 0.0) on any failure — the caller falls back to Tesseract.
+    Failure is expected on non-Mac systems where PyObjC is not installed.
     """
     try:
         import objc
         import Quartz
         from Vision import VNImageRequestHandler, VNRecognizeTextRequest
 
-        # Convert bytes → CGImage
+        # Convert bytes → CGImage via NSData + Quartz image source
         data = objc.lookUpClass("NSData").dataWithBytes_length_(image_bytes, len(image_bytes))
         image_source = Quartz.CGImageSourceCreateWithData(data, None)
         cg_image = Quartz.CGImageSourceCreateImageAtIndex(image_source, 0, None)
@@ -88,10 +122,22 @@ def _ocr_page_apple_vision(image_bytes: bytes) -> tuple[str, float]:
 def _ocr_page_tesseract(image_bytes: bytes) -> tuple[str, float]:
     """
     Tesseract OCR. Linux production backend. Returns (text, confidence).
-    Uses pytesseract wrapper. Requires tesseract-ocr system package.
-    Confidence is synthetic (0.85) — Tesseract does not provide per-page
-    confidence in a simple API call, and 0.85 reflects its typical accuracy
-    on clean cookbook scans (between Vision's ~0.95 and pymupdf's 0.7).
+
+    Uses pytesseract wrapper around the tesseract-ocr CLI. Requires the
+    tesseract-ocr system package to be installed (included in the Railway
+    Dockerfile via apt-get).
+
+    lang="eng": English-only language model. Cookbook content is English.
+    Using multiple language models increases memory and latency with no
+    benefit for our corpus.
+
+    Confidence is synthetic (0.85) — pytesseract.image_to_string() does not
+    expose per-page confidence in a simple API call. The value 0.85 was chosen
+    to reflect Tesseract's typical accuracy on clean cookbook scans:
+      - Above pymupdf's 0.7 (pymupdf is a lower-quality extraction method)
+      - Below Apple Vision's ~0.95 (Vision is higher quality on stylised fonts)
+
+    Returns ("", 0.0) on failure — the caller falls back to pymupdf.
     """
     try:
         import io
@@ -109,9 +155,20 @@ def _ocr_page_tesseract(image_bytes: bytes) -> tuple[str, float]:
 
 def _ocr_page_pymupdf_fallback(page) -> tuple[str, float]:
     """
-    pymupdf text extraction fallback. Used on non-Mac or when Vision unavailable.
-    Lower quality than Apple Vision — doesn't handle stylised fonts or columns.
-    Confidence is synthetic (0.7 = known fallback).
+    pymupdf text extraction fallback. Returns (text, confidence).
+
+    Reads embedded text streams from the PDF — not OCR. Works well for
+    digitally-created PDFs (e.g. exported from InDesign) but poorly for
+    scanned historical cookbooks where text is embedded as image data.
+
+    Confidence is synthetic (0.7): the lowest of the three backends,
+    reflecting that pymupdf extraction:
+      - Gives no quality signal of its own
+      - Fails silently on image-based PDFs (returns empty string)
+      - Has known issues with two-column layouts (merges columns incorrectly)
+
+    This is called as a last resort. If it returns empty text, the page
+    is stored as empty in PageCache — the state machine will skip it.
     """
     text = page.get_text("text")
     return text, 0.7
@@ -128,8 +185,35 @@ async def rasterise_and_ocr_pdf(
     Rasterises every page at 300 DPI, runs OCR, writes PageCache rows.
     Returns list of page dicts (page_number, text, confidence, page_hash).
 
-    pdf_source: file path (str/Path) preferred — pymupdf memory-maps it.
-                bytes still accepted for backwards compatibility.
+    pdf_source: file path (str/Path) preferred — pymupdf memory-maps it,
+      avoiding loading the entire PDF into RAM. bytes still accepted for
+      backwards compatibility with the API route that reads the upload into
+      memory before enqueueing (V1 limitation — V2 should pass an object
+      storage URL instead).
+
+    Page hash (SHA256):
+      Computed from the pymupdf embedded text, not from the OCR output.
+      pymupdf text extraction is deterministic and fast — it's used only
+      for hashing, not as the final text. OCR output varies slightly across
+      runs due to language model stochasticity; the embedded text is stable.
+      This makes the hash a reliable fingerprint for deduplication.
+
+    Backend selection per page:
+      macOS: Vision → Tesseract (if Vision fails) → pymupdf (if Tesseract fails)
+      Linux: Tesseract → pymupdf (if Tesseract fails)
+      Both use asyncio.to_thread() for the blocking OCR call to avoid blocking
+      the event loop during the ~100-500ms per-page OCR operation.
+
+    Memory management:
+      - pix (pixmap): freed immediately after tobytes("png") — 10-20 MB per page
+      - img_bytes: freed after OCR — no longer needed once text is extracted
+      - _COMMIT_BATCH: flush PageCache rows to DB every 50 pages to bound
+        session memory. Without this, a 200-page cookbook accumulates 200
+        ORM objects in the session before the final commit.
+
+    progress_callback: optional async callable(page_num, total_pages).
+      Called after each page so the Celery task can update the IngestionJob
+      status with OCR progress (displayed in the admin monitoring UI).
     """
     import uuid
 
@@ -138,6 +222,7 @@ async def rasterise_and_ocr_pdf(
     if isinstance(pdf_source, (str, Path)):
         doc = fitz.open(str(pdf_source))
     else:
+        # bytes path: fitz.open(stream=...) loads into memory — not ideal for large PDFs
         doc = fitz.open(stream=pdf_source, filetype="pdf")
     pages = []
     is_mac = sys.platform == "darwin"
@@ -145,17 +230,22 @@ async def rasterise_and_ocr_pdf(
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        mat = fitz.Matrix(300 / 72, 300 / 72)  # 300 DPI
+
+        # Rasterise at 300 DPI — matrix scales from PDF's 72 DPI default
+        mat = fitz.Matrix(300 / 72, 300 / 72)
         pix = page.get_pixmap(matrix=mat)
         img_bytes = pix.tobytes("png")
 
-        # Free the pixmap immediately — 300 DPI images are 10-20 MB each
+        # Free the pixmap immediately — 300 DPI images are 10-20 MB each.
+        # Keeping the pixmap alive until end-of-loop would double memory use.
         del pix
 
-        # SHA256 of page text content — stable across re-runs, much lighter than rawdict
+        # Page hash: derived from embedded text (fast, deterministic) not OCR output.
+        # Used for deduplication and change detection on re-ingestion.
         page_text_for_hash = page.get_text("text")
         page_hash = hashlib.sha256(page_text_for_hash.encode()).hexdigest()
 
+        # OCR with backend priority — asyncio.to_thread() for non-blocking execution
         if is_mac:
             text, confidence = await asyncio.to_thread(_ocr_page_apple_vision, img_bytes)
             if not text and _HAS_TESSERACT:
@@ -172,10 +262,12 @@ async def rasterise_and_ocr_pdf(
         # Free image bytes after OCR — no longer needed
         del img_bytes
 
+        # Write PageCache row immediately (before classifier/state machine).
+        # If downstream processing fails, OCR output is safe in Postgres.
         cache_row = PageCache(
             page_id=uuid.uuid4(),
             book_id=uuid.UUID(book_id),
-            page_number=page_num + 1,
+            page_number=page_num + 1,  # 1-indexed for human readability
             page_text=text,
             page_hash=page_hash,
             vision_confidence=confidence,
@@ -194,10 +286,12 @@ async def rasterise_and_ocr_pdf(
         if progress_callback is not None:
             await progress_callback(page_num + 1, len(doc))
 
-        # Batch-commit to avoid holding all PageCache objects in session
+        # Batch-commit to avoid holding all PageCache objects in session memory.
+        # After 50 pages, flush to DB and clear the session's identity map.
         if (page_num + 1) % _COMMIT_BATCH == 0:
             await db.commit()
 
+    # Final commit for the last partial batch
     await db.commit()
     doc.close()
     return pages

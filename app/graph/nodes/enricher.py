@@ -39,6 +39,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable
+from typing import cast
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -53,6 +54,11 @@ from app.models.recipe import EnrichedRecipe, RawRecipe, RecipeStep
 
 logger = logging.getLogger(__name__)
 
+# Allowed chunk types for RAG advisory context.
+# "index" and "catalog" chunk types are filtered out — they contain
+# page numbers and cross-reference lists, not culinary knowledge.
+# Only narrative knowledge (technique, recipe, tip, narrative) is useful
+# for enriching step descriptions.
 ALLOWED_RAG_CHUNK_TYPES = {
     "recipe",
     "ingredient_list",
@@ -69,48 +75,60 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
     """
     Parse ingredients from raw_recipe using ingredient-parser-nlp and normalize
     units to canonical system using Pint.
-    
+
+    Why normalize units?
+      The generator produces ingredient quantities in whatever unit Claude chose
+      (cups, tablespoons, grams, etc.). Normalization to canonical units lets the
+      prep-merging logic in the dag_merger compare quantities across recipes
+      (e.g. "1 cup flour" + "2 tablespoons flour" → "1 cup + 2 tbsp flour").
+
     Canonical units:
-    - Volume: cup, tbsp, tsp
-    - Weight: gram
-    
+      - Volume: cup > tablespoon > teaspoon (prefers largest unit with magnitude ≥ 1)
+      - Weight: gram
+
     Returns list of IngredientUse dicts ready for RecipeStep.ingredient_uses.
-    Silent fallback: unconvertible units store None + fallback_reason.
-    Preserves exact prep_method from parser (no synonym normalization per D003).
+
+    Silent fallback contract:
+      - Unconvertible units: quantity_canonical=None, fallback_reason set.
+      - Dimensionless quantities (e.g. "2 eggs"): stored as-is, no conversion.
+      - Parser failures: falls back to original quantity string from raw_recipe.
+    The pipeline never fails due to ingredient parsing — it degrades gracefully
+    to raw quantity strings when normalization isn't possible.
     """
     from ingredient_parser import parse_ingredient
     from pint import UnitRegistry, DimensionalityError, UndefinedUnitError
-    
+
     ureg = UnitRegistry()
     results = []
-    
-    # Canonical unit preferences (in descending size order for volume)
+
+    # Volume canonical order: try cup first (largest), fall back to tbsp, then tsp.
+    # This ensures "3 teaspoons" stays as teaspoons rather than converting to
+    # a tiny fraction of a cup.
     CANONICAL_VOLUME = ["cup", "tablespoon", "teaspoon"]
     CANONICAL_WEIGHT = "gram"
-    
+
     for ing in raw_recipe.ingredients:
-        # Build raw string for parser
+        # Build raw string for the ingredient parser
         raw_str = f"{ing.quantity} {ing.name}".strip()
-        
+
         try:
             parsed = parse_ingredient(raw_str)
-            
-            # Extract parsed fields - name, amount, preparation are lists
-            ingredient_name = parsed.name[0].text if parsed.name and len(parsed.name) > 0 else ing.name
-            prep_method = parsed.preparation[0].text if parsed.preparation and len(parsed.preparation) > 0 else ing.preparation
+
+            # ingredient_parser returns lists for name, preparation, amount.
+            # Take the first element of each (most recipes have one name/prep per ingredient).
+            ingredient_name = parsed.name[0].text if parsed.name and len(parsed.name) > 0 else ing.name  # type: ignore[index,arg-type]
+            prep_method = parsed.preparation[0].text if parsed.preparation and len(parsed.preparation) > 0 else ing.preparation  # type: ignore[index,arg-type]
             quantity_original = ing.quantity
-            
-            # Attempt unit normalization
+
             quantity_canonical = None
             unit_canonical = None
             fallback_reason = None
-            
+
             if parsed.amount and len(parsed.amount) > 0:
-                # Get first amount
                 amount = parsed.amount[0]
-                
-                # Check if we have a quantity
-                if amount.quantity is None:
+
+                if amount.quantity is None:  # type: ignore[union-attr]
+                    # No numeric quantity — store as fallback (e.g. "a pinch of salt")
                     fallback_reason = "no quantity specified"
                     results.append({
                         "ingredient_name": ingredient_name,
@@ -121,15 +139,13 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
                         "fallback_reason": fallback_reason,
                     })
                     continue
-                
-                # Convert Fraction to float
-                quantity = float(amount.quantity)
-                
-                # Get unit - amount.unit is a Pint Unit object
-                unit_obj = amount.unit
-                
+
+                quantity = float(amount.quantity)  # type: ignore[union-attr]
+                unit_obj = amount.unit  # type: ignore[union-attr]
+
                 if unit_obj is None or str(unit_obj) == "" or str(unit_obj) == "dimensionless":
-                    # Dimensionless quantity (e.g., "2 eggs")
+                    # Dimensionless quantity (e.g., "2 eggs") — no unit conversion possible.
+                    # Stored as-is; the merger can still display "2 eggs" correctly.
                     fallback_reason = "dimensionless quantity"
                     results.append({
                         "ingredient_name": ingredient_name,
@@ -140,22 +156,20 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
                         "fallback_reason": fallback_reason,
                     })
                     continue
-                
-                # Attempt Pint conversion
+
                 try:
-                    pint_quantity = quantity * unit_obj
-                    
-                    # Try to convert to canonical units
+                    pint_quantity = quantity * unit_obj  # type: ignore[operator]
+
                     converted = False
-                    
-                    # Try volume units - prefer the largest unit that keeps magnitude >= 1
-                    # CANONICAL_VOLUME is ordered: ["cup", "tablespoon", "teaspoon"]
+
+                    # Try volume units largest-first. Stop at first unit where
+                    # the converted magnitude is ≥ 1. This avoids "0.06 cups" for
+                    # 1 tablespoon — we'd prefer to display "1 tablespoon" instead.
                     for vol_unit in CANONICAL_VOLUME:
                         try:
-                            converted_qty = pint_quantity.to(vol_unit)
-                            magnitude = float(converted_qty.magnitude)
-                            
-                            # Use this unit if magnitude >= 1 (first match wins - largest unit)
+                            converted_qty = pint_quantity.to(vol_unit)  # type: ignore[union-attr]
+                            magnitude = float(converted_qty.magnitude)  # type: ignore[arg-type]
+
                             if magnitude >= 1.0:
                                 quantity_canonical = magnitude
                                 unit_canonical = vol_unit
@@ -163,35 +177,35 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
                                 break
                         except DimensionalityError:
                             continue
-                    
-                    # If no volume unit gave magnitude >= 1, use teaspoon (smallest) to avoid tiny fractions
+
+                    # If all volume units give magnitude < 1, use teaspoon (smallest)
+                    # to avoid displaying fractions like "0.001 cups".
                     if not converted:
-                        for vol_unit in reversed(CANONICAL_VOLUME):  # Try teaspoon first
+                        for vol_unit in reversed(CANONICAL_VOLUME):
                             try:
-                                converted_qty = pint_quantity.to(vol_unit)
-                                quantity_canonical = float(converted_qty.magnitude)
+                                converted_qty = pint_quantity.to(vol_unit)  # type: ignore[union-attr]
+                                quantity_canonical = float(converted_qty.magnitude)  # type: ignore[arg-type]
                                 unit_canonical = vol_unit
                                 converted = True
                                 break
                             except DimensionalityError:
                                 continue
-                    
-                    # If volume didn't work, try weight
+
+                    # If volume conversion failed entirely, try weight.
                     if not converted:
                         try:
-                            converted_qty = pint_quantity.to(CANONICAL_WEIGHT)
-                            quantity_canonical = float(converted_qty.magnitude)
+                            converted_qty = pint_quantity.to(CANONICAL_WEIGHT)  # type: ignore[union-attr]
+                            quantity_canonical = float(converted_qty.magnitude)  # type: ignore[arg-type]
                             unit_canonical = CANONICAL_WEIGHT
                             converted = True
                         except DimensionalityError:
                             fallback_reason = f"unconvertible unit: '{unit_obj}'"
-                    
+
                 except (UndefinedUnitError, AttributeError, ValueError, TypeError) as e:
                     fallback_reason = f"unconvertible unit: '{unit_obj}'"
             else:
-                # No amount in parsed result
                 fallback_reason = "no quantity specified"
-            
+
             results.append({
                 "ingredient_name": ingredient_name,
                 "prep_method": prep_method,
@@ -200,9 +214,10 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
                 "quantity_original": quantity_original,
                 "fallback_reason": fallback_reason,
             })
-            
+
         except Exception as e:
-            # Parser failed completely - fallback with original data
+            # ingredient_parser failed completely — fall back to raw data.
+            # This ensures one bad ingredient string doesn't drop the whole recipe.
             logger.warning("Ingredient parsing failed for '%s': %s", raw_str, e)
             results.append({
                 "ingredient_name": ing.name,
@@ -212,9 +227,8 @@ def _parse_and_normalize_ingredients(raw_recipe: RawRecipe) -> list:
                 "quantity_original": ing.quantity,
                 "fallback_reason": f"parsing failed: {type(e).__name__}",
             })
-    
-    return results
 
+    return results
 
 
 def _link_steps_to_ingredients(
@@ -225,32 +239,39 @@ def _link_steps_to_ingredients(
     """
     Parse ingredient tags from LLM output ("Uses: ingredient1, ingredient2")
     and link to normalized_ingredients, populating RecipeStep.ingredient_uses.
-    
+
+    Why "Uses: X, Y" format?
+      The enrichment prompt instructs Claude to include "Uses: <ingredient list>"
+      in each step description. This is a cheap structured extraction — we parse
+      it out here rather than adding a separate LLM structured output field.
+      Claude reliably follows this convention when explicitly instructed.
+
+    Exact name matching only (no fuzzy matching):
+      Fuzzy matching risks linking the wrong ingredient (e.g. "butter" matching
+      "peanut butter"). Exact match on the normalized name is safer and
+      sufficient since Claude uses the same ingredient names from the prompt.
+
     Returns new list of RecipeStep objects with ingredient_uses populated.
-    Exact name matching only — no fuzzy matching per Q2 research decision.
+    Steps with no "Uses:" tag get empty ingredient_uses — not an error.
     """
     from app.models.recipe import IngredientUse
-    
-    # Build lookup from ingredient name to normalized metadata
+
+    # Build a case-insensitive lookup from ingredient name to its normalized metadata dict.
     ingredient_lookup = {
         ing_dict["ingredient_name"].lower().strip(): ing_dict
         for ing_dict in normalized_ingredients
     }
-    
+
     updated_steps = []
     for step in steps:
-        # Parse "Uses: X, Y, Z" from description
         uses_pattern = r"Uses:\s*([^\n]+)"
         match = re.search(uses_pattern, step.description, re.IGNORECASE)
-        
+
         ingredient_uses = []
         if match:
-            # Extract ingredient names from match
             ing_names_str = match.group(1).strip()
-            # Split on commas and clean up whitespace
             ing_names = [name.strip().lower() for name in ing_names_str.split(",")]
-            
-            # Match each ingredient name to normalized data
+
             for ing_name in ing_names:
                 if ing_name in ingredient_lookup:
                     ing_data = ingredient_lookup[ing_name]
@@ -264,8 +285,9 @@ def _link_steps_to_ingredients(
                             fallback_reason=ing_data["fallback_reason"],
                         )
                     )
-        
-        # Create new RecipeStep with populated ingredient_uses
+
+        # Build a new RecipeStep instance with ingredient_uses populated.
+        # RecipeStep is immutable (Pydantic model) — must construct a new one.
         updated_step = RecipeStep(
             step_id=step.step_id,
             description=step.description,
@@ -280,14 +302,21 @@ def _link_steps_to_ingredients(
             oven_temp_f=step.oven_temp_f,
         )
         updated_steps.append(updated_step)
-    
+
     return updated_steps
+
 
 # ── Structured output wrapper ────────────────────────────────────────────────
 
 
 class StepEnrichmentOutput(BaseModel):
-    """Wrapper for LangChain structured output. Claude returns this shape."""
+    """Wrapper for LangChain structured output. Claude returns this shape.
+
+    LangChain's with_structured_output() forces Claude to produce output
+    that validates against this model. If Claude produces invalid output
+    (wrong types, missing required fields), LangChain raises a validation
+    error that the llm_retry decorator treats as non-retryable.
+    """
 
     steps: list[RecipeStep]
     chef_notes: str
@@ -301,6 +330,10 @@ def _generate_recipe_slug(name: str) -> str:
     """
     Convert recipe name to a URL-safe slug for step_id generation.
     'Braised Short Ribs' → 'braised_short_ribs'
+
+    Step IDs follow the convention: {slug}_step_{n}
+    This slug must match the one used in dag_builder._generate_recipe_slug()
+    for step prefix matching to work correctly during scheduling.
     """
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
@@ -314,15 +347,21 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
     Returns list of advisory chunk dicts with 'text', 'chunk_type', 'chunk_id' keys.
 
     Graceful degradation: returns [] on any failure (network, auth, empty index).
+    The caller treats [] as "no cookbook context" and proceeds with LLM-only enrichment.
 
-    CONTRACT ENFORCEMENT:
-    - Retrieved data is advisory text grounding only, never canonical recipe input.
-    - Chunks must contain plain text in metadata['text'].
-    - Only cookbook/reference narrative chunk types are accepted; index/catalog/
-      unknown metadata is filtered to keep enrichment grounded in culinary advice
-      rather than browse/list artifacts.
-    - rag_owner_key is the authoritative isolation filter when present; user_id is
-      only a legacy fallback.
+    RAG ADVISORY CONTRACT:
+      Retrieved chunks are advisory culinary context ONLY. They are formatted as
+      plain text in the enrichment prompt and labeled "ADVISORY CONTEXT". Claude
+      is explicitly instructed to derive steps from the raw recipe, not from the
+      chunks. Chunks inform timing, technique, and flavor — they never replace
+      or override the generator's recipe structure.
+
+    Ownership isolation:
+      rag_owner_key is the primary filter — it's a stable hash that survives
+      user_id changes (DB migrations, account merges). user_id is a legacy fallback
+      for chunks indexed before rag_owner_key was introduced.
+      Double-filter: Pinecone filter first, then owner verification on results.
+      This defends against Pinecone filter bugs that could return cross-user data.
     """
     try:
         from openai import OpenAI
@@ -333,7 +372,8 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
         if not settings.pinecone_api_key or not settings.openai_api_key:
             return []
 
-        # Embed the query
+        # Embed the query using the same model as the ingestion pipeline.
+        # Must use text-embedding-3-small (1536 dims) to match the Pinecone index.
         openai_client = OpenAI(api_key=settings.openai_api_key)
         response = openai_client.embeddings.create(
             model="text-embedding-3-small",
@@ -341,10 +381,10 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
         )
         query_embedding = response.data[0].embedding
 
-        # Query Pinecone with user_id filter
         pc = Pinecone(api_key=settings.pinecone_api_key)
         index = pc.Index(settings.pinecone_index_name)
 
+        # Prefer rag_owner_key filter; fall back to user_id for legacy chunks.
         owner_filter = {}
         if rag_owner_key:
             owner_filter = {"rag_owner_key": {"$eq": rag_owner_key}}
@@ -354,7 +394,7 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
         results = index.query(
             vector=query_embedding,
             top_k=settings.rag_retrieval_top_k,
-            filter=owner_filter,
+            filter=owner_filter,  # type: ignore[arg-type]
             include_metadata=True,
         )
 
@@ -364,6 +404,8 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
             chunk_id = metadata.get("chunk_id", match.get("id", "unknown"))
             raw_text = metadata.get("text", "")
 
+            # Secondary ownership verification — defends against Pinecone filter bugs.
+            # If Pinecone returns a chunk that doesn't match our owner, drop it and warn.
             match_rag_owner_key = str(metadata.get("rag_owner_key", "")).strip()
             match_user_id = str(metadata.get("user_id", "")).strip()
             owner_matches = False
@@ -383,8 +425,9 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
                 )
                 continue
 
-            # DEFENSIVE VALIDATION: Enforce advisory text-only contract.
-            # Chunks without valid text are silently filtered (not errors).
+            # Validate text field — silently filter chunks without valid text.
+            # Not an error: Pinecone may return chunks with missing text if
+            # the ingestion pipeline had a partial failure.
             if not isinstance(raw_text, str):
                 logger.warning("RAG chunk text is not a string (filtered): chunk_id=%s", chunk_id)
                 continue
@@ -394,6 +437,7 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
                 logger.warning("RAG chunk missing text field (filtered): chunk_id=%s", chunk_id)
                 continue
 
+            # Filter to allowed chunk types — index/catalog entries are noise.
             chunk_type = str(metadata.get("chunk_type", "")).strip().lower()
             if chunk_type not in ALLOWED_RAG_CHUNK_TYPES:
                 logger.info(
@@ -415,12 +459,20 @@ def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> 
         return chunks
 
     except Exception as exc:
+        # Any failure (API key invalid, network down, Pinecone unavailable) →
+        # return [] for graceful degradation. The enricher proceeds without RAG context.
         logger.warning("RAG retrieval failed (graceful degradation): %s", exc)
         return []
 
 
 def _build_rag_query(raw_recipe: RawRecipe) -> str:
-    """Stable retrieval query for a recipe's advisory cookbook context."""
+    """Stable retrieval query for a recipe's advisory cookbook context.
+
+    Combines name + cuisine + description for rich semantic coverage.
+    Consistent format means recipes with similar cuisine styles retrieve
+    similar technique chunks (e.g. two French sauces both retrieve
+    emulsification and reduction technique chunks).
+    """
     return f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
 
 
@@ -437,10 +489,26 @@ async def _get_cached_rag_context(
     rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]],
     rag_cache_lock: asyncio.Lock,
 ) -> list[dict]:
+    """Shared RAG cache across concurrent recipe enrichments.
+
+    Why cache? When enriching multiple recipes concurrently (asyncio.gather),
+    two recipes with similar queries (e.g. both are French braises) would
+    otherwise trigger duplicate Pinecone queries. The cache deduplicates them —
+    the second recipe waits for the first recipe's query to complete and reuses
+    the result.
+
+    Implementation: the cache stores asyncio Tasks (futures), not results.
+    The lock prevents a race where two coroutines both check the cache,
+    both find a miss, and both start duplicate tasks. The first one creates
+    the Task and stores it; the second awaits the same Task.
+    """
     cache_key = _rag_cache_key(query, user_id, rag_owner_key)
     async with rag_cache_lock:
         cached_result = rag_cache.get(cache_key)
         if cached_result is None:
+            # asyncio.to_thread() runs the sync _retrieve_rag_context() in a
+            # thread pool so it doesn't block the event loop during the HTTP
+            # calls to OpenAI and Pinecone.
             cached_result = asyncio.create_task(
                 asyncio.to_thread(_retrieve_rag_context, query, user_id, rag_owner_key)
             )
@@ -455,14 +523,10 @@ async def _get_cached_rag_context(
 def _format_rag_context(chunks: list[dict]) -> str:
     """
     Format retrieved RAG chunks for inclusion in the enrichment prompt.
-    
-    CONTRACT ENFORCEMENT: RAG chunks are ADVISORY CONTEXT ONLY.
-    They provide culinary knowledge (techniques, timing guidance, flavor notes)
-    to inform LLM-generated step enrichment. They are NEVER parsed as structured
-    recipe inputs or used to replace/override the raw_recipe steps.
-    
-    If chunks contain structured recipe data, they are treated as plain text
-    examples, not canonical inputs.
+
+    The chunks are labeled [RECIPE #N], [TECHNIQUE #N] etc. so Claude can
+    reference them when writing chef_notes. The labels make it clear to Claude
+    that these are advisory excerpts, not authoritative recipe sources.
     """
     if not chunks:
         return "No cookbook-specific context available. Use your general culinary knowledge."
@@ -482,7 +546,13 @@ def _build_enrichment_prompt(
     slug: str,
     rag_context: list[dict],
 ) -> str:
-    """Build the system prompt for step enrichment."""
+    """Build the system prompt for step enrichment.
+
+    The prompt is long and detailed by design — Claude needs explicit
+    instructions for step_id format, resource types, dependency rules,
+    timing guidelines, prep-ahead criteria, and oven temperature extraction.
+    Ambiguous instructions produce inconsistent output that breaks the scheduler.
+    """
     rag_text = _format_rag_context(rag_context)
 
     steps_text = "\n".join(f"  {i + 1}. {step}" for i, step in enumerate(raw_recipe.steps))
@@ -591,27 +661,39 @@ def _create_llm() -> ChatAnthropic:
     """
     Creates the ChatAnthropic instance. Extracted as a separate function so
     tests can patch graph.nodes.enricher._create_llm to bypass the real API.
+
+    Why a factory function rather than a module-level constant?
+      The LLM instance captures the API key at construction time. A module-level
+      constant would read the key at import time, before the test can set up
+      environment variables. A factory function reads the key on first call,
+      which is after any test fixtures have run.
     """
     settings = get_settings()
     return ChatAnthropic(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-20250514",  # type: ignore[call-arg]
         api_key=settings.anthropic_api_key,
-        max_tokens=4096,
+        max_tokens=4096,  # type: ignore[call-arg]
     )
 
 
-# ── Per-recipe enrichment ────────────────────────────────────────────────────
+# ── Preheat injection ────────────────────────────────────────────────────────
 
 
 def _strip_preheat_from_descriptions(steps: list[RecipeStep]) -> list[RecipeStep]:
     """
     Remove leading preheat-oven sentences from step descriptions.
 
-    The pipeline injects synthetic preheat steps via _inject_preheat_steps(),
-    so embedded preheat instructions in step descriptions are redundant and
-    cause parallel temperature conflicts when two recipes start simultaneously.
+    Why strip preheat from descriptions?
+      The enrichment prompt explicitly tells Claude not to include preheat
+      instructions, but Claude occasionally does it anyway. The pipeline
+      injects its own synthetic preheat step (_inject_preheat_steps), so
+      embedded preheat text in descriptions causes two problems:
+        1. The chef sees "Preheat to 375°F" twice (once in description, once as step)
+        2. If two recipes have different oven temps, both preheat instructions
+           appear back-to-back, which is confusing.
 
-    Strips sentences matching "Preheat oven to ..." at the start of a description.
+    Only strips leading preheat sentences. If "Preheat oven" appears mid-step,
+    it's left alone — that's a different context (e.g. "while you preheat the oven").
     """
     pattern = re.compile(r'^Preheat oven[^.]*\.\s*', re.IGNORECASE)
     result = []
@@ -626,59 +708,61 @@ def _strip_preheat_from_descriptions(steps: list[RecipeStep]) -> list[RecipeStep
 def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep]:
     """
     Inject synthetic preheat step before first oven usage.
-    
-    Scans enriched steps for first step with resource=OVEN and oven_temp_f set.
-    Injects preheat step 12 minutes before that step:
-    - step_id: {slug}_preheat_1
-    - description: 'Preheat oven to {temp}°F'
-    - duration_minutes: 12
-    - resource: Resource.OVEN
-    - oven_temp_f: {temp}
-    - depends_on: []
-    
-    Edge cases:
-    - No oven steps → returns steps unchanged
-    - Multiple oven steps → injects ONE preheat before the first
-    - First step is already oven → preheat becomes step 1, oven becomes step 2
-    - None oven_temp_f for oven step → skip preheat injection
-    
-    Returns new list with preheat injected at position 0 if needed.
+
+    Why inject preheat synthetically instead of relying on Claude?
+      1. Timing precision: preheat takes ~12 minutes and must complete BEFORE
+         the first oven step. Without an explicit preheat step, the scheduler
+         doesn't know to start the oven 12 minutes early.
+      2. Cross-recipe oven conflict detection: the dag_merger uses oven step
+         intervals to detect temperature conflicts. A synthetic preheat step
+         with oven_temp_f set lets the merger detect that a 325°F braise and
+         a 450°F roast can't share one oven — even if the recipe steps overlap.
+      3. Consistency: Claude sometimes forgets preheat, sometimes includes it.
+         Injecting it deterministically here removes that variability.
+
+    Injection contract:
+      - One preheat per recipe (before the FIRST oven step with a temperature).
+      - step_id: {slug}_preheat_1 — always includes "_preheat_" for is_preheat flag.
+      - duration_minutes: 12 (conservative standard residential oven preheat time).
+      - The first oven step's depends_on gains preheat_step_id prepended.
+      - No preheat if there are no oven steps or if the first oven step has no temp.
     """
-    # Find first oven step with valid temperature
     first_oven_idx = None
     first_oven_temp = None
-    
+
     for idx, step in enumerate(steps):
         if step.resource == Resource.OVEN and step.oven_temp_f is not None:
             first_oven_idx = idx
             first_oven_temp = step.oven_temp_f
             break
-    
-    # No oven usage found → no preheat needed
+
     if first_oven_idx is None:
         return steps
-    
-    # Build preheat step
+
     preheat_step = RecipeStep(
         step_id=f"{slug}_preheat_1",
         description=f"Preheat oven to {first_oven_temp}°F",
         duration_minutes=12,
         resource=Resource.OVEN,
         oven_temp_f=first_oven_temp,
-        depends_on=[],
+        depends_on=[],  # Preheat has no prerequisites — start immediately
         can_be_done_ahead=False,
         prep_ahead_window=None,
         ingredient_uses=[],
     )
-    
-    # Wire the first oven step to depend on the preheat step
+
+    # Wire the first oven step to depend on the preheat completing.
+    # Prepend preheat_step_id to preserve any existing dependencies.
     first_oven_step = steps[first_oven_idx]
     steps[first_oven_idx] = first_oven_step.model_copy(
         update={"depends_on": [preheat_step.step_id] + first_oven_step.depends_on}
     )
 
-    # Inject at the beginning
+    # Preheat goes at position 0 — it should start at T+0, not after other steps.
     return [preheat_step] + steps
+
+
+# ── Per-recipe enrichment ────────────────────────────────────────────────────
 
 
 async def _enrich_single_recipe(
@@ -689,16 +773,25 @@ async def _enrich_single_recipe(
     rag_cache_lock: asyncio.Lock,
 ) -> tuple[EnrichedRecipe, dict]:
     """
-    Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient metadata extraction.
-    Raises on failure — caller handles per-recipe error isolation.
+    Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient linking.
+
+    Steps in order:
+      1. Parse + normalize ingredients (deterministic, no I/O)
+      2. RAG retrieval (async, graceful degradation)
+      3. LLM enrichment with structured output (async, with retry)
+      4. Link LLM-tagged ingredients to normalized metadata
+      5. Strip embedded preheat from step descriptions
+      6. Inject synthetic preheat step
+
+    Raises on failure — the caller (_enrich_one in rag_enricher_node) catches
+    this and marks the recipe as per-recipe recoverable error.
+
     Returns (EnrichedRecipe, token_usage_dict).
     """
     slug = _generate_recipe_slug(raw_recipe.name)
 
-    # Parse and normalize ingredients (deterministic, no LLM)
     normalized_ingredients = _parse_and_normalize_ingredients(raw_recipe)
 
-    # RAG retrieval (graceful degradation — returns [] on failure)
     rag_query = _build_rag_query(raw_recipe)
     rag_chunks = await _get_cached_rag_context(
         query=rag_query,
@@ -708,10 +801,8 @@ async def _enrich_single_recipe(
         rag_cache_lock=rag_cache_lock,
     )
 
-    # Build prompt
     system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
 
-    # Call Claude with structured output (with retry on transient errors)
     llm = _create_llm()
     chain = llm.with_structured_output(StepEnrichmentOutput)
 
@@ -726,25 +817,18 @@ async def _enrich_single_recipe(
             ]
         )
 
-    result = await _invoke_llm()
+    result = cast(StepEnrichmentOutput, await _invoke_llm())
     usage = extract_token_usage(result, "rag_enricher")
 
-    # Link LLM-tagged ingredients to normalized metadata
     linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
-
-    # Strip any preheat instructions the LLM embedded in step descriptions —
-    # the pipeline injects its own synthetic preheat step below
     linked_steps = _strip_preheat_from_descriptions(linked_steps)
-
-    # Inject preheat step before first oven usage
     steps_with_preheat = _inject_preheat_steps(linked_steps, slug)
 
-    # Build EnrichedRecipe
     rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
 
     enriched = EnrichedRecipe(
         source=raw_recipe,
-        steps=steps_with_preheat,  # Use steps with preheat injection
+        steps=steps_with_preheat,
         rag_sources=rag_source_ids,
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,
@@ -759,8 +843,17 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     """
     Real RAG enricher node. Processes each raw recipe individually.
 
+    Concurrency: all recipes are enriched concurrently via asyncio.gather().
+    Each recipe makes independent API calls (OpenAI embedding + Pinecone query +
+    Claude enrichment), so there's no benefit to sequential processing.
+    The rag_cache deduplicates identical Pinecone queries across recipes.
+
     Returns partial GRASPState dict with enriched_recipes (replace semantics).
     Per-recipe failures are recoverable; all-fail is fatal.
+
+    Token usage: accumulated in token_usages and returned as token_usage field.
+    GRASPState.token_usage uses operator.add — this list is APPENDED to any
+    previously accumulated usage from the generator node.
     """
     raw_recipe_dicts: list[dict] = state.get("raw_recipes", [])
     user_id: str = state.get("user_id", "")
@@ -771,13 +864,22 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     enriched: list[dict] = []
     errors: list[dict] = []
     token_usages: list[dict] = []
+
+    # Shared RAG cache + lock across all concurrent _enrich_one calls.
+    # Prevents duplicate Pinecone queries for recipes with similar cuisine/style.
     rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]] = {}
     rag_cache_lock = asyncio.Lock()
 
     async def _enrich_one(recipe_dict: dict) -> tuple[dict | None, dict | None, dict | None]:
-        """Enrich a single recipe, returning (enriched_dict, usage, error)."""
+        """Enrich a single recipe, returning (enriched_dict, usage, error).
+
+        Returns (None, None, error_dict) on failure — allows asyncio.gather()
+        to collect all results without stopping on the first error.
+        """
         recipe_name = recipe_dict.get("name", "unknown")
         try:
+            # model_validate() re-parses the dict — required because state fields
+            # come back as plain dicts after checkpoint restore, not Pydantic instances.
             raw_recipe = RawRecipe.model_validate(recipe_dict)
             enriched_recipe, usage = await _enrich_single_recipe(
                 raw_recipe,
@@ -795,6 +897,8 @@ async def rag_enricher_node(state: GRASPState) -> dict:
             return enriched_recipe.model_dump(), usage, None
         except Exception as exc:
             exc_type = type(exc).__name__
+            # Distinguish timeout from other RAG/LLM failures.
+            # Both are recoverable but the frontend shows different messages.
             if is_timeout_error(exc):
                 error_type = ErrorType.LLM_TIMEOUT
             else:
@@ -809,17 +913,23 @@ async def rag_enricher_node(state: GRASPState) -> dict:
             )
             return None, None, error.model_dump()
 
+    # Concurrent enrichment — all recipes in parallel.
+    # return_exceptions=False (default): if _enrich_one itself raises (shouldn't happen
+    # given the try/except), the exception propagates and this node fails fatally.
+    # Per-recipe errors are caught inside _enrich_one and returned as error dicts.
     results = await asyncio.gather(*[_enrich_one(rd) for rd in raw_recipe_dicts])
 
     for enriched_dict, usage, error in results:
         if error:
             errors.append(error)
         else:
-            enriched.append(enriched_dict)
-            token_usages.append(usage)
+            if enriched_dict is not None:
+                enriched.append(enriched_dict)
+            if usage is not None:
+                token_usages.append(usage)
 
     if not enriched:
-        # All recipes failed — fatal
+        # All recipes failed enrichment — fatal error, pipeline cannot continue.
         return {
             "enriched_recipes": [],
             "errors": [

@@ -29,29 +29,49 @@ from app.models.enums import SessionStatus
 class Session(SQLModel, table=True):
     __tablename__ = "sessions"
 
+    # Primary key — also used as the LangGraph thread_id (see celery task).
+    # Using the same UUID as both the DB row PK and the checkpoint thread_id
+    # keeps session identity stable across the two systems with no mapping table.
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+    # Foreign key to user_profiles. All queries scope by user_id first so
+    # a user can never read another user's sessions.
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+
+    # SessionStatus as a DB-level string column (not enum) for portability.
+    # Index for fast status-filter queries (e.g. "show all pending sessions").
+    # Written only by POST /run (→ GENERATING) and finalise_session() (→ terminal).
     status: SessionStatus = Field(default=SessionStatus.PENDING, sa_column=Column(String, nullable=False, index=True))
 
-    # DinnerConcept stored as JSON — pure Pydantic, not a separate table
+    # DinnerConcept stored as JSON — pure Pydantic, not a separate table.
+    # Snapshotted at creation so concept changes in-flight don't corrupt the run.
+    # Validated on read via DinnerConcept.model_validate(session.concept_json).
     concept_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
-    # Populated by finalise_session() on completion
-    schedule_summary: Optional[str] = None  # one-paragraph overview for list view
+    # Denormalized from NaturalLanguageSchedule on completion.
+    # summary: stored for list views — avoids loading the full result_schedule blob.
+    # total_duration_minutes: displayed in session cards without deserializing schedule.
+    # error_summary: single-sentence dropped-recipe explanation for PARTIAL status.
+    schedule_summary: Optional[str] = None
     total_duration_minutes: Optional[int] = None
     error_summary: Optional[str] = None  # populated on PARTIAL outcome
 
-    # Full pipeline results — populated by finalise_session() for fast reads
+    # Full pipeline results persisted by finalise_session() for fast detail reads.
+    # Storing here avoids hitting the LangGraph checkpoint on every GET /sessions/{id}.
+    # Both are JSON-serialized via Pydantic .model_dump(mode="json") for type safety.
     result_recipes: Optional[list] = Field(default=None, sa_column=Column(JSON))
     result_schedule: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
-    # LLM token usage (observability — no enforcement in V1)
+    # Accumulated LLM token counts across all nodes. Observability only — no
+    # enforcement in V1. Shape: {total_input_tokens, total_output_tokens, per_node: [...]}
     token_usage: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
-    # Celery task tracking (for cancellation)
+    # Set by POST /run so the session can be cancelled mid-flight.
+    # Also used to check task health in admin tooling.
     celery_task_id: Optional[str] = None
 
-    # Timing
+    # All timestamps stored as UTC naive datetimes (tzinfo stripped) to avoid
+    # SQLAlchemy timezone-awareness inconsistencies across Postgres driver versions.
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None   # set by POST /run
+    completed_at: Optional[datetime] = None # set by finalise_session()
