@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -124,8 +124,7 @@ describe('NewSessionPage', () => {
 
     renderPage();
 
-    await userEvent.clear(screen.getByLabelText('Dishes'));
-    await userEvent.paste('4');
+    fireEvent.change(screen.getByLabelText('Dishes'), { target: { value: '4' } });
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Around my chicken piccata');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
 
@@ -409,8 +408,7 @@ describe('NewSessionPage', () => {
     renderPage();
 
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A festive brunch');
-    await userEvent.clear(screen.getByLabelText('Guests'));
-    await userEvent.paste('8');
+    fireEvent.change(screen.getByLabelText('Guests'), { target: { value: '8' } });
     await userEvent.selectOptions(screen.getByLabelText('Meal type'), 'lunch');
     await userEvent.type(screen.getByLabelText('Serving time'), '12:30');
 

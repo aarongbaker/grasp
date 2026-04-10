@@ -71,6 +71,8 @@ describe('RecipeLibraryPage', () => {
     expect(screen.getByLabelText('Loading recipe library')).toBeInTheDocument();
 
     expect(await screen.findByRole('heading', { name: 'No saved dishes yet.' })).toBeInTheDocument();
+    expect(screen.getByText(/Private shelf is empty/i)).toBeInTheDocument();
+    expect(screen.getByText(/Start a chef-authored draft, then return here when you want to browse or group it into a cookbook folder\./i)).toBeInTheDocument();
     expect(screen.getByText(/Draft here\. Plan there\./i)).toBeInTheDocument();
     const draftLinks = screen.getAllByRole('link', { name: /Start a Recipe Draft/i });
     expect(draftLinks.some((link) => link.getAttribute('href') === '/recipes/new')).toBe(true);

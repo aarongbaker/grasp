@@ -387,6 +387,7 @@ describe('session presentation', () => {
       sourceLabel: 'Planner cookbook target',
       sourceDetail: 'Built from the dinner planner using one cookbook folder as the planning target.',
     });
+    expect(getSessionConceptDisplay(plannerCookbookTargetSession.concept_json).sourceDetail).not.toMatch(/catalog/i);
   });
 
   it('ignores planner cookbook mode metadata when building shared display copy', () => {
@@ -953,3 +954,4 @@ describe('session presentation', () => {
     expect(screen.getByText('Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
   });
 });
+
