@@ -69,7 +69,7 @@ class CreateUserRequest(BaseModel):
 class UserResponse(BaseModel):
     """Lightweight user response — excludes password_hash."""
 
-    model_config = {"from_attributes": True"}
+    model_config = {"from_attributes": True}
 
     user_id: uuid.UUID
     name: str
