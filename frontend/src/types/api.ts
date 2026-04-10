@@ -15,6 +15,8 @@ export type DinnerConceptSource =
 export type PlannerCookbookPlanningMode = 'strict' | 'cookbook_biased';
 export type PlannerReferenceKind = 'authored' | 'cookbook';
 export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous';
+export type CatalogCookbookAccessState = 'included' | 'preview' | 'locked';
+export type CatalogCookbookAudience = 'included' | 'preview' | 'premium';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -475,6 +477,32 @@ export interface AuthoredRecipeBase {
 export interface RecipeCookbookBase {
   name: string;
   description: string;
+}
+
+export interface CatalogCookbookSummary {
+  catalog_cookbook_id: string;
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  cover_image_url: string | null;
+  recipe_count: number;
+  audience: CatalogCookbookAudience;
+  access_state: CatalogCookbookAccessState;
+  access_state_reason: string;
+}
+
+export interface CatalogCookbookDetail extends CatalogCookbookSummary {
+  description: string;
+  sample_recipe_titles: string[];
+  tags: string[];
+}
+
+export interface CatalogCookbookListResponse {
+  items: CatalogCookbookSummary[];
+}
+
+export interface CatalogCookbookDetailResponse {
+  item: CatalogCookbookDetail;
 }
 
 export interface RecipeCookbookCreateRequest extends RecipeCookbookBase {}

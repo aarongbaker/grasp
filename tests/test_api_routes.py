@@ -47,6 +47,7 @@ def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
     from app.api.routes import sessions as sessions_routes
     from app.api.routes.authored_recipes import router as authored_recipes_router
+    from app.api.routes.catalog import router as catalog_router
     from app.api.routes.health import router as health_router
     from app.api.routes.ingest import router as ingest_router
     from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
@@ -69,6 +70,7 @@ def _create_test_app() -> FastAPI:
     app.include_router(ingest_router, prefix="/api/v1")
     app.include_router(authored_recipes_router, prefix="/api/v1")
     app.include_router(recipe_cookbooks_router, prefix="/api/v1")
+    app.include_router(catalog_router, prefix="/api/v1")
     return app
 
 
@@ -1788,6 +1790,79 @@ async def test_get_recipe_cookbook_requires_ownership(app_with_overrides, mock_d
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Access denied"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Catalog cookbook routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_list_catalog_cookbooks_returns_explicit_catalog_contract(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert list(data.keys()) == ["items"]
+    assert len(data["items"]) == 3
+    assert {item["slug"] for item in data["items"]} == {
+        "weeknight-foundations",
+        "spring-market-preview",
+        "chef-tasting-menus",
+    }
+    assert all("catalog_cookbook_id" in item for item in data["items"])
+    assert all("cookbook_id" not in item for item in data["items"])
+    assert all(item["access_state"] in {"included", "preview", "locked"} for item in data["items"])
+
+
+async def test_list_catalog_cookbooks_derives_locked_and_preview_states(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks")
+
+    assert resp.status_code == 200
+    items_by_slug = {item["slug"]: item for item in resp.json()["items"]}
+    assert items_by_slug["weeknight-foundations"]["access_state"] == "included"
+    assert items_by_slug["spring-market-preview"]["access_state"] == "preview"
+    assert items_by_slug["chef-tasting-menus"]["access_state"] == "locked"
+    assert "Upgrade required" in items_by_slug["chef-tasting-menus"]["access_state_reason"]
+
+
+async def test_get_catalog_cookbook_returns_detail_shape_and_preserves_private_lane_separation(app_with_overrides, mock_db, test_user):
+    private_cookbook = RecipeCookbookRecord(
+        user_id=test_user.user_id,
+        name="Private Cookbook",
+        description="Chef-owned authored recipe container.",
+    )
+    mock_db.seed(RecipeCookbookRecord, private_cookbook.cookbook_id, private_cookbook)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        catalog_resp = await ac.get("/api/v1/catalog/cookbooks/11111111-1111-1111-1111-111111111111")
+        private_resp = await ac.get(f"/api/v1/recipe-cookbooks/{private_cookbook.cookbook_id}")
+
+    assert catalog_resp.status_code == 200
+    catalog_item = catalog_resp.json()["item"]
+    assert catalog_item["catalog_cookbook_id"] == "11111111-1111-1111-1111-111111111111"
+    assert catalog_item["slug"] == "weeknight-foundations"
+    assert catalog_item["access_state"] == "included"
+    assert catalog_item["sample_recipe_titles"] == ["Skillet Chicken Piccata", "Tomato Braised Chickpeas"]
+    assert "cookbook_id" not in catalog_item
+
+    assert private_resp.status_code == 200
+    private_item = private_resp.json()
+    assert private_item["cookbook_id"] == str(private_cookbook.cookbook_id)
+    assert private_item["name"] == "Private Cookbook"
+
+
+async def test_get_catalog_cookbook_returns_404_for_unknown_id(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/catalog/cookbooks/{uuid.uuid4()}")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Catalog cookbook not found"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
