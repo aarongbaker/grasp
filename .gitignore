@@ -54,3 +54,8 @@ tmp/
 
 # ── GSD baseline (auto-generated) ──
 .gsd-id
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
