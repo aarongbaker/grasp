@@ -76,7 +76,7 @@ describe('DashboardPage discoverability', () => {
     cleanup();
   });
 
-  it('shows separate creation paths for dinner planning, private library browsing, and chef-authored drafting', async () => {
+  it('shows separate creation paths for dinner planning, catalog discovery, private library browsing, and chef-authored drafting', async () => {
     renderWithAuth(<DashboardPage />);
 
     expect(screen.getByRole('heading', { name: 'Your Sessions' })).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe('DashboardPage discoverability', () => {
     await waitFor(() => expect(sessionsApi.listSessions).toHaveBeenCalledWith('user-1'));
   });
 
-  it('keeps the sidebar exposing the library and draft entry paths separately', () => {
+  it('keeps the sidebar exposing the catalog, library, and draft entry paths separately', () => {
     renderWithAuth(<Sidebar />, ['/recipes']);
 
     expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/');

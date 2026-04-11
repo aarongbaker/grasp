@@ -1,4 +1,4 @@
-export type PathwayKey = 'generated-planner' | 'recipe-library' | 'authored-workspace';
+export type PathwayKey = 'generated-planner' | 'recipe-library' | 'catalog' | 'authored-workspace';
 
 export type PathwayMeta = {
   key: PathwayKey;
@@ -31,6 +31,16 @@ export const PATHWAYS: readonly PathwayMeta[] = [
     purpose: 'Reopen private authored dishes, group them into cookbook folders, and keep your working repertoire within reach.',
     relationship: 'Use this when you already have dishes. Move from library recipes into a dinner plan when you are ready to schedule service.',
     icon: '\u2630',
+  },
+  {
+    key: 'catalog',
+    to: '/catalog',
+    title: 'Browse Cookbook Catalog',
+    navLabel: 'Cookbook Catalog',
+    cta: 'Open cookbook catalog',
+    purpose: 'Browse the platform cookbook catalog to preview featured collections, included shelves, and locked titles before committing them to dinner planning.',
+    relationship: 'Use this when you want to discover from the platform catalog. Step back into the dinner planner after you have chosen the cookbook lane you want to cook from.',
+    icon: '\u25C8',
   },
   {
     key: 'authored-workspace',

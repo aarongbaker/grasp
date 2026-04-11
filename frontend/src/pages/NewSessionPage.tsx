@@ -82,13 +82,19 @@ export function NewSessionPage() {
   const [loading, setLoading] = useState(false);
 
   const recipeLibrary = pathwayByKey['recipe-library'];
+  const catalogPathway = pathwayByKey.catalog;
   const authoredWorkspace = pathwayByKey['authored-workspace'];
   const crossLinks = useMemo(
     () => [
       {
+        label: catalogPathway.title,
+        to: catalogPathway.to,
+        description: 'Browse the platform catalog when you want preview, included, or locked cookbook access states before choosing what to cook from.',
+      },
+      {
         label: recipeLibrary.title,
         to: recipeLibrary.to,
-        description: 'Reach for the shelf when the dish already exists and you want to reopen or schedule it.',
+        description: 'Reach for the private library when the dish already exists and you want to reopen or schedule your own saved work.',
       },
       {
         label: authoredWorkspace.title,
@@ -96,7 +102,7 @@ export function NewSessionPage() {
         description: 'Use the workspace first when you need to draft the dish itself before it belongs in service planning.',
       },
     ],
-    [authoredWorkspace.title, authoredWorkspace.to, recipeLibrary.title, recipeLibrary.to],
+    [authoredWorkspace.title, authoredWorkspace.to, catalogPathway.title, catalogPathway.to, recipeLibrary.title, recipeLibrary.to],
   );
 
   const plannerAnchorDescription =
@@ -322,7 +328,7 @@ export function NewSessionPage() {
             </h2>
             <p className={styles.guidanceText}>
               Keep this route for menu-intent planning. It stays focused on a single dinner brief and does not switch into
-              cookbook browsing or authored drafting.
+              platform catalog browsing, private-library browsing, or authored drafting.
             </p>
             <div className={styles.guidanceLinks}>
               {crossLinks.map((link) => (

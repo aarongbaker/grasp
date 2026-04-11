@@ -9,6 +9,8 @@ import { SessionDetailPage } from './pages/SessionDetailPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { AuthoredRecipeWorkspacePage } from './pages/AuthoredRecipeWorkspacePage';
 import { RecipeLibraryPage } from './pages/RecipeLibraryPage';
+import { CatalogPage } from './pages/CatalogPage';
+import { CatalogCookbookDetailPage } from './pages/CatalogCookbookDetailPage';
 
 export function App() {
   return (
@@ -20,6 +22,8 @@ export function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/sessions/new" element={<NewSessionPage />} />
         <Route path="/recipes" element={<RecipeLibraryPage />} />
+        <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/catalog/:catalogCookbookId" element={<CatalogCookbookDetailPage />} />
         <Route path="/recipes/new" element={<AuthoredRecipeWorkspacePage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />

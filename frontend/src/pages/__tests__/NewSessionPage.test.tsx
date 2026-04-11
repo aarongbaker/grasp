@@ -99,9 +99,12 @@ describe('NewSessionPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Plan a Dinner' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Start here when service timing leads.' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Browse Cookbook Catalog/i })).toHaveAttribute('href', '/catalog');
     expect(screen.getByRole('link', { name: /Browse Recipe Library/i })).toHaveAttribute('href', '/recipes');
     expect(screen.getByRole('link', { name: /Start a Recipe Draft/i })).toHaveAttribute('href', '/recipes/new');
-    expect(screen.getByLabelText('Planner anchor')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Keep this route for menu-intent planning\. It stays focused on a single dinner brief and does not switch into/i),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('Dishes')).toHaveValue(3);
     expect(
       screen.getByText(/No owned reference is required unless you want the planner anchored/i),

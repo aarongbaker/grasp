@@ -60,7 +60,7 @@ export function DashboardPage() {
             Begin from the right workspace
           </h2>
           <p className={styles.creationRailText}>
-            Keep dinner planning, private recipe browsing, and chef-authored drafting separate so each flow speaks the language of the work.
+            Keep dinner planning, private library browsing, catalog discovery, and chef-authored drafting separate so each flow speaks the language of the work.
           </p>
         </div>
 
