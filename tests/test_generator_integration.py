@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 
+from app.api.routes.catalog import load_catalog_runtime_seed_recipes
 from app.graph.nodes.generator import (
     RecipeGenerationOutput,
     _build_mixed_origin_system_prompt,
@@ -24,12 +25,14 @@ from app.graph.nodes.generator import (
     _build_system_prompt,
     _derive_recipe_count,
     _resolve_recipe_count,
+    build_planner_catalog_cookbook_raw_recipes,
     recipe_generator_node,
 )
 from app.models.enums import ErrorType, MealType, Occasion
 from app.models.pipeline import (
     DinnerConcept,
     GenerationRetryReason,
+    PlannerCatalogCookbookReference,
     PlannerLibraryAuthoredRecipeAnchor,
     PlannerLibraryCookbookPlanningMode,
     PlannerLibraryCookbookTarget,
@@ -405,6 +408,127 @@ def incompatible_candidate_menu() -> RecipeGenerationOutput:
             ),
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_build_planner_catalog_cookbook_raw_recipes_uses_catalog_runtime_seam(dinner_concept):
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_catalog_cookbook",
+        planner_catalog_cookbook=PlannerCatalogCookbookReference(
+            catalog_cookbook_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            slug="weeknight-foundations",
+            title="Weeknight Foundations",
+            access_state="included",
+            access_state_reason="Included with the base catalog",
+        ),
+    )
+
+    recipes = await build_planner_catalog_cookbook_raw_recipes(concept)
+
+    assert [recipe.name for recipe in recipes] == ["Skillet Chicken Piccata", "Tomato Braised Chickpeas"]
+    assert all(recipe.provenance.kind == "library_cookbook" for recipe in recipes)
+    assert all(recipe.provenance.cookbook_id == "11111111-1111-1111-1111-111111111111" for recipe in recipes)
+    assert recipes[0].provenance.source_label == "catalog:weeknight-foundations:Weeknight Foundations"
+    assert recipes[0].course == "entree"
+
+
+@pytest.mark.asyncio
+async def test_generator_node_keeps_planner_catalog_included_mode_seed_only(dinner_concept):
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_catalog_cookbook",
+        planner_catalog_cookbook=PlannerCatalogCookbookReference(
+            catalog_cookbook_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            slug="weeknight-foundations",
+            title="Weeknight Foundations",
+            access_state="included",
+            access_state_reason="Included with the base catalog",
+        ),
+    )
+    state = {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    with patch("app.graph.nodes.generator._generate_ranked_recipe_candidates", AsyncMock()) as ranked_mock:
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Skillet Chicken Piccata",
+        "Tomato Braised Chickpeas",
+    ]
+    assert [recipe["provenance"]["source_label"] for recipe in result["raw_recipes"]] == [
+        "catalog:weeknight-foundations:Weeknight Foundations",
+        "catalog:weeknight-foundations:Weeknight Foundations",
+    ]
+    assert [recipe["provenance"]["cookbook_id"] for recipe in result["raw_recipes"]] == [
+        "11111111-1111-1111-1111-111111111111",
+        "11111111-1111-1111-1111-111111111111",
+    ]
+    ranked_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generator_node_uses_catalog_preview_anchor_for_complements(
+    dinner_concept,
+    compatible_candidate_menu,
+    incompatible_candidate_menu,
+):
+    concept = DinnerConcept(
+        free_text=dinner_concept.free_text,
+        guest_count=dinner_concept.guest_count,
+        meal_type=dinner_concept.meal_type,
+        occasion=dinner_concept.occasion,
+        dietary_restrictions=dinner_concept.dietary_restrictions,
+        concept_source="planner_catalog_cookbook",
+        planner_catalog_cookbook=PlannerCatalogCookbookReference(
+            catalog_cookbook_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            slug="spring-market-preview",
+            title="Spring Market Preview",
+            access_state="preview",
+            access_state_reason="Preview access enabled for this chef",
+        ),
+    )
+    state = {
+        "concept": concept.model_dump(mode="json"),
+        "kitchen_config": {"max_burners": 4, "max_oven_racks": 2, "has_second_oven": False},
+        "equipment": [],
+        "errors": [],
+    }
+
+    with patch(
+        "app.graph.nodes.generator._generate_ranked_recipe_candidates",
+        AsyncMock(return_value=(compatible_candidate_menu, [{"total_tokens": 30}], {})),
+    ) as ranked_mock:
+        result = await recipe_generator_node(state)
+
+    assert [recipe["name"] for recipe in result["raw_recipes"]] == [
+        "Peas with Mint Butter",
+        "Roast Chicken",
+        "Apple Tart",
+        "Frisee Salad",
+    ]
+    assert result["raw_recipes"][0]["provenance"] == {
+        "kind": "library_cookbook",
+        "source_label": "catalog:spring-market-preview:Spring Market Preview",
+        "recipe_id": None,
+        "cookbook_id": "22222222-2222-2222-2222-222222222222",
+    }
+    assert all(recipe["provenance"]["kind"] == "generated" for recipe in result["raw_recipes"][1:])
+    kwargs = ranked_mock.await_args.kwargs
+    assert kwargs["anchor_recipes"][0].name == "Peas with Mint Butter"
+    assert result["token_usage"] == [{"total_tokens": 30}]
 
 
 @pytest.mark.asyncio

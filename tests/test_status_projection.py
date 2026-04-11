@@ -608,6 +608,47 @@ async def test_planner_cookbook_target_raw_recipes_still_project_enriching_witho
 
 
 @pytest.mark.asyncio
+async def test_planner_catalog_cookbook_raw_recipes_still_project_enriching_without_private_runtime_fields():
+    """Catalog-seeded planner runs should project ENRICHING from raw_recipes alone."""
+    catalog_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    graph = _make_mock_graph(
+        {
+            "concept": {
+                "free_text": "Plan within the platform catalog lane.",
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+                "concept_source": "planner_catalog_cookbook",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": str(catalog_id),
+                    "slug": "weeknight-foundations",
+                    "title": "Weeknight Foundations",
+                    "access_state": "included",
+                    "access_state_reason": "Included with the base catalog",
+                },
+            },
+            "raw_recipes": [
+                {
+                    "name": "Skillet Chicken Piccata",
+                    "steps": ["Prep", "Sear", "Finish"],
+                    "provenance": {
+                        "kind": "library_cookbook",
+                        "source_label": "catalog:weeknight-foundations:Weeknight Foundations",
+                        "recipe_id": None,
+                        "cookbook_id": str(catalog_id),
+                    },
+                }
+            ],
+        }
+    )
+
+    status = await status_projection(uuid.uuid4(), graph)
+
+    assert status == SessionStatus.ENRICHING
+
+
+@pytest.mark.asyncio
 async def test_retry_generation_checkpoint_projects_generating_without_direct_in_progress_status_writes():
     graph = _make_mock_graph(
         {

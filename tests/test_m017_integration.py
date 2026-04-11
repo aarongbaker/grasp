@@ -8,10 +8,12 @@ from httpx import ASGITransport, AsyncClient
 from app.api.routes.sessions import router as sessions_router
 from app.core.auth import get_current_user
 from app.db.session import get_session
+from app.api.routes.catalog import load_catalog_runtime_seed_recipes
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
     DinnerConcept,
+    PlannerCatalogCookbookReference,
     PlannerLibraryAuthoredRecipeAnchor,
     PlannerLibraryCookbookPlanningMode,
     PlannerLibraryCookbookTarget,
@@ -249,6 +251,101 @@ async def test_planner_authored_anchor_session_persists_mixed_origin_results(
         for recipe in results_payload["recipes"][1:]
     )
     assert results_payload["recipes"][0]["source"]["source"]["provenance"]["recipe_id"] == str(anchor_record.recipe_id)
+
+
+@pytest.mark.asyncio
+async def test_planner_catalog_cookbook_session_persists_catalog_seeded_results_without_private_cookbook_semantics(
+    compiled_graph,
+    unique_session_id,
+    test_db_session,
+    test_user_id,
+):
+    from app.core.status import finalise_session
+
+    user = await test_db_session.get(UserProfile, test_user_id)
+    assert user is not None
+
+    concept = DinnerConcept(
+        free_text="Plan dinner from the platform catalog foundations lane.",
+        guest_count=4,
+        meal_type=MealType.DINNER,
+        occasion=Occasion.CASUAL,
+        dietary_restrictions=[],
+        concept_source="planner_catalog_cookbook",
+        planner_catalog_cookbook=PlannerCatalogCookbookReference(
+            catalog_cookbook_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            slug="weeknight-foundations",
+            title="Weeknight Foundations",
+            access_state="included",
+            access_state_reason="Included with the base catalog",
+        ),
+    )
+
+    session_row = Session(
+        session_id=unique_session_id,
+        user_id=test_user_id,
+        status=SessionStatus.GENERATING,
+        concept_json=concept.model_dump(mode="json"),
+    )
+    test_db_session.add(session_row)
+    await test_db_session.commit()
+
+    final_state = await _run_persisted_session(
+        compiled_graph=compiled_graph,
+        test_db_session=test_db_session,
+        session_row=session_row,
+        user=user,
+    )
+
+    assert final_state["schedule"] is not None
+    assert final_state["errors"] == []
+    assert len(final_state["raw_recipes"]) == 2
+    assert [recipe["name"] for recipe in final_state["raw_recipes"]] == [
+        "Skillet Chicken Piccata",
+        "Tomato Braised Chickpeas",
+    ]
+    assert [recipe["provenance"]["kind"] for recipe in final_state["raw_recipes"]] == [
+        "library_cookbook",
+        "library_cookbook",
+    ]
+    assert all(
+        recipe["provenance"]["source_label"] == "catalog:weeknight-foundations:Weeknight Foundations"
+        for recipe in final_state["raw_recipes"]
+    )
+    assert all(recipe["provenance"]["cookbook_id"] == "11111111-1111-1111-1111-111111111111" for recipe in final_state["raw_recipes"])
+
+    await finalise_session(unique_session_id, final_state, test_db_session)
+
+    refreshed = await test_db_session.get(Session, unique_session_id)
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.COMPLETE
+    assert refreshed.result_schedule is not None
+    assert refreshed.result_recipes is not None
+
+    persisted_provenance = [recipe["source"]["source"]["provenance"] for recipe in refreshed.result_recipes]
+    assert [item["kind"] for item in persisted_provenance] == ["library_cookbook", "library_cookbook"]
+    assert all(item["recipe_id"] is None for item in persisted_provenance)
+    assert all(item["cookbook_id"] == "11111111-1111-1111-1111-111111111111" for item in persisted_provenance)
+    assert all(
+        item["source_label"] == "catalog:weeknight-foundations:Weeknight Foundations"
+        for item in persisted_provenance
+    )
+
+    results_payload = await _get_results_payload(
+        db_session=test_db_session,
+        current_user=user,
+        session_id=unique_session_id,
+    )
+    assert results_payload["errors"] == []
+    assert [recipe["source"]["source"]["provenance"]["kind"] for recipe in results_payload["recipes"]] == [
+        "library_cookbook",
+        "library_cookbook",
+    ]
+    assert all(
+        recipe["source"]["source"]["provenance"]["source_label"]
+        == "catalog:weeknight-foundations:Weeknight Foundations"
+        for recipe in results_payload["recipes"]
+    )
 
 
 @pytest.mark.asyncio

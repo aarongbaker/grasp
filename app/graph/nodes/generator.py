@@ -41,6 +41,7 @@ from sqlalchemy import asc, desc
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import select
 
+from app.api.routes.catalog import load_catalog_runtime_seed_recipes
 from app.core.llm import extract_token_usage, is_timeout_error, llm_retry
 from app.core.settings import get_settings
 from app.models.authored_recipe import AuthoredRecipeCreate, AuthoredRecipeRecord
@@ -962,6 +963,23 @@ async def build_planner_cookbook_target_raw_recipes(concept: DinnerConcept) -> l
     return compiled_recipes
 
 
+async def build_planner_catalog_cookbook_raw_recipes(concept: DinnerConcept) -> list[RawRecipe]:
+    # Planner-catalog-cookbook: loads deterministic platform-managed runtime
+    # seed recipes from the catalog seam. This stays explicitly separate from
+    # planner_cookbook_target so platform inventory never reuses private cookbook
+    # tables or authored-recipe compilation semantics.
+    if concept.concept_source != "planner_catalog_cookbook":
+        return []
+
+    catalog_reference = concept.planner_catalog_cookbook
+    if catalog_reference is None:
+        raise ValueError(
+            "planner_catalog_cookbook is required when concept_source is 'planner_catalog_cookbook'"
+        )
+
+    return load_catalog_runtime_seed_recipes(catalog_reference.catalog_cookbook_id)
+
+
 # ── LLM factory (mockable seam) ─────────────────────────────────────────────
 
 
@@ -1341,7 +1359,77 @@ async def recipe_generator_node(state: GRASPState) -> dict:
                 "token_usage": usages,
             }
 
-        # ── Path 5: free_text / default LLM generation path ─────────────────
+        # ── Path 5: planner_catalog_cookbook concept_source ────────────────
+        # Platform-catalog path: seed deterministic runtime recipes from the
+        # catalog seam. Included catalog selections execute seed-only; preview
+        # selections expose the same seed payloads but allow complementary LLM
+        # generation so the runtime path stays meaningful without pretending the
+        # preview inventory is a complete private cookbook.
+        if concept.concept_source == "planner_catalog_cookbook":
+            catalog_reference = concept.planner_catalog_cookbook
+            catalog_seed_recipes = await build_planner_catalog_cookbook_raw_recipes(concept)
+            if catalog_seed_recipes and catalog_seed_recipes[0].course is None:
+                catalog_seed_recipes[0] = catalog_seed_recipes[0].model_copy(update={"course": "entree"})
+
+            access_state = catalog_reference.access_state if catalog_reference is not None else "included"
+            if access_state == "included":
+                seeded_recipes = catalog_seed_recipes[:recipe_count]
+                logger.info(
+                    "Seeded %d planner catalog recipes from %r in included mode",
+                    len(seeded_recipes),
+                    catalog_reference.slug if catalog_reference else "unknown catalog cookbook",
+                )
+                return {
+                    "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
+                }
+
+            seeded_recipes = catalog_seed_recipes[:1]
+            anchor_recipe = seeded_recipes[0]
+            complement_count = max(0, recipe_count - len(seeded_recipes))
+            if complement_count == 0:
+                logger.info(
+                    "Seeded planner catalog preview anchor %r from %r with no complementary generation required",
+                    anchor_recipe.name,
+                    catalog_reference.slug if catalog_reference else "unknown catalog cookbook",
+                )
+                return {
+                    "raw_recipes": [recipe.model_dump(mode="json") for recipe in seeded_recipes],
+                }
+
+            system_prompt = _build_mixed_origin_system_prompt(
+                concept=concept,
+                kitchen_config=kitchen_config,
+                equipment=equipment,
+                anchor_recipe=anchor_recipe,
+                complement_count=complement_count,
+            )
+            human_prompt = _build_mixed_origin_human_prompt(complement_count, anchor_recipe)
+
+            logger.info(
+                "Seeded planner catalog preview anchor %r from %r and generating %d complementary candidates",
+                anchor_recipe.name,
+                catalog_reference.slug if catalog_reference else "unknown catalog cookbook",
+                complement_count,
+            )
+            result, usages, _score_details = await _generate_ranked_recipe_candidates(
+                system_prompt=system_prompt,
+                human_prompt=human_prompt,
+                kitchen_config=kitchen_config,
+                anchor_recipes=seeded_recipes,
+            )
+            all_recipes = [*seeded_recipes, *result.recipes]
+            logger.info(
+                "Seeded planner catalog cookbook %r and selected %d complementary recipes: %s",
+                catalog_reference.slug if catalog_reference else "unknown catalog cookbook",
+                len(result.recipes),
+                [r.name for r in result.recipes],
+            )
+            return {
+                "raw_recipes": [recipe.model_dump(mode="json") for recipe in all_recipes],
+                "token_usage": usages,
+            }
+
+        # ── Path 6: free_text / default LLM generation path ─────────────────
         # All other concept_source values (free_text, None, etc.) fall through
         # to here — Claude generates all recipes from scratch.
 
