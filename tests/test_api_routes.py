@@ -864,6 +864,162 @@ async def test_create_session_with_authored_recipe_201(app_with_overrides, mock_
     assert "nut-free" in concept["dietary_restrictions"]
 
 
+async def test_create_session_with_planner_catalog_cookbook_included_201(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from the platform catalog foundations lane.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": "11111111-1111-1111-1111-111111111111",
+                    "slug": "client-supplied-slug-should-be-ignored",
+                    "title": "Client supplied title should be ignored",
+                    "access_state": "locked",
+                    "access_state_reason": "Client supplied reason should be ignored",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    concept = data["concept_json"]
+    assert concept["concept_source"] == "planner_catalog_cookbook"
+    assert concept["planner_cookbook_target"] is None
+    assert concept["planner_catalog_cookbook"] == {
+        "catalog_cookbook_id": "11111111-1111-1111-1111-111111111111",
+        "slug": "weeknight-foundations",
+        "title": "Weeknight Foundations",
+        "access_state": "included",
+        "access_state_reason": "Included with the base catalog",
+    }
+
+
+async def test_create_session_with_planner_catalog_cookbook_preview_201(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from the preview catalog lane.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": "22222222-2222-2222-2222-222222222222",
+                    "slug": "stale-preview-slug",
+                    "title": "Stale preview title",
+                    "access_state": "included",
+                    "access_state_reason": "Stale access state",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 201
+    concept = resp.json()["concept_json"]
+    assert concept["planner_catalog_cookbook"] == {
+        "catalog_cookbook_id": "22222222-2222-2222-2222-222222222222",
+        "slug": "spring-market-preview",
+        "title": "Spring Market Preview",
+        "access_state": "preview",
+        "access_state_reason": "Preview access enabled for this chef",
+    }
+
+
+async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(app_with_overrides, test_user):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from the premium catalog lane.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": "33333333-3333-3333-3333-333333333333",
+                    "slug": "chef-tasting-menus",
+                    "title": "Chef Tasting Menus",
+                    "access_state": "included",
+                    "access_state_reason": "Client state should not matter",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Upgrade required for this catalog cookbook"
+
+
+async def test_create_session_with_planner_catalog_cookbook_unknown_returns_404(app_with_overrides, test_user):
+    unknown_id = str(uuid.uuid4())
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from an unknown catalog cookbook.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": unknown_id,
+                    "slug": "unknown",
+                    "title": "Unknown",
+                    "access_state": "included",
+                    "access_state_reason": "Unknown",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Catalog cookbook not found"
+
+
+async def test_create_session_rejects_mixed_planner_catalog_shape(app_with_overrides):
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from the catalog lane.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": "11111111-1111-1111-1111-111111111111",
+                    "slug": "weeknight-foundations",
+                    "title": "Weeknight Foundations",
+                    "access_state": "included",
+                    "access_state_reason": "Included with the base catalog",
+                },
+                "planner_cookbook_target": {
+                    "cookbook_id": str(uuid.uuid4()),
+                    "name": "Should not coexist",
+                    "mode": "strict",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "casual",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 422
+    data = resp.json()
+    assert isinstance(data["detail"], list)
+    assert any("planner_cookbook_target" in issue["loc"] for issue in data["detail"])
+
+
 async def test_create_session_with_planner_authored_anchor_201(app_with_overrides, mock_db, test_user):
     authored_recipe = AuthoredRecipeRecord(
         user_id=test_user.user_id,

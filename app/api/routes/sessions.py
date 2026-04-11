@@ -34,12 +34,14 @@ from sqlmodel import select
 from app.core.deps import CurrentUser, DBSession
 from app.core.rate_limit import create_session_limit, user_identity_or_ip_key
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
+from app.models.catalog import CatalogCookbookAccessState
 from app.models.enums import MealType, Occasion, SessionStatus
 from app.models.pipeline import (
     CreateSessionAuthoredRequest,
     CreateSessionCookbookRequest,
     CreateSessionLegacyRequest,
     CreateSessionPlannerAuthoredAnchorRequest,
+    CreateSessionPlannerCatalogCookbookRequest,
     CreateSessionPlannerCookbookTargetRequest,
     CreateSessionRequest,
     DinnerConcept,
@@ -54,6 +56,7 @@ from app.models.pipeline import (
 from app.models.recipe import ValidatedRecipe
 from app.models.session import Session
 from app.models.scheduling import NaturalLanguageSchedule
+from app.api.routes.catalog import resolve_catalog_cookbook_access
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
@@ -214,6 +217,37 @@ async def _resolve_planner_cookbook_target(
     }
 
 
+async def _resolve_planner_catalog_cookbook(
+    *,
+    body: CreateSessionPlannerCatalogCookbookRequest,
+    current_user: CurrentUser,
+) -> dict:
+    """Resolve one catalog cookbook through the backend entitlement seam.
+
+    Persist canonical catalog metadata from the backend fixture seam rather than
+    trusting client-supplied title/access fields. Preview and included catalog
+    cookbooks are both planner-selectable; locked catalog items fail explicitly.
+    """
+    catalog_summary = resolve_catalog_cookbook_access(
+        body.planner_catalog_cookbook.catalog_cookbook_id,
+        current_user,
+    )
+    if catalog_summary.access_state == CatalogCookbookAccessState.LOCKED:
+        raise HTTPException(status_code=403, detail=catalog_summary.access_state_reason)
+
+    return {
+        "concept_source": "planner_catalog_cookbook",
+        "free_text": body.free_text,
+        "planner_catalog_cookbook": {
+            "catalog_cookbook_id": str(catalog_summary.catalog_cookbook_id),
+            "slug": catalog_summary.slug,
+            "title": catalog_summary.title,
+            "access_state": catalog_summary.access_state.value,
+            "access_state_reason": catalog_summary.access_state_reason,
+        },
+    }
+
+
 @router.post("/planner/resolve", response_model=PlannerReferenceResolutionResponse)
 @limiter.limit("30/minute")
 async def resolve_planner_reference(
@@ -275,6 +309,8 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
         concept_fields.update(await _resolve_planner_authored_anchor(body=body, db=db, current_user=current_user))
     elif isinstance(body, CreateSessionPlannerCookbookTargetRequest):
         concept_fields.update(await _resolve_planner_cookbook_target(body=body, db=db, current_user=current_user))
+    elif isinstance(body, CreateSessionPlannerCatalogCookbookRequest):
+        concept_fields.update(await _resolve_planner_catalog_cookbook(body=body, current_user=current_user))
     elif isinstance(body, CreateSessionCookbookRequest):
         # Cookbook mode: selected_recipes will be resolved by the generator node
         # at pipeline start. For now, store chunk_ids in the concept.

@@ -336,6 +336,78 @@ def test_build_session_initial_state_rejects_planner_authored_anchor_when_mixed_
         )
 
 
+def test_build_session_initial_state_preserves_planner_catalog_cookbook():
+    catalog_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    concept_payload = {
+        "free_text": "Plan within the platform catalog lane.",
+        "guest_count": 4,
+        "meal_type": "dinner",
+        "occasion": "dinner_party",
+        "dietary_restrictions": [],
+        "concept_source": "planner_catalog_cookbook",
+        "planner_catalog_cookbook": {
+            "catalog_cookbook_id": str(catalog_id),
+            "slug": "weeknight-foundations",
+            "title": "Weeknight Foundations",
+            "access_state": "included",
+            "access_state_reason": "Included with the base catalog",
+        },
+    }
+
+    concept, state = build_session_initial_state(
+        concept_payload=concept_payload,
+        user_id="user-123",
+        rag_owner_key="owner-123",
+        kitchen_config={"max_burners": 4},
+        equipment=[{"name": "Dutch oven"}],
+    )
+
+    assert concept.concept_source == "planner_catalog_cookbook"
+    assert state["concept"]["planner_cookbook_target"] is None
+    assert state["concept"]["planner_catalog_cookbook"] == {
+        "catalog_cookbook_id": str(catalog_id),
+        "slug": "weeknight-foundations",
+        "title": "Weeknight Foundations",
+        "access_state": "included",
+        "access_state_reason": "Included with the base catalog",
+    }
+    assert state["raw_recipes"] == []
+    assert state["errors"] == []
+
+
+def test_build_session_initial_state_rejects_planner_catalog_cookbook_when_mixed_with_private_cookbook_shape():
+    concept_payload = {
+        "free_text": "Plan within the platform catalog lane.",
+        "guest_count": 4,
+        "meal_type": "dinner",
+        "occasion": "dinner_party",
+        "dietary_restrictions": [],
+        "concept_source": "planner_catalog_cookbook",
+        "planner_catalog_cookbook": {
+            "catalog_cookbook_id": "11111111-1111-1111-1111-111111111111",
+            "slug": "weeknight-foundations",
+            "title": "Weeknight Foundations",
+            "access_state": "included",
+            "access_state_reason": "Included with the base catalog",
+        },
+        "planner_cookbook_target": {
+            "cookbook_id": str(uuid.uuid4()),
+            "name": "Should not coexist",
+            "description": "Private container",
+            "mode": "strict",
+        },
+    }
+
+    with pytest.raises(Exception, match="planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"):
+        build_session_initial_state(
+            concept_payload=concept_payload,
+            user_id="user-123",
+            rag_owner_key="owner-123",
+            kitchen_config={},
+            equipment=[],
+        )
+
+
 def test_build_initial_pipeline_state_preserves_cookbook_concept_without_status_fields():
     concept = DinnerConcept(
         free_text="Cookbook-selected recipes: Roast chicken.",

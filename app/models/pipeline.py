@@ -100,6 +100,23 @@ class PlannerLibraryCookbookTarget(BaseModel):
     mode: PlannerLibraryCookbookPlanningMode
 
 
+class PlannerCatalogCookbookReference(BaseModel):
+    """Planner-lane reference to one platform-managed catalog cookbook.
+
+    This is intentionally separate from planner_cookbook_target, which is reserved
+    for private chef-owned RecipeCookbookRecord containers. Sessions persist the
+    canonical catalog summary plus derived access state from the backend fixture seam.
+    """
+
+    catalog_cookbook_id: uuid.UUID
+    slug: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    access_state: Literal["included", "preview", "locked"]
+    access_state_reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)
+    ]
+
+
 class PlannerReferenceKind(str, Enum):
     AUTHORED = "authored"
     COOKBOOK = "cookbook"
@@ -139,9 +156,6 @@ class PlannerCookbookResolutionMatch(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
 
 
-# Discriminated union — FastAPI/Pydantic selects the correct match type from
-# the `kind` field. Discriminators avoid ambiguous deserialization errors when
-# both shapes have similar fields.
 PlannerResolutionMatch = Annotated[
     PlannerAuthoredResolutionMatch | PlannerCookbookResolutionMatch,
     Field(discriminator="kind"),
@@ -162,11 +176,12 @@ class DinnerConcept(BaseModel):
     never ambiguous. guest_count bounded [1, 100].
 
     concept_source determines which code path the generator node uses:
-      "free_text"             → LLM generates all recipes from scratch
-      "cookbook"              → generator seeds from selected_recipes deterministically
-      "authored"              → generator compiles authored_payload into pipeline format
+      "free_text"               → LLM generates all recipes from scratch
+      "cookbook"                → generator seeds from selected_recipes deterministically
+      "authored"                → generator compiles authored_payload into pipeline format
       "planner_authored_anchor" → authored recipe is one dish; LLM fills the rest
-      "planner_cookbook_target" → cookbook provides pool; LLM selects/fills gaps
+      "planner_cookbook_target" → private cookbook provides pool; LLM selects/fills gaps
+      "planner_catalog_cookbook" → platform catalog cookbook selected through backend entitlement seam
 
     The validate_source_contract validator enforces that exactly the right
     optional fields are present for each concept_source. This prevents silent
@@ -182,12 +197,18 @@ class DinnerConcept(BaseModel):
     dietary_restrictions: list[str] = []
     serving_time: Optional[str] = None  # "HH:MM" 24-hour format, e.g. "19:00"
     concept_source: Literal[
-        "free_text", "cookbook", "authored", "planner_authored_anchor", "planner_cookbook_target"
+        "free_text",
+        "cookbook",
+        "authored",
+        "planner_authored_anchor",
+        "planner_cookbook_target",
+        "planner_catalog_cookbook",
     ] = "free_text"
     selected_recipes: list[SelectedCookbookRecipe] = []
     selected_authored_recipe: Optional[SelectedAuthoredRecipe] = None
     planner_authored_recipe_anchor: Optional[PlannerLibraryAuthoredRecipeAnchor] = None
     planner_cookbook_target: Optional[PlannerLibraryCookbookTarget] = None
+    planner_catalog_cookbook: Optional[PlannerCatalogCookbookReference] = None
 
     @field_validator("serving_time")
     @classmethod
@@ -200,18 +221,12 @@ class DinnerConcept(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_contract(self) -> "DinnerConcept":
-        """Enforce that each concept_source has exactly its required optional fields.
-
-        This runs AFTER all field-level validators, so all fields are fully typed.
-        The nested if/elif chain checks each source's required and forbidden fields.
-        Without this check, the generator node would receive ambiguous state
-        (e.g. both selected_recipes and planner_cookbook_target populated) and
-        have to guess which one to use — defensive validation is better.
-        """
+        """Enforce that each concept_source has exactly its required optional fields."""
         has_selected_recipes = bool(self.selected_recipes)
         has_selected_authored_recipe = self.selected_authored_recipe is not None
         has_planner_authored_anchor = self.planner_authored_recipe_anchor is not None
         has_planner_cookbook_target = self.planner_cookbook_target is not None
+        has_planner_catalog_cookbook = self.planner_catalog_cookbook is not None
 
         if self.concept_source == "cookbook":
             if not has_selected_recipes:
@@ -228,6 +243,10 @@ class DinnerConcept(BaseModel):
                 raise ValueError(
                     "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
                 )
+            if has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is only allowed when concept_source is 'planner_catalog_cookbook'"
+                )
         elif self.concept_source == "authored":
             if has_selected_recipes:
                 raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
@@ -242,6 +261,10 @@ class DinnerConcept(BaseModel):
             if has_planner_cookbook_target:
                 raise ValueError(
                     "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
+                )
+            if has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is only allowed when concept_source is 'planner_catalog_cookbook'"
                 )
         elif self.concept_source == "planner_authored_anchor":
             if has_selected_recipes:
@@ -258,6 +281,10 @@ class DinnerConcept(BaseModel):
                 raise ValueError(
                     "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
                 )
+            if has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is only allowed when concept_source is 'planner_catalog_cookbook'"
+                )
         elif self.concept_source == "planner_cookbook_target":
             if has_selected_recipes:
                 raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
@@ -273,8 +300,11 @@ class DinnerConcept(BaseModel):
                 raise ValueError(
                     "planner_cookbook_target is required when concept_source is 'planner_cookbook_target'"
                 )
-        else:
-            # free_text — no optional reference fields allowed
+            if has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is only allowed when concept_source is 'planner_catalog_cookbook'"
+                )
+        elif self.concept_source == "planner_catalog_cookbook":
             if has_selected_recipes:
                 raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
             if has_selected_authored_recipe:
@@ -289,19 +319,30 @@ class DinnerConcept(BaseModel):
                 raise ValueError(
                     "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
                 )
+            if not has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is required when concept_source is 'planner_catalog_cookbook'"
+                )
+        else:
+            if has_selected_recipes:
+                raise ValueError("selected_recipes is only allowed when concept_source is 'cookbook'")
+            if has_selected_authored_recipe:
+                raise ValueError(
+                    "selected_authored_recipe is only allowed when concept_source is 'authored'"
+                )
+            if has_planner_authored_anchor:
+                raise ValueError(
+                    "planner_authored_recipe_anchor is only allowed when concept_source is 'planner_authored_anchor'"
+                )
+            if has_planner_cookbook_target:
+                raise ValueError(
+                    "planner_cookbook_target is only allowed when concept_source is 'planner_cookbook_target'"
+                )
+            if has_planner_catalog_cookbook:
+                raise ValueError(
+                    "planner_catalog_cookbook is only allowed when concept_source is 'planner_catalog_cookbook'"
+                )
         return self
-
-
-# ── Session Creation Request Models ──────────────────────────────────────────
-# Each CreateSession*Request variant corresponds to one concept_source.
-# They are separate models (not a single polymorphic model) because each has
-# a different set of required fields — a unified model would make too many
-# fields optional and rely on runtime validation to catch misconfiguration.
-#
-# The CreateSessionRequest union is the FastAPI body type. FastAPI tries each
-# variant in order and uses the first one that validates. discriminator=None
-# means no Literal field is used for routing — FastAPI tries sequentially.
-# This is safe because each variant has a different Literal concept_source field.
 
 
 class CreateSessionLegacyRequest(BaseModel):
@@ -320,8 +361,6 @@ class CreateSessionLegacyRequest(BaseModel):
 
 
 class CreateSessionAuthoredSelection(BaseModel):
-    """Inlined authored recipe reference for the authored session creation endpoint."""
-
     model_config = {"extra": "forbid"}
 
     recipe_id: uuid.UUID
@@ -329,18 +368,10 @@ class CreateSessionAuthoredSelection(BaseModel):
 
 
 class CreateSessionCookbookSelection(BaseModel):
-    """Inlined chunk reference for cookbook-mode session creation.
-
-    Only chunk_id is required at request time — full chunk metadata is resolved
-    from the database before being embedded into the DinnerConcept snapshot.
-    """
-
     chunk_id: uuid.UUID
 
 
 class CreateSessionPlannerAuthoredAnchor(BaseModel):
-    """Inlined authored recipe anchor for planner_authored_anchor sessions."""
-
     model_config = {"extra": "forbid"}
 
     recipe_id: uuid.UUID
@@ -348,19 +379,6 @@ class CreateSessionPlannerAuthoredAnchor(BaseModel):
 
 
 class GenerationRetryReason(BaseModel):
-    """Normalized retry context stored in checkpoint state.
-
-    Single-oven auto-repair is intentionally narrow: only typed dag_merger
-    `RESOURCE_CONFLICT` failures with one-oven `irreconcilable` metadata are
-    retryable. Within-tolerance overlap stays compatible, and second-oven
-    kitchens remain outside this retry seam.
-
-    This model is stored in GRASPState.generation_retry_reason and passed to
-    the generator's retry prompt via _build_retry_system_prompt(). The fields
-    here are the minimum information the generator needs to understand WHY
-    its previous attempt failed and HOW to fix it.
-    """
-
     node_name: str
     error_type: ErrorType
     summary: OneOvenConflictSummary
@@ -369,20 +387,6 @@ class GenerationRetryReason(BaseModel):
 
 
 class GenerationRetryEligibility(BaseModel):
-    """Typed router-facing view of whether dag_merger can trigger auto-repair.
-
-    This model keeps retry-routing policy in checkpoint-local state instead of
-    implicit conditionals. The one-oven contract is stable and explicit:
-    when `has_second_oven` is false, overlapping oven work is only considered
-    retryable when the scheduler classified it as `irreconcilable`, meaning the
-    required temperatures exceed the configured tolerance and cannot be repaired
-    by simple resequencing inside a single oven.
-
-    `exhausted` is distinct from `eligible=False` — exhausted means we TRIED
-    the retry path but ran out of attempts. eligible=False means we never
-    entered the retry path (compatible conflict or second oven available).
-    """
-
     eligible: bool = False
     exhausted: bool = False
     current_attempt: int = Field(ge=1, default=1)
@@ -391,14 +395,6 @@ class GenerationRetryEligibility(BaseModel):
 
 
 class GenerationAttemptRecord(BaseModel):
-    """Lightweight checkpoint-visible record of generation attempts.
-
-    Appended to GRASPState.generation_history after each generator run.
-    Used for observability — operators can inspect the checkpoint to see
-    how many attempts were made and what recipes were generated each time.
-    Not used by routing logic (that reads generation_attempt directly).
-    """
-
     attempt: int = Field(ge=1)
     trigger: Literal["initial", "auto_repair"] = "initial"
     recipe_names: list[str] = []
@@ -406,8 +402,6 @@ class GenerationAttemptRecord(BaseModel):
 
 
 class CreateSessionPlannerCookbookTarget(BaseModel):
-    """Inlined cookbook target reference for planner_cookbook_target sessions."""
-
     model_config = {"extra": "forbid"}
 
     cookbook_id: uuid.UUID
@@ -415,9 +409,19 @@ class CreateSessionPlannerCookbookTarget(BaseModel):
     mode: PlannerLibraryCookbookPlanningMode
 
 
-class CreateSessionCookbookRequest(BaseModel):
-    """Request for cookbook-mode sessions. Requires at least one selected chunk."""
+class CreateSessionPlannerCatalogCookbook(BaseModel):
+    model_config = {"extra": "forbid"}
 
+    catalog_cookbook_id: uuid.UUID
+    slug: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    access_state: Literal["included", "preview", "locked"]
+    access_state_reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)
+    ]
+
+
+class CreateSessionCookbookRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
     concept_source: Literal["cookbook"] = "cookbook"
@@ -432,8 +436,6 @@ class CreateSessionCookbookRequest(BaseModel):
 
 
 class CreateSessionAuthoredRequest(BaseModel):
-    """Request for authored-mode sessions. Requires one authored recipe selection."""
-
     model_config = {"extra": "forbid"}
 
     concept_source: Literal["authored"] = "authored"
@@ -448,8 +450,6 @@ class CreateSessionAuthoredRequest(BaseModel):
 
 
 class CreateSessionPlannerAuthoredAnchorRequest(BaseModel):
-    """Request for planner_authored_anchor sessions. Requires an authored recipe anchor."""
-
     model_config = {"extra": "forbid"}
 
     concept_source: Literal["planner_authored_anchor"] = "planner_authored_anchor"
@@ -464,8 +464,6 @@ class CreateSessionPlannerAuthoredAnchorRequest(BaseModel):
 
 
 class CreateSessionPlannerCookbookTargetRequest(BaseModel):
-    """Request for planner_cookbook_target sessions. Requires a cookbook target."""
-
     model_config = {"extra": "forbid"}
 
     concept_source: Literal["planner_cookbook_target"] = "planner_cookbook_target"
@@ -479,30 +477,32 @@ class CreateSessionPlannerCookbookTargetRequest(BaseModel):
     serving_time: Optional[str] = None
 
 
-# Discriminated union for all session creation variants.
-# FastAPI validates request bodies against each type in sequence.
-# discriminator=None disables Pydantic's discriminated union logic —
-# each variant has a Literal concept_source field, so FastAPI's
-# sequential validation still produces the correct type.
+class CreateSessionPlannerCatalogCookbookRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    concept_source: Literal["planner_catalog_cookbook"] = "planner_catalog_cookbook"
+    free_text: str = Field(max_length=2000)
+    planner_catalog_cookbook: CreateSessionPlannerCatalogCookbook
+    guest_count: int = Field(ge=1, le=100)
+    dish_count: int | None = Field(default=None, ge=1, le=12)
+    meal_type: MealType
+    occasion: Occasion
+    dietary_restrictions: list[str] = []
+    serving_time: Optional[str] = None
+
+
 CreateSessionRequest = Annotated[
     CreateSessionLegacyRequest
     | CreateSessionCookbookRequest
     | CreateSessionAuthoredRequest
     | CreateSessionPlannerAuthoredAnchorRequest
-    | CreateSessionPlannerCookbookTargetRequest,
+    | CreateSessionPlannerCookbookTargetRequest
+    | CreateSessionPlannerCatalogCookbookRequest,
     Field(discriminator=None),
 ]
 
 
 class InitialPipelineState(TypedDict):
-    """Typed view of the initial state dict passed to graph.ainvoke().
-
-    All fields are plain Python types (str, list[dict], etc.) not Pydantic
-    objects, because LangGraph's PostgresSaver serializes state to JSON.
-    Pydantic objects survive initial invocation but are deserialized as plain
-    dicts on checkpoint resume — storing plain types avoids this asymmetry.
-    """
-
     concept: dict
     kitchen_config: dict
     equipment: list[dict]
@@ -529,12 +529,6 @@ def build_initial_pipeline_state(
     kitchen_config: dict,
     equipment: list[dict],
 ) -> InitialPipelineState:
-    """Build the initial GRASPState payload passed to LangGraph.
-
-    All list fields start empty — nodes replace them (never append).
-    generation_attempt_limit=3 allows up to 2 corrective retries for
-    one-oven conflicts (initial + 2 auto-repair attempts).
-    """
     return {
         "concept": concept.model_dump(mode="json"),
         "kitchen_config": kitchen_config,
@@ -563,17 +557,6 @@ def build_session_initial_state(
     kitchen_config: dict,
     equipment: list[dict],
 ) -> tuple[DinnerConcept, InitialPipelineState]:
-    """
-    Validate persisted Session.concept_json and build the initial GRASP state.
-
-    This is the worker entry seam for both legacy free-text and cookbook-selected
-    sessions. It intentionally keeps cookbook selections inside the concept and
-    leaves raw_recipes empty so the graph still enters through recipe_generator,
-    which can deterministically seed cookbook recipes without LLM generation.
-
-    Raises ValidationError if the stored concept_json is invalid (e.g. from a
-    schema migration). The Celery task wrapper catches this and writes FAILED.
-    """
     concept = DinnerConcept.model_validate(concept_payload)
     return concept, build_initial_pipeline_state(
         concept=concept,
@@ -584,50 +567,22 @@ def build_session_initial_state(
     )
 
 
-# ── GRASPState ────────────────────────────────────────────────────────────────
-# TypedDict required by LangGraph. All Pydantic models stored as dicts for
-# maximum JSON serialisation compatibility with LangGraph's PostgresSaver.
-# Nodes must call Model.model_validate(state["field"]) to get typed instances.
-#
-# This avoids the hidden deserialization trap: LangGraph restores checkpoint
-# state as plain Python dicts, NOT Pydantic model instances. If nodes assume
-# they receive Pydantic objects, they will crash on resume from checkpoint.
-# Storing as dicts and validating at node boundaries is the safe pattern.
-#
-# ACCUMULATOR FIELDS (Annotated with operator.add):
-#   errors:      each node appends its NodeError dicts; router reads errors[-1]
-#   token_usage: each LLM node appends its token count dict for billing
-#
-# All other fields use REPLACE semantics — the last node to write wins.
-# This is why nodes return {"recipe_dags": new_list} not {"recipe_dags": old + new}.
-
-
 class GRASPState(TypedDict, total=False):
-    concept: dict                      # DinnerConcept.model_dump()
-    kitchen_config: dict               # KitchenConfig fields — snapshotted at session start
-    equipment: list[dict]              # Equipment dicts — snapshotted at session start
-    user_id: str                       # UUID string for relational ownership
-    rag_owner_key: str                 # Stable Pinecone key, portable across DB migrations
-    raw_recipes: list[dict]            # list[RawRecipe.model_dump()]
-    enriched_recipes: list[dict]       # list[EnrichedRecipe.model_dump()]
-    validated_recipes: list[dict]      # list[ValidatedRecipe.model_dump()]
-    recipe_dags: list[dict]            # list[RecipeDAG.model_dump()]
-    merged_dag: Optional[dict]         # MergedDAG.model_dump() | None
-    schedule: Optional[dict]           # NaturalLanguageSchedule.model_dump() | None
-
-    # ACCUMULATOR: LangGraph's operator.add reducer APPENDS new errors to the
-    # existing list instead of replacing it. This is what makes per-recipe
-    # error isolation work — each node can push errors independently and
-    # the router reads errors[-1] to see the most recent failure.
+    concept: dict
+    kitchen_config: dict
+    equipment: list[dict]
+    user_id: str
+    rag_owner_key: str
+    raw_recipes: list[dict]
+    enriched_recipes: list[dict]
+    validated_recipes: list[dict]
+    recipe_dags: list[dict]
+    merged_dag: Optional[dict]
+    schedule: Optional[dict]
     errors: Annotated[list[dict], operator.add]
-
-    # ACCUMULATOR: each LLM node appends a dict like:
-    # {"node": "recipe_generator", "input_tokens": 1234, "output_tokens": 567}
-    # finalise_session() sums these for Session.token_usage.
     token_usage: Annotated[list[dict], operator.add]
-
-    generation_attempt: int            # current attempt (1-indexed, incremented on retry)
-    generation_attempt_limit: int      # ceiling — 3 allows initial + 2 corrective retries
-    generation_retry_reason: Optional[dict]  # GenerationRetryReason.model_dump() | None
-    generation_retry_exhausted: bool   # True when retry path entered but no attempts left
-    generation_history: list[dict]     # list[GenerationAttemptRecord.model_dump()] for observability
+    generation_attempt: int
+    generation_attempt_limit: int
+    generation_retry_reason: Optional[dict]
+    generation_retry_exhausted: bool
+    generation_history: list[dict]
