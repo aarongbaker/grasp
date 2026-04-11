@@ -1,9 +1,10 @@
 import { pathwayByKey } from '../layout/pathways';
+import type { PathwayKey } from '../layout/pathways';
 import type { DinnerConcept, RecipeProvenance, ValidatedRecipe } from '../../types/api';
 
 export interface SessionConceptDisplayModel {
   title: string;
-  pathwayKey: 'generated-planner' | 'recipe-library' | 'authored-workspace';
+  pathwayKey: PathwayKey;
   pathwayLabel: string;
   sourceLabel: string;
   sourceDetail: string;
