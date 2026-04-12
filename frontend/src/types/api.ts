@@ -11,7 +11,8 @@ export type DinnerConceptSource =
   | 'cookbook'
   | 'authored'
   | 'planner_authored_anchor'
-  | 'planner_cookbook_target';
+  | 'planner_cookbook_target'
+  | 'planner_catalog_cookbook';
 export type PlannerCookbookPlanningMode = 'strict' | 'cookbook_biased';
 export type PlannerReferenceKind = 'authored' | 'cookbook';
 export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous';
@@ -131,6 +132,14 @@ export interface PlannerLibraryCookbookTarget {
   mode: PlannerCookbookPlanningMode;
 }
 
+export interface PlannerCatalogCookbookReference {
+  catalog_cookbook_id: string;
+  slug: string;
+  title: string;
+  access_state: CatalogCookbookAccessState;
+  access_state_reason: string;
+}
+
 export interface PlannerReferenceResolutionRequest {
   kind: PlannerReferenceKind;
   reference: string;
@@ -171,6 +180,7 @@ export interface DinnerConcept {
   selected_authored_recipe?: SelectedAuthoredRecipe | null;
   planner_authored_recipe_anchor?: PlannerLibraryAuthoredRecipeAnchor | null;
   planner_cookbook_target?: PlannerLibraryCookbookTarget | null;
+  planner_catalog_cookbook?: PlannerCatalogCookbookReference | null;
 }
 
 export interface CreateFreeTextSessionRequest {
@@ -202,6 +212,10 @@ export interface CreateSessionPlannerCookbookTarget {
   cookbook_id: string;
   name: string;
   mode: PlannerCookbookPlanningMode;
+}
+
+export interface CreateSessionPlannerCatalogCookbook {
+  catalog_cookbook_id: string;
 }
 
 export interface CreateCookbookSessionRequest {
@@ -252,12 +266,25 @@ export interface CreatePlannerCookbookTargetSessionRequest {
   serving_time?: string;
 }
 
+export interface CreatePlannerCatalogCookbookSessionRequest {
+  concept_source: 'planner_catalog_cookbook';
+  free_text: string;
+  planner_catalog_cookbook: CreateSessionPlannerCatalogCookbook;
+  guest_count: number;
+  dish_count?: number;
+  meal_type: MealType;
+  occasion: Occasion;
+  dietary_restrictions?: string[];
+  serving_time?: string;
+}
+
 export type CreateSessionRequest =
   | CreateFreeTextSessionRequest
   | CreateCookbookSessionRequest
   | CreateAuthoredSessionRequest
   | CreatePlannerAuthoredAnchorSessionRequest
-  | CreatePlannerCookbookTargetSessionRequest;
+  | CreatePlannerCookbookTargetSessionRequest
+  | CreatePlannerCatalogCookbookSessionRequest;
 
 export interface Session {
   session_id: string;

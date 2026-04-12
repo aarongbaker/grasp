@@ -264,11 +264,37 @@ const plannerCookbookTargetSession: Session = {
     selected_recipes: [],
     selected_authored_recipe: null,
     planner_authored_recipe_anchor: null,
+    planner_catalog_cookbook: null,
     planner_cookbook_target: {
       cookbook_id: 'cookbook-spring-pastry',
       name: 'Spring Pastry',
       description: 'Tarts, galettes, and plated fruit desserts.',
       mode: 'cookbook_biased',
+    },
+  },
+};
+
+const plannerCatalogCookbookSession: Session = {
+  ...menuSession,
+  session_id: 'session-planner-catalog-cookbook',
+  concept_json: {
+    free_text: 'Build a dinner from the platform weeknight catalog',
+    guest_count: 6,
+    meal_type: 'dinner',
+    occasion: 'dinner_party',
+    dietary_restrictions: [],
+    serving_time: '18:30',
+    concept_source: 'planner_catalog_cookbook',
+    selected_recipes: [],
+    selected_authored_recipe: null,
+    planner_authored_recipe_anchor: null,
+    planner_cookbook_target: null,
+    planner_catalog_cookbook: {
+      catalog_cookbook_id: 'catalog-1',
+      slug: 'weeknight-foundations',
+      title: 'Weeknight Foundations',
+      access_state: 'included',
+      access_state_reason: 'Included with your current catalog access.',
     },
   },
 };
@@ -390,6 +416,34 @@ describe('session presentation', () => {
     expect(getSessionConceptDisplay(plannerCookbookTargetSession.concept_json).sourceDetail).not.toMatch(/catalog/i);
   });
 
+  it('keeps catalog-backed planner sessions in a distinct catalog lane instead of masquerading as private cookbook folders', () => {
+    expect(getSessionConceptDisplay(plannerCatalogCookbookSession.concept_json)).toEqual({
+      title: 'Weeknight Foundations',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner catalog cookbook',
+      sourceDetail: 'Built from the dinner planner using one platform catalog cookbook as the planning seed.',
+    });
+    expect(getSessionConceptDisplay(plannerCatalogCookbookSession.concept_json).sourceDetail).not.toMatch(/folder/i);
+  });
+
+  it('renders a persisted catalog-backed planner session with catalog wording instead of private-library wording', () => {
+    render(
+      <MemoryRouter>
+        <SessionCard session={plannerCatalogCookbookSession} onDelete={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Weeknight Foundations')).toBeInTheDocument();
+    expect(screen.getByText('Planner catalog cookbook')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Plan a Dinner\s*·\s*Built from the dinner planner using one platform catalog cookbook as the planning seed\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Planner cookbook target/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/private library/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cookbook folder/i)).not.toBeInTheDocument();
+  });
+
   it('ignores planner cookbook mode metadata when building shared display copy', () => {
     const strictPlannerCookbookTarget: DinnerConcept = {
       ...plannerCookbookTargetSession.concept_json,
@@ -443,6 +497,28 @@ describe('session presentation', () => {
       pathwayLabel: 'Plan a Dinner',
       sourceLabel: 'Planner cookbook target',
       sourceDetail: 'Built from the dinner planner with a cookbook target, but the saved folder name was missing from the persisted concept.',
+    });
+  });
+
+  it('falls back to free text when a planner catalog cookbook is missing the trusted title', () => {
+    const malformedConcept: DinnerConcept = {
+      ...plannerCatalogCookbookSession.concept_json,
+      free_text: 'Fallback catalog note',
+      planner_catalog_cookbook: {
+        catalog_cookbook_id: 'catalog-1',
+        slug: 'weeknight-foundations',
+        title: '   ',
+        access_state: 'included',
+        access_state_reason: 'Included with your current catalog access.',
+      },
+    };
+
+    expect(getSessionConceptDisplay(malformedConcept)).toEqual({
+      title: 'Fallback catalog note',
+      pathwayKey: 'generated-planner',
+      pathwayLabel: 'Plan a Dinner',
+      sourceLabel: 'Planner catalog cookbook',
+      sourceDetail: 'Built from the dinner planner with a catalog cookbook, but the trusted catalog title was missing from the persisted concept.',
     });
   });
 

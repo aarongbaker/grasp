@@ -143,6 +143,16 @@
     0 18px 34px rgba(61, 53, 48, 0.1);
 }
 
+.catalogLaneCard {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1.05rem;
+  border-radius: 20px;
+  border: 1px solid rgba(201, 129, 58, 0.16);
+  background: rgba(46, 40, 34, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 248, 240, 0.03);
+}
+
 .anchorHeader {
   display: grid;
   gap: var(--space-sm);

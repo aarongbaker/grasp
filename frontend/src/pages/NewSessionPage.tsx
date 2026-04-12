@@ -1,5 +1,5 @@
 import { type FormEvent, type KeyboardEvent, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { createSession, resolvePlannerReference, runPipeline } from '../api/sessions';
 import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
@@ -11,11 +11,13 @@ import {
   PLANNER_COOKBOOK_MODE_LABELS,
   type CreateFreeTextSessionRequest,
   type CreatePlannerAuthoredAnchorSessionRequest,
+  type CreatePlannerCatalogCookbookSessionRequest,
   type CreatePlannerCookbookTargetSessionRequest,
   type CreateSessionRequest,
   type MealType,
   type Occasion,
   type PlannerAuthoredResolutionMatch,
+  type PlannerCatalogCookbookReference,
   type PlannerCookbookPlanningMode,
   type PlannerCookbookResolutionMatch,
   type PlannerReferenceKind,
@@ -40,7 +42,12 @@ const plannerCookbookModeOptions = Object.entries(PLANNER_COOKBOOK_MODE_LABELS).
 }));
 
 type PlannerAnchorMode = (typeof plannerAnchorOptions)[number]['value'];
+type CatalogHandoffStatus = 'missing' | 'invalid' | 'included' | 'preview' | 'locked';
 type PlannerResolutionPhase = 'idle' | 'resolving' | 'resolved' | 'error';
+
+interface PlannerCatalogLocationState {
+  plannerCatalogCookbook?: PlannerCatalogCookbookReference;
+}
 
 interface PlannerResolutionState {
   phase: PlannerResolutionPhase;
@@ -64,8 +71,35 @@ function getPlannerMatchId(match: PlannerAuthoredResolutionMatch | PlannerCookbo
   return match.kind === 'authored' ? match.recipe_id : match.cookbook_id;
 }
 
+function isPlannerCatalogCookbookReference(value: unknown): value is PlannerCatalogCookbookReference {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const item = value as Partial<PlannerCatalogCookbookReference>;
+  return (
+    typeof item.catalog_cookbook_id === 'string' &&
+    item.catalog_cookbook_id.length > 0 &&
+    typeof item.slug === 'string' &&
+    typeof item.title === 'string' &&
+    (item.access_state === 'included' || item.access_state === 'preview' || item.access_state === 'locked') &&
+    typeof item.access_state_reason === 'string'
+  );
+}
+
+function getCatalogHandoffStatus(value: unknown): CatalogHandoffStatus {
+  if (value == null) {
+    return 'missing';
+  }
+  if (!isPlannerCatalogCookbookReference(value)) {
+    return 'invalid';
+  }
+  return value.access_state;
+}
+
 export function NewSessionPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [freeText, setFreeText] = useState('');
   const [guestCount, setGuestCount] = useState(4);
   const [dishCount, setDishCount] = useState(3);
@@ -78,6 +112,7 @@ export function NewSessionPage() {
   const [plannerReferenceInput, setPlannerReferenceInput] = useState('');
   const [plannerResolution, setPlannerResolution] = useState<PlannerResolutionState>(idleResolutionState);
   const [plannerCookbookMode, setPlannerCookbookMode] = useState<PlannerCookbookPlanningMode | ''>('');
+  const catalogHandoffCandidate = (location.state as PlannerCatalogLocationState | null)?.plannerCatalogCookbook;
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -111,6 +146,12 @@ export function NewSessionPage() {
       : plannerAnchorMode === 'cookbook'
         ? 'Name the owned cookbook you mean, resolve it inline, and choose how tightly the planner should stay inside it.'
         : 'Start from menu intent alone when you want the planner to build the dinner from a clean brief.';
+
+  const catalogHandoffStatus = useMemo(() => getCatalogHandoffStatus(catalogHandoffCandidate), [catalogHandoffCandidate]);
+  const plannerCatalogCookbook = useMemo(
+    () => (isPlannerCatalogCookbookReference(catalogHandoffCandidate) ? catalogHandoffCandidate : null),
+    [catalogHandoffCandidate],
+  );
 
   const selectedPlannerMatch = useMemo(() => {
     if (!plannerResolution.response) {
@@ -219,6 +260,28 @@ export function NewSessionPage() {
       serving_time: servingTime || undefined,
     };
 
+    if (plannerCatalogCookbook) {
+      if (catalogHandoffStatus === 'locked') {
+        throw new Error('This catalog cookbook is locked. Return to the catalog and choose an included or preview cookbook before starting the plan.');
+      }
+      if (catalogHandoffStatus === 'invalid') {
+        throw new Error('The catalog cookbook handoff was malformed. Return to the catalog detail page and reopen the planner from there.');
+      }
+
+      const request: CreatePlannerCatalogCookbookSessionRequest = {
+        concept_source: 'planner_catalog_cookbook',
+        ...sharedFields,
+        planner_catalog_cookbook: {
+          catalog_cookbook_id: plannerCatalogCookbook.catalog_cookbook_id,
+        },
+      };
+      return request;
+    }
+
+    if (catalogHandoffStatus === 'invalid') {
+      throw new Error('The catalog cookbook handoff was malformed. Return to the catalog detail page and reopen the planner from there.');
+    }
+
     if (plannerAnchorMode === 'authored') {
       if (!plannerResolution.response || plannerResolution.response.status === 'no_match') {
         throw new Error('Resolve the saved recipe reference before starting the plan.');
@@ -292,7 +355,7 @@ export function NewSessionPage() {
     }
   }
 
-  const canSubmit = !!freeText.trim();
+  const canSubmit = !!freeText.trim() && catalogHandoffStatus !== 'locked' && catalogHandoffStatus !== 'invalid';
   const isPlannerResolutionBusy = plannerResolution.phase === 'resolving';
   const isCookbookModeResolved = plannerResolution.response?.kind === 'cookbook';
 
@@ -352,6 +415,55 @@ export function NewSessionPage() {
             <p className={styles.anchorDescription}>{plannerAnchorDescription}</p>
           </div>
 
+          {catalogHandoffStatus !== 'missing' && (
+            <div className={styles.catalogLaneCard} aria-live="polite">
+              {catalogHandoffStatus === 'included' && plannerCatalogCookbook ? (
+                <>
+                  <p className={styles.resultEyebrow}>Catalog cookbook included</p>
+                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
+                  <p className={styles.resultText}>
+                    This catalog cookbook was handed off from the platform catalog and will seed the planner through the catalog access lane rather than your private cookbook folders.
+                  </p>
+                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
+                </>
+              ) : null}
+
+              {catalogHandoffStatus === 'preview' && plannerCatalogCookbook ? (
+                <>
+                  <p className={styles.resultEyebrow}>Catalog cookbook preview</p>
+                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
+                  <p className={styles.resultText}>
+                    Preview access is valid for planning. The planner will seed one catalog anchor and keep catalog wording separate from your private cookbook shelves.
+                  </p>
+                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
+                </>
+              ) : null}
+
+              {catalogHandoffStatus === 'locked' && plannerCatalogCookbook ? (
+                <>
+                  <p className={styles.resultEyebrow}>Catalog cookbook locked</p>
+                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
+                  <p className={styles.resultText}>
+                    This handoff is blocked by the backend-provided catalog access state, so session creation stays disabled here.
+                  </p>
+                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
+                </>
+              ) : null}
+
+              {catalogHandoffStatus === 'invalid' ? (
+                <>
+                  <p className={styles.resultEyebrow}>Catalog handoff invalid</p>
+                  <p className={styles.resultHeadline}>The catalog selection could not be trusted in this planner state.</p>
+                  <p className={styles.resultText}>
+                    The handoff shape was malformed, so the planner will not submit a catalog-backed session from this page.
+                  </p>
+                  <p className={styles.recoveryHint}>Return to the catalog detail page and reopen the planner from a valid cookbook detail handoff.</p>
+                </>
+              ) : null}
+            </div>
+          )}
+
+          {!plannerCatalogCookbook && (
           <div className={styles.anchorGrid}>
             <Select
               label="Planner anchor"
@@ -384,15 +496,33 @@ export function NewSessionPage() {
               </div>
             )}
           </div>
+          )}
 
           <div className={styles.anchorMeta}>
             <span className={styles.anchorMetaLabel}>
-              {plannerAnchorMode === 'none'
-                ? 'No owned reference is required unless you want the planner anchored to one saved recipe or cookbook.'
-                : plannerAnchorMode === 'authored'
-                  ? 'Resolve one owned recipe title inline so no-match, ambiguity, and retry states stay visible before session creation.'
-                  : 'Resolve one owned cookbook inline, then choose whether planning stays strict to that shelf or only leans toward it.'}
+              {plannerCatalogCookbook
+                ? catalogHandoffStatus === 'locked'
+                  ? 'The backend marked this catalog cookbook as locked, so planner submission is intentionally blocked until you choose another catalog cookbook.'
+                  : catalogHandoffStatus === 'preview'
+                    ? 'Preview catalog access is authoritative here. The planner will submit the catalog-backed payload only while this handoff remains valid.'
+                    : 'Included catalog access is authoritative here. The planner will submit the catalog-backed payload without reusing the private cookbook target lane.'
+                : plannerAnchorMode === 'none'
+                  ? 'No owned reference is required unless you want the planner anchored to one saved recipe or cookbook.'
+                  : plannerAnchorMode === 'authored'
+                    ? 'Resolve one owned recipe title inline so no-match, ambiguity, and retry states stay visible before session creation.'
+                    : 'Resolve one owned cookbook inline, then choose whether planning stays strict to that shelf or only leans toward it.'}
             </span>
+            {plannerCatalogCookbook && (
+              <span className={styles.anchorMetaDetail}>
+                {catalogHandoffStatus === 'included'
+                  ? `Catalog lane ready with “${plannerCatalogCookbook.title}”.`
+                  : catalogHandoffStatus === 'preview'
+                    ? `Catalog preview lane ready with “${plannerCatalogCookbook.title}”.`
+                    : catalogHandoffStatus === 'locked'
+                      ? `Catalog lane blocked for “${plannerCatalogCookbook.title}”.`
+                      : 'Catalog lane is waiting for a valid handoff.'}
+              </span>
+            )}
             {plannerResolution.phase === 'resolved' && plannerResolution.status === 'resolved' && selectedPlannerMatch && (
               <span className={styles.anchorMetaDetail}>
                 {selectedPlannerMatch.kind === 'authored'
@@ -402,7 +532,7 @@ export function NewSessionPage() {
             )}
           </div>
 
-          {plannerAnchorMode !== 'none' && (
+          {!plannerCatalogCookbook && plannerAnchorMode !== 'none' && (
             <div className={styles.resolutionPanel} aria-live="polite">
               {plannerResolution.phase === 'error' && (
                 <div className={styles.inlineError}>

@@ -33,6 +33,10 @@ function getPlannerCookbookTargetTitle(concept: DinnerConcept): string | null {
   return cleanText(concept.planner_cookbook_target?.name);
 }
 
+function getPlannerCatalogCookbookTitle(concept: DinnerConcept): string | null {
+  return cleanText(concept.planner_catalog_cookbook?.title);
+}
+
 function getProvenanceLabel(kind: RecipeProvenance['kind']): string {
   switch (kind) {
     case 'library_authored':
@@ -81,8 +85,9 @@ export function getSessionConceptDisplay(concept: DinnerConcept): SessionConcept
   const authoredTitle = getAuthoredTitle(concept);
   const plannerAuthoredTitle = getPlannerAuthoredAnchorTitle(concept);
   const plannerCookbookTitle = getPlannerCookbookTargetTitle(concept);
+  const plannerCatalogCookbookTitle = getPlannerCatalogCookbookTitle(concept);
   const freeText = cleanText(concept.free_text);
-  const title = authoredTitle ?? plannerAuthoredTitle ?? plannerCookbookTitle ?? freeText ?? 'Dinner session';
+  const title = authoredTitle ?? plannerAuthoredTitle ?? plannerCookbookTitle ?? plannerCatalogCookbookTitle ?? freeText ?? 'Dinner session';
 
   if (conceptSource === 'authored') {
     const recipeLibrary = pathwayByKey['recipe-library'];
@@ -123,6 +128,20 @@ export function getSessionConceptDisplay(concept: DinnerConcept): SessionConcept
       sourceDetail: plannerCookbookTitle
         ? 'Built from the dinner planner using one cookbook folder as the planning target.'
         : 'Built from the dinner planner with a cookbook target, but the saved folder name was missing from the persisted concept.',
+    };
+  }
+
+  if (conceptSource === 'planner_catalog_cookbook') {
+    const generatedPlanner = pathwayByKey['generated-planner'];
+
+    return {
+      title,
+      pathwayKey: generatedPlanner.key,
+      pathwayLabel: generatedPlanner.title,
+      sourceLabel: 'Planner catalog cookbook',
+      sourceDetail: plannerCatalogCookbookTitle
+        ? 'Built from the dinner planner using one platform catalog cookbook as the planning seed.'
+        : 'Built from the dinner planner with a catalog cookbook, but the trusted catalog title was missing from the persisted concept.',
     };
   }
 

@@ -33,6 +33,7 @@ const createdSession: Session = {
     selected_authored_recipe: null,
     planner_authored_recipe_anchor: null,
     planner_cookbook_target: null,
+    planner_catalog_cookbook: null,
   },
   schedule_summary: null,
   total_duration_minutes: null,
@@ -92,6 +93,162 @@ describe('NewSessionPage', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('hydrates an included catalog handoff and submits the catalog-backed session lane', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-1',
+                slug: 'weeknight-foundations',
+                title: 'Weeknight Foundations',
+                access_state: 'included',
+                access_state_reason: 'Included with your current catalog access.',
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Catalog cookbook included')).toBeInTheDocument();
+    expect(screen.getByText('Weeknight Foundations')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Planner anchor')).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build a weeknight dinner from the catalog lane');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'planner_catalog_cookbook',
+          free_text: 'Build a weeknight dinner from the catalog lane',
+          planner_catalog_cookbook: {
+            catalog_cookbook_id: 'catalog-1',
+          },
+        }),
+      ),
+    );
+    expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_cookbook_target');
+  });
+
+  it('shows preview catalog guidance but still allows planner submission through the catalog lane', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-2',
+                slug: 'spring-pastry',
+                title: 'Spring Pastry',
+                access_state: 'preview',
+                access_state_reason: 'Preview access is available for this catalog cookbook.',
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Catalog cookbook preview')).toBeInTheDocument();
+    expect(screen.getByText(/Preview access is valid for planning/i)).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Seed dessert service from the preview catalog lane');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'planner_catalog_cookbook',
+          planner_catalog_cookbook: {
+            catalog_cookbook_id: 'catalog-2',
+          },
+        }),
+      ),
+    );
+  });
+
+  it('blocks locked catalog handoffs inline before session creation', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-3',
+                slug: 'premium-desserts',
+                title: 'Premium Desserts',
+                access_state: 'locked',
+                access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
+    expect(screen.getByText('Catalog cookbook locked')).toBeInTheDocument();
+    expect(screen.getByText(/session creation stays disabled here/i)).toBeInTheDocument();
+    expect(submitButton).toBeDisabled();
+    expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('surfaces malformed catalog handoffs inline before session creation', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-4',
+                title: 'Broken Handoff',
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
+    expect(screen.getByText('Catalog handoff invalid')).toBeInTheDocument();
+    expect(screen.getByText(/The handoff shape was malformed/i)).toBeInTheDocument();
+    expect(submitButton).toBeDisabled();
+    expect(createSessionSpy).not.toHaveBeenCalled();
   });
 
   it('renders the planner lane with inline reference controls and guidance links', async () => {
