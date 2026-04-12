@@ -1,38 +1,25 @@
 """
 graph/nodes/enricher.py
 
-Real RAG enricher — Phase 5. Second LLM call in the system.
+LLM-only recipe enricher — structured step conversion for the active product path.
 
-CURATED TEXT ENRICHMENT (M015 pivot):
-After the cookbook de-scope, enrichment uses only team/admin-curated cookbook
-text from Pinecone. Users cannot upload cookbooks; they submit free-text menu
-intent, and enrichment optionally grounds LLM-generated recipes with relevant
-curated culinary knowledge.
-
-Reads raw_recipes from GRASPState, queries Pinecone for relevant cookbook
-chunks (per-user isolation via rag_owner_key), then calls Claude to convert
-flat step strings into structured RecipeStep objects with timing, resource
-tags, and dependency edges.
+M026 removed cookbook-specific retrieval from the enrichment stage. The enricher
+now reads raw recipes from GRASPState and uses Claude to convert flat step text
+into structured RecipeStep objects with timing, resource tags, dependency edges,
+and deterministic ingredient/preheat augmentation.
 
 Error handling: per-recipe recoverable. If one recipe fails enrichment,
 it is dropped and the pipeline continues with survivors. If ALL recipes
 fail, the error is fatal (recoverable=False) — nothing to validate or
 schedule.
 
-RAG graceful degradation: if Pinecone query fails or returns zero results,
-enrichment proceeds with LLM-only (no RAG context). rag_sources is set to [].
-The pipeline never fails due to missing cookbooks.
-
 IDEMPOTENCY: Returns enriched_recipes as a NEW list (not appended).
 Replace semantics — same contract as generator (§2.10).
 
-Mockable seams:
-  _create_llm()            — returns ChatAnthropic instance
-  _retrieve_rag_context()  — embeds query + queries Pinecone
+Mockable seam:
+  _create_llm() — returns ChatAnthropic instance
 
-Tests patch these two functions to bypass external APIs.
-
-See: .gsd/milestones/M015/slices/S03/S03-CONTEXT.md for enrichment contract.
+Tests patch the LLM factory/invocation to bypass external APIs.
 """
 
 import asyncio
@@ -338,186 +325,12 @@ def _generate_recipe_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-# ── RAG retrieval (mockable seam) ────────────────────────────────────────────
-
-
-def _retrieve_rag_context(query: str, user_id: str, rag_owner_key: str = "") -> list[dict]:
-    """
-    Embed query with OpenAI and search Pinecone for relevant cookbook chunks.
-    Returns list of advisory chunk dicts with 'text', 'chunk_type', 'chunk_id' keys.
-
-    Graceful degradation: returns [] on any failure (network, auth, empty index).
-    The caller treats [] as "no cookbook context" and proceeds with LLM-only enrichment.
-
-    RAG ADVISORY CONTRACT:
-      Retrieved chunks are advisory culinary context ONLY. They are formatted as
-      plain text in the enrichment prompt and labeled "ADVISORY CONTEXT". Claude
-      is explicitly instructed to derive steps from the raw recipe, not from the
-      chunks. Chunks inform timing, technique, and flavor — they never replace
-      or override the generator's recipe structure.
-
-    Ownership isolation:
-      rag_owner_key is the primary filter — it's a stable hash that survives
-      user_id changes (DB migrations, account merges). user_id is a legacy fallback
-      for chunks indexed before rag_owner_key was introduced.
-      Double-filter: Pinecone filter first, then owner verification on results.
-      This defends against Pinecone filter bugs that could return cross-user data.
-    """
-    try:
-        from openai import OpenAI
-        from pinecone import Pinecone
-
-        settings = get_settings()
-
-        if not settings.pinecone_api_key or not settings.openai_api_key:
-            return []
-
-        # Embed the query using the same model as the ingestion pipeline.
-        # Must use text-embedding-3-small (1536 dims) to match the Pinecone index.
-        openai_client = OpenAI(api_key=settings.openai_api_key)
-        response = openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=[query],
-        )
-        query_embedding = response.data[0].embedding
-
-        pc = Pinecone(api_key=settings.pinecone_api_key)
-        index = pc.Index(settings.pinecone_index_name)
-
-        # Prefer rag_owner_key filter; fall back to user_id for legacy chunks.
-        owner_filter = {}
-        if rag_owner_key:
-            owner_filter = {"rag_owner_key": {"$eq": rag_owner_key}}
-        elif user_id:
-            owner_filter = {"user_id": {"$eq": user_id}}
-
-        results = index.query(
-            vector=query_embedding,
-            top_k=settings.rag_retrieval_top_k,
-            filter=owner_filter,  # type: ignore[arg-type]
-            include_metadata=True,
-        )
-
-        chunks = []
-        for match in results.get("matches", []):
-            metadata = match.get("metadata", {})
-            chunk_id = metadata.get("chunk_id", match.get("id", "unknown"))
-            raw_text = metadata.get("text", "")
-
-            # Secondary ownership verification — defends against Pinecone filter bugs.
-            # If Pinecone returns a chunk that doesn't match our owner, drop it and warn.
-            match_rag_owner_key = str(metadata.get("rag_owner_key", "")).strip()
-            match_user_id = str(metadata.get("user_id", "")).strip()
-            owner_matches = False
-            if rag_owner_key:
-                owner_matches = match_rag_owner_key == rag_owner_key or (
-                    not match_rag_owner_key and bool(user_id) and match_user_id == user_id
-                )
-            elif user_id:
-                owner_matches = match_user_id == user_id
-
-            if not owner_matches:
-                logger.warning(
-                    "RAG chunk ownership mismatch (dropped): chunk_id=%s rag_owner_key=%s user_id=%s",
-                    chunk_id,
-                    match_rag_owner_key or "<missing>",
-                    match_user_id or "<missing>",
-                )
-                continue
-
-            # Validate text field — silently filter chunks without valid text.
-            # Not an error: Pinecone may return chunks with missing text if
-            # the ingestion pipeline had a partial failure.
-            if not isinstance(raw_text, str):
-                logger.warning("RAG chunk text is not a string (filtered): chunk_id=%s", chunk_id)
-                continue
-
-            text = raw_text.strip()
-            if not text:
-                logger.warning("RAG chunk missing text field (filtered): chunk_id=%s", chunk_id)
-                continue
-
-            # Filter to allowed chunk types — index/catalog entries are noise.
-            chunk_type = str(metadata.get("chunk_type", "")).strip().lower()
-            if chunk_type not in ALLOWED_RAG_CHUNK_TYPES:
-                logger.info(
-                    "RAG chunk filtered by advisory boundary: chunk_id=%s chunk_type=%s",
-                    chunk_id,
-                    chunk_type or "<missing>",
-                )
-                continue
-
-            chunks.append(
-                {
-                    "text": text,
-                    "chunk_type": chunk_type,
-                    "chunk_id": metadata.get("chunk_id", match.get("id", "")),
-                    "score": match.get("score", 0.0),
-                }
-            )
-
-        return chunks
-
-    except Exception as exc:
-        # Any failure (API key invalid, network down, Pinecone unavailable) →
-        # return [] for graceful degradation. The enricher proceeds without RAG context.
-        logger.warning("RAG retrieval failed (graceful degradation): %s", exc)
-        return []
-
-
-def _build_rag_query(raw_recipe: RawRecipe) -> str:
-    """Stable retrieval query for a recipe's advisory cookbook context.
-
-    Combines name + cuisine + description for rich semantic coverage.
-    Consistent format means recipes with similar cuisine styles retrieve
-    similar technique chunks (e.g. two French sauces both retrieve
-    emulsification and reduction technique chunks).
-    """
-    return f"{raw_recipe.name} {raw_recipe.cuisine} {raw_recipe.description}"
-
-
-def _rag_cache_key(query: str, user_id: str, rag_owner_key: str) -> tuple[str, str, str]:
-    """Cache key stays scoped to one run via the local cache dict in rag_enricher_node()."""
-    return (user_id.strip(), rag_owner_key.strip(), query.strip())
-
-
-async def _get_cached_rag_context(
-    *,
-    query: str,
-    user_id: str,
-    rag_owner_key: str,
-    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]],
-    rag_cache_lock: asyncio.Lock,
-) -> list[dict]:
-    """Shared RAG cache across concurrent recipe enrichments.
-
-    Why cache? When enriching multiple recipes concurrently (asyncio.gather),
-    two recipes with similar queries (e.g. both are French braises) would
-    otherwise trigger duplicate Pinecone queries. The cache deduplicates them —
-    the second recipe waits for the first recipe's query to complete and reuses
-    the result.
-
-    Implementation: the cache stores asyncio Tasks (futures), not results.
-    The lock prevents a race where two coroutines both check the cache,
-    both find a miss, and both start duplicate tasks. The first one creates
-    the Task and stores it; the second awaits the same Task.
-    """
-    cache_key = _rag_cache_key(query, user_id, rag_owner_key)
-    async with rag_cache_lock:
-        cached_result = rag_cache.get(cache_key)
-        if cached_result is None:
-            # asyncio.to_thread() runs the sync _retrieve_rag_context() in a
-            # thread pool so it doesn't block the event loop during the HTTP
-            # calls to OpenAI and Pinecone.
-            cached_result = asyncio.create_task(
-                asyncio.to_thread(_retrieve_rag_context, query, user_id, rag_owner_key)
-            )
-            rag_cache[cache_key] = cached_result
-
-    return list(await cached_result)
-
-
 # ── Prompt builders ──────────────────────────────────────────────────────────
+
+
+def _build_enrichment_context() -> str:
+    """Return the fixed enrichment-context block for the active no-retrieval contract."""
+    return "No external cookbook context is provided. Use the raw recipe and your general culinary knowledge only."
 
 
 def _format_rag_context(chunks: list[dict]) -> str:
@@ -544,7 +357,6 @@ def _format_rag_context(chunks: list[dict]) -> str:
 def _build_enrichment_prompt(
     raw_recipe: RawRecipe,
     slug: str,
-    rag_context: list[dict],
 ) -> str:
     """Build the system prompt for step enrichment.
 
@@ -553,7 +365,7 @@ def _build_enrichment_prompt(
     timing guidelines, prep-ahead criteria, and oven temperature extraction.
     Ambiguous instructions produce inconsistent output that breaks the scheduler.
     """
-    rag_text = _format_rag_context(rag_context)
+    enrichment_context_text = _build_enrichment_context()
 
     steps_text = "\n".join(f"  {i + 1}. {step}" for i, step in enumerate(raw_recipe.steps))
     ingredients_text = "\n".join(
@@ -619,20 +431,11 @@ Assign exactly one resource per step:
 - `prep_ahead_window`: e.g. "up to 24 hours", "up to 3 days". Only set if can_be_done_ahead is true. Must express hours or days, never minutes.
 - `prep_ahead_notes`: brief storage/reheating instructions. Only set if can_be_done_ahead is true.
 
-## ADVISORY COOKBOOK CONTEXT (RAG GROUNDING)
-The following cookbook excerpts are ADVISORY ONLY. They provide culinary knowledge
-to inform your timing, technique, and flavor decisions. They are NOT canonical
-recipe structures to be copied or parsed.
+## ENRICHMENT CONTEXT
+The active product path does not retrieve cookbook-specific context during enrichment.
+Derive your output from the RAW RECIPE and your general culinary knowledge only.
 
-Your output MUST be derived from the RAW RECIPE steps above, enriched with timing,
-resources, and dependencies. Use cookbook context to refine technique details,
-validate timing assumptions, or suggest improvements — but NEVER replace the
-raw recipe structure with cookbook content.
-
-If cookbook context contradicts the raw recipe, prioritize the raw recipe and
-note the discrepancy in chef_notes.
-
-{rag_text}
+{enrichment_context_text}
 
 ## OVEN TEMPERATURE EXTRACTION
 For each step, extract the oven temperature if the step involves oven cooking. Populate the `oven_temp_f` field as follows:
@@ -649,7 +452,7 @@ For each step, extract the oven temperature if the step involves oven cooking. P
 1. Generate exactly {len(raw_recipe.steps)} RecipeStep objects, one per flat text step.
 2. Each step description should be a refined, actionable version of the flat text — add precision (temperatures, visual cues, timing details) but preserve the original intent.
 3. For oven steps, populate oven_temp_f according to the oven extraction rules above.
-4. chef_notes: 1-2 sentences of practical advice for executing this recipe. Incorporate RAG context if available.
+4. chef_notes: 1-2 sentences of practical advice for executing this recipe.
 5. techniques_used: list of culinary techniques employed (e.g. "braising", "emulsification", "tempering").
 6. Do NOT include oven preheating instructions ("Preheat oven to X°F") in step descriptions. Oven preheating is injected as a separate step by the pipeline. Write oven steps assuming the oven is already at temperature (e.g. "Transfer to the preheated oven. Braise for 45 minutes..." not "Preheat oven to 325°F. Transfer to oven...")."""
 
@@ -767,23 +570,18 @@ def _inject_preheat_steps(steps: list[RecipeStep], slug: str) -> list[RecipeStep
 
 async def _enrich_single_recipe(
     raw_recipe: RawRecipe,
-    user_id: str,
-    rag_owner_key: str,
-    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]],
-    rag_cache_lock: asyncio.Lock,
 ) -> tuple[EnrichedRecipe, dict]:
     """
-    Enrich a single RawRecipe: RAG retrieval + LLM structured output + ingredient linking.
+    Enrich a single RawRecipe using LLM-only structuring.
 
     Steps in order:
       1. Parse + normalize ingredients (deterministic, no I/O)
-      2. RAG retrieval (async, graceful degradation)
-      3. LLM enrichment with structured output (async, with retry)
-      4. Link LLM-tagged ingredients to normalized metadata
-      5. Strip embedded preheat from step descriptions
-      6. Inject synthetic preheat step
+      2. LLM enrichment with structured output (async, with retry)
+      3. Link LLM-tagged ingredients to normalized metadata
+      4. Strip embedded preheat from step descriptions
+      5. Inject synthetic preheat step
 
-    Raises on failure — the caller (_enrich_one in rag_enricher_node) catches
+    Raises on failure — the caller (_enrich_one in enrich_recipe_steps_node) catches
     this and marks the recipe as per-recipe recoverable error.
 
     Returns (EnrichedRecipe, token_usage_dict).
@@ -792,16 +590,7 @@ async def _enrich_single_recipe(
 
     normalized_ingredients = _parse_and_normalize_ingredients(raw_recipe)
 
-    rag_query = _build_rag_query(raw_recipe)
-    rag_chunks = await _get_cached_rag_context(
-        query=rag_query,
-        user_id=user_id,
-        rag_owner_key=rag_owner_key,
-        rag_cache=rag_cache,
-        rag_cache_lock=rag_cache_lock,
-    )
-
-    system_prompt = _build_enrichment_prompt(raw_recipe, slug, rag_chunks)
+    system_prompt = _build_enrichment_prompt(raw_recipe, slug)
 
     llm = _create_llm()
     chain = llm.with_structured_output(StepEnrichmentOutput)
@@ -818,18 +607,16 @@ async def _enrich_single_recipe(
         )
 
     result = cast(StepEnrichmentOutput, await _invoke_llm())
-    usage = extract_token_usage(result, "rag_enricher")
+    usage = extract_token_usage(result, "enricher")
 
     linked_steps = _link_steps_to_ingredients(result.steps, normalized_ingredients, raw_recipe)
     linked_steps = _strip_preheat_from_descriptions(linked_steps)
     steps_with_preheat = _inject_preheat_steps(linked_steps, slug)
 
-    rag_source_ids = [c.get("chunk_id", "") for c in rag_chunks if c.get("chunk_id")]
-
     enriched = EnrichedRecipe(
         source=raw_recipe,
         steps=steps_with_preheat,
-        rag_sources=rag_source_ids,
+        rag_sources=[],
         chef_notes=result.chef_notes,
         techniques_used=result.techniques_used,
     )
@@ -839,14 +626,13 @@ async def _enrich_single_recipe(
 # ── Node function ────────────────────────────────────────────────────────────
 
 
-async def rag_enricher_node(state: GRASPState) -> dict:
+async def enrich_recipe_steps_node(state: GRASPState) -> dict:
     """
-    Real RAG enricher node. Processes each raw recipe individually.
+    LLM-only enrichment node. Processes each raw recipe individually.
 
     Concurrency: all recipes are enriched concurrently via asyncio.gather().
-    Each recipe makes independent API calls (OpenAI embedding + Pinecone query +
-    Claude enrichment), so there's no benefit to sequential processing.
-    The rag_cache deduplicates identical Pinecone queries across recipes.
+    Each recipe makes an independent Claude enrichment call, so there is no
+    benefit to sequential processing.
 
     Returns partial GRASPState dict with enriched_recipes (replace semantics).
     Per-recipe failures are recoverable; all-fail is fatal.
@@ -856,19 +642,12 @@ async def rag_enricher_node(state: GRASPState) -> dict:
     previously accumulated usage from the generator node.
     """
     raw_recipe_dicts: list[dict] = state.get("raw_recipes", [])
-    user_id: str = state.get("user_id", "")
-    rag_owner_key: str = state.get("rag_owner_key", "")
 
     logger.info("Enriching %d raw recipes", len(raw_recipe_dicts))
 
     enriched: list[dict] = []
     errors: list[dict] = []
     token_usages: list[dict] = []
-
-    # Shared RAG cache + lock across all concurrent _enrich_one calls.
-    # Prevents duplicate Pinecone queries for recipes with similar cuisine/style.
-    rag_cache: dict[tuple[str, str, str], Awaitable[list[dict]]] = {}
-    rag_cache_lock = asyncio.Lock()
 
     async def _enrich_one(recipe_dict: dict) -> tuple[dict | None, dict | None, dict | None]:
         """Enrich a single recipe, returning (enriched_dict, usage, error).
@@ -878,34 +657,23 @@ async def rag_enricher_node(state: GRASPState) -> dict:
         """
         recipe_name = recipe_dict.get("name", "unknown")
         try:
-            # model_validate() re-parses the dict — required because state fields
-            # come back as plain dicts after checkpoint restore, not Pydantic instances.
             raw_recipe = RawRecipe.model_validate(recipe_dict)
-            enriched_recipe, usage = await _enrich_single_recipe(
-                raw_recipe,
-                user_id,
-                rag_owner_key,
-                rag_cache,
-                rag_cache_lock,
-            )
+            enriched_recipe, usage = await _enrich_single_recipe(raw_recipe)
             logger.info(
-                "Enriched recipe: %s (%d steps, %d RAG sources)",
+                "Enriched recipe: %s (%d steps)",
                 recipe_name,
                 len(enriched_recipe.steps),
-                len(enriched_recipe.rag_sources),
             )
             return enriched_recipe.model_dump(), usage, None
         except Exception as exc:
             exc_type = type(exc).__name__
-            # Distinguish timeout from other RAG/LLM failures.
-            # Both are recoverable but the frontend shows different messages.
             if is_timeout_error(exc):
                 error_type = ErrorType.LLM_TIMEOUT
             else:
-                error_type = ErrorType.RAG_FAILURE
+                error_type = ErrorType.VALIDATION_FAILURE
             logger.warning("Enrichment failed for '%s': %s: %s", recipe_name, exc_type, exc)
             error = NodeError(
-                node_name="rag_enricher",
+                node_name="enricher",
                 error_type=error_type,
                 recoverable=True,
                 message=f"Enrichment failed for '{recipe_name}': {exc_type}: {exc}",
@@ -913,10 +681,6 @@ async def rag_enricher_node(state: GRASPState) -> dict:
             )
             return None, None, error.model_dump()
 
-    # Concurrent enrichment — all recipes in parallel.
-    # return_exceptions=False (default): if _enrich_one itself raises (shouldn't happen
-    # given the try/except), the exception propagates and this node fails fatally.
-    # Per-recipe errors are caught inside _enrich_one and returned as error dicts.
     results = await asyncio.gather(*[_enrich_one(rd) for rd in raw_recipe_dicts])
 
     for enriched_dict, usage, error in results:
@@ -929,13 +693,12 @@ async def rag_enricher_node(state: GRASPState) -> dict:
                 token_usages.append(usage)
 
     if not enriched:
-        # All recipes failed enrichment — fatal error, pipeline cannot continue.
         return {
             "enriched_recipes": [],
             "errors": [
                 {
-                    "node_name": "rag_enricher",
-                    "error_type": ErrorType.RAG_FAILURE.value,
+                    "node_name": "enricher",
+                    "error_type": ErrorType.VALIDATION_FAILURE.value,
                     "recoverable": False,
                     "message": f"All {len(raw_recipe_dicts)} recipes failed enrichment. Cannot proceed.",
                     "metadata": {"failed_count": len(raw_recipe_dicts)},

@@ -206,7 +206,7 @@ export function RecipeLibraryPage() {
           <p className={styles.kicker}>Private recipe library</p>
           <h1 className={styles.title}>Keep your authored dishes on a shelf you can reopen at service speed.</h1>
           <p className={styles.subtitle}>
-            Browse private drafts, tuck them into cookbook folders, and reopen any dish without crossing into dinner-planning sessions.
+            Browse private drafts, tuck them into cookbook folders, and reopen any dish inside your owned library lane before you cross into dinner-planning sessions.
           </p>
           <div className={styles.heroActions}>
             <Link to={authoredWorkspace.to}>

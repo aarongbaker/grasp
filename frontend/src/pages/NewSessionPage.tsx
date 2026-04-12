@@ -367,7 +367,7 @@ export function NewSessionPage() {
             <div>
               <h1 className={styles.title}>Plan a Dinner</h1>
               <p className={styles.subtitle}>
-                Describe the meal you want to cook from Generation, pre-existing cookbook recipes, or even your own recipes. 
+                Describe the meal you want to cook from a fresh dinner brief, a platform catalog cookbook handoff, or one owned recipe or cookbook folder.
                 GRASP will turn that menu intent into a paced dinner service with timing, equipment flow, and a finished schedule.
               </p>
             </div>
@@ -574,7 +574,7 @@ export function NewSessionPage() {
                     <>
                       <p className={styles.resultHeadline}>{selectedPlannerMatch.name}</p>
                       <p className={styles.resultText}>
-                        {selectedPlannerMatch.description || 'This owned cookbook shelf is the planner target for the dinner brief.'}
+                        {selectedPlannerMatch.description || 'This owned cookbook folder is the planner target for the dinner brief.'}
                       </p>
                     </>
                   )}
@@ -615,7 +615,7 @@ export function NewSessionPage() {
                             <span className={styles.choiceDescription}>
                               {match.kind === 'authored'
                                 ? 'Saved recipe anchor'
-                                : match.description || 'Cookbook shelf'}
+                                : match.description || 'Cookbook folder'}
                             </span>
                           </span>
                         </label>
@@ -629,7 +629,7 @@ export function NewSessionPage() {
                 <div className={styles.modeCard}>
                   <p className={styles.resultEyebrow}>Cookbook planning mode</p>
                   <p className={styles.resultText}>
-                    Decide whether this dinner must stay inside the chosen cookbook or whether the planner can borrow outside dishes while still leaning on that owned shelf.
+                    Decide whether this dinner must stay inside the chosen cookbook folder or whether the planner can borrow outside dishes while still leaning on that owned collection.
                   </p>
                   <p className={styles.recoveryHint}>
                     The planner remains blocked until you pick one mode, so the target cookbook guidance is explicit before session creation.

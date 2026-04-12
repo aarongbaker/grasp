@@ -442,6 +442,8 @@ describe('session presentation', () => {
     expect(screen.queryByText(/Planner cookbook target/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/private library/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cookbook folder/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/upload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/detected[- ]recipes?/i)).not.toBeInTheDocument();
   });
 
   it('ignores planner cookbook mode metadata when building shared display copy', () => {
@@ -569,7 +571,7 @@ describe('session presentation', () => {
 
     expect(getRecipeProvenanceDisplay(plannerCookbookRecipe.source.source.provenance)).toEqual({
       label: 'From your cookbook library',
-      detail: 'Recovered from the cookbook collection “Spring Pastry”.',
+      detail: 'Shelved in your cookbook folder “Spring Pastry”.',
     });
   });
 
@@ -628,7 +630,7 @@ describe('session presentation', () => {
     render(<RecipeCard recipe={plannerCookbookRecipe} />);
 
     expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
-    expect(screen.getByText('Recovered from the cookbook collection “Spring Pastry”.')).toBeInTheDocument();
+    expect(screen.getByText('Shelved in your cookbook folder “Spring Pastry”.')).toBeInTheDocument();
   });
 
   it('renders shared generated-planner metadata on the session detail page without changing tabs or status flow', async () => {
@@ -670,6 +672,7 @@ describe('session presentation', () => {
     expect(screen.getByText('Anchored to your saved recipe “Chicken Ballotine with Tarragon Jus”.')).toBeInTheDocument();
     expect(screen.getByText('Generated for this session')).toBeInTheDocument();
     expect(screen.getByText('From your cookbook library')).toBeInTheDocument();
+    expect(screen.queryByText(/recovered from the cookbook collection/i)).not.toBeInTheDocument();
   });
 
   it('renders structured one-oven guidance on the session detail page when results include resequencing metadata', async () => {

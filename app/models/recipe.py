@@ -140,7 +140,7 @@ class RecipeProvenance(BaseModel):
 class RawRecipe(BaseModel):
     """Generator output. Steps are flat strings — no timing or resource tags yet.
 
-    This is the unstructured hand-off from recipe_generator_node to rag_enricher_node.
+    This is the unstructured hand-off from recipe_generator_node to enrich_recipe_steps_node.
     Steps are plain text (e.g. "Sear the beef on all sides over high heat.") —
     the enricher converts these into structured RecipeStep objects with timing,
     resource assignments, and dependency edges.
@@ -164,7 +164,7 @@ class RawRecipe(BaseModel):
 
 class EnrichedRecipe(BaseModel):
     """
-    RAG Enricher output. Flat strings → structured RecipeStep objects.
+    Enricher output. Flat strings → structured RecipeStep objects.
 
     Hidden detail: model_validator runs AFTER all field validators. The
     depends_on consistency check must run after steps is fully populated,
@@ -172,16 +172,15 @@ class EnrichedRecipe(BaseModel):
     for real — it is NOT a stub.
 
     Composition: source preserves the full RawRecipe so a future diff view
-    can show exactly what RAG grounding changed (timing, resources, dependencies)
+    can show exactly what enrichment changed (timing, resources, dependencies)
     versus what the generator produced.
     """
 
     source: RawRecipe  # full raw preserved — composition pattern (not inheritance)
     steps: list[RecipeStep]  # enriched structured steps, one per raw step (+ injected preheat)
 
-    # Pinecone chunk IDs of the RAG context used during enrichment.
-    # Empty list if RAG degraded gracefully (no cookbook content available).
-    # Surfaced in the UI as a "from library" provenance indicator.
+    # Compatibility field preserved while cookbook-RAG removal settles.
+    # Active enrichment is LLM-only, so this should normally be an empty list.
     rag_sources: list[str] = []
 
     chef_notes: str = ""          # Claude's practical advice for executing the recipe

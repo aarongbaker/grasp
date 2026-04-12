@@ -6,7 +6,7 @@ Each later phase only swaps one import line (mock → real node).
 
 Graph topology (linear with conditional error routing):
   START → recipe_generator → [error_router] → fatal? → handle_fatal_error → END
-                                             → continue → rag_enricher
+                                             → continue → enricher
         → [error_router] → ... → dag_merger → [dag_merger_router]
         → retry_generation? → recipe_generator
         → continue → schedule_renderer → [final_router] → mark_complete → END
@@ -14,7 +14,7 @@ Graph topology (linear with conditional error routing):
 
 CRITICAL import pattern for Phases 4-7:
   Phase 4: from app.graph.nodes.generator import recipe_generator_node  (delete mock)
-  Phase 5: from app.graph.nodes.enricher import rag_enricher_node       (delete mock)
+  Phase 5: from app.graph.nodes.enricher import enrich_recipe_steps_node  (delete mock)
   etc.
 
 The three lines after "# ── Node Imports (swap here in Phases 4-7) ──" are
@@ -31,7 +31,7 @@ from langgraph.graph import END, StateGraph
 # this makes git blame immediately informative when debugging phase regressions.
 from app.graph.nodes.dag_builder import dag_builder_node  # Phase 6: real
 from app.graph.nodes.dag_merger import dag_merger_node  # Phase 6: real
-from app.graph.nodes.enricher import rag_enricher_node  # Phase 5: real
+from app.graph.nodes.enricher import enrich_recipe_steps_node  # Phase 5: real
 
 # ── Node Imports (swap here in Phases 4-7) ───────────────────────────────────
 # This comment block is intentional scaffolding left in place. The three lines
@@ -94,8 +94,7 @@ async def mark_complete_node(state: GRASPState) -> dict:
 async def mark_partial_node(state: GRASPState) -> dict:
     """Terminal node — pipeline completed with recoverable errors."""
     # Reached when the schedule was produced but at least one recoverable error
-    # was accumulated (e.g. a RAG enrichment step fell back to Claude-only).
-    # The caller (Celery task / API route) reads state.errors to surface
+    # was accumulated during enrichment or validation. The caller (Celery task / API route)
     # warnings to the user; this node itself has nothing to add.
     return {"errors": []}
 
@@ -135,7 +134,7 @@ def build_grasp_graph(checkpointer) -> StateGraph:
     # Node order here is cosmetic — execution order is determined solely by
     # the edges added below.
     workflow.add_node("recipe_generator", recipe_generator_node)
-    workflow.add_node("rag_enricher", rag_enricher_node)       # RAG + Claude step enrichment
+    workflow.add_node("enricher", enrich_recipe_steps_node)       # LLM-only step enrichment
     workflow.add_node("validator", validator_node)              # Pydantic validation pass
     workflow.add_node("dag_builder", dag_builder_node)          # NetworkX DAG construction + cycle detection
     workflow.add_node("dag_merger", dag_merger_node)            # Greedy list scheduler (resource-aware)
@@ -165,14 +164,12 @@ def build_grasp_graph(checkpointer) -> StateGraph:
     workflow.add_conditional_edges(
         "recipe_generator",
         error_router,
-        {"fatal": "handle_fatal_error", "continue": "rag_enricher"},
+        {"fatal": "handle_fatal_error", "continue": "enricher"},
     )
 
-    # After rag_enricher: on fatal, halt. On continue, validate.
-    # Fatal here typically means Pinecone is unreachable AND Claude fallback
-    # also failed — both would have to fail simultaneously.
+    # After enricher: on fatal, halt. On continue, validate.
     workflow.add_conditional_edges(
-        "rag_enricher",
+        "enricher",
         error_router,
         {"fatal": "handle_fatal_error", "continue": "validator"},
     )

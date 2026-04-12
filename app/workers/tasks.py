@@ -184,16 +184,12 @@ async def _run_pipeline_async(session_id: str, user_id: str):
 
 @celery_app.task(name="grasp.delete_cookbook_vectors")
 def delete_cookbook_vectors(book_id: str, vector_ids: list[str]):
-    """Best-effort Pinecone cleanup for a deleted cookbook.
+    """Historical cleanup task for removed cookbook-ingestion flows.
 
-    Runs out-of-band from the API request that triggered the deletion.
-    If this task fails (Pinecone down, bad API key), the cookbook DB record
-    is already deleted and the vectors become orphaned — they waste index
-    space but don't cause incorrect retrieval results because the book_id
-    metadata on those vectors won't match any active book.
-
-    Batched in groups of 100 because Pinecone's delete API has a per-request
-    ID limit. Large cookbooks (500+ chunks) need multiple delete calls.
+    M026 removed ingest routes from the active application surface. This task is
+    retained temporarily only so older/internal cleanup code paths do not crash
+    on import while the remaining ingestion/Pinecone infrastructure is retired.
+    No active product flow should enqueue it.
     """
     from pinecone import Pinecone
 
@@ -210,12 +206,12 @@ def delete_cookbook_vectors(book_id: str, vector_ids: list[str]):
 
 @celery_app.task(name="grasp.ingest_cookbook")
 def ingest_cookbook(job_id: str, user_id: str, pdf_bytes_b64: str, filename: str):
-    """Ingestion pipeline task. pdf_bytes_b64 is base64-encoded (JSON-safe).
+    """Historical ingestion pipeline task for removed upload flows.
 
-    PDF bytes are base64-encoded before being passed to Celery because Celery
-    serializes task arguments as JSON, which cannot represent raw bytes.
-    In V2, this should be replaced with object storage (S3/R2) references —
-    large PDFs (up to 100 MB) inflate the Redis task payload significantly.
+    M026 removed `/api/v1/ingest` from the mounted FastAPI app, so no active
+    product route should enqueue this task. The implementation remains in place
+    temporarily while the broader ingestion/Pinecone cleanup proceeds in later
+    slice tasks.
     """
     import base64
 

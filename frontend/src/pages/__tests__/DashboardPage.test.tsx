@@ -90,6 +90,9 @@ describe('DashboardPage discoverability', () => {
 
     const planLinks = screen.getAllByRole('link', { name: /plan a dinner|open dinner planner/i });
     expect(planLinks.some((link) => link.getAttribute('href') === '/sessions/new')).toBe(true);
+    expect(screen.queryByText(/upload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/detected[- ]recipes?/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/recovered from the cookbook collection/i)).not.toBeInTheDocument();
 
     await waitFor(() => expect(sessionsApi.listSessions).toHaveBeenCalledWith('user-1'));
   });

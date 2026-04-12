@@ -38,8 +38,8 @@ export const PATHWAYS: readonly PathwayMeta[] = [
     title: 'Browse Cookbook Catalog',
     navLabel: 'Cookbook Catalog',
     cta: 'Open cookbook catalog',
-    purpose: 'Browse the platform cookbook catalog to preview featured collections, included shelves, and locked titles before committing them to dinner planning.',
-    relationship: 'Use this when you want to discover from the platform catalog. Step back into the dinner planner after you have chosen the cookbook lane you want to cook from.',
+    purpose: 'Browse the platform cookbook catalog to preview featured collections, included access, and locked titles before committing one catalog lane to dinner planning.',
+    relationship: 'Use this when you want to discover from the platform catalog. Step back into the dinner planner after you have chosen the catalog cookbook lane you want to cook from.',
     icon: '\u25C8',
   },
   {

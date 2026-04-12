@@ -7,7 +7,8 @@ Tests cover:
   - Sessions: create, run (409 guard, 403 ownership), get status (Fix #7)
   - Authored recipes: create, list, read, cookbook assignment, cross-user denial,
     cookbook ownership, and route-family separation
-  - Ingest: PDF-only validation (400), ownership on status poll (Fix #7)
+  - Catalog: read-only cookbook catalog summaries/detail and planner catalog session creation
+  - Historical/internal ingest seam: PDF-only validation (400), ownership on status poll (Fix #7)
 
 Uses dependency overrides with mock DB session to avoid needing a real
 Postgres instance. Tests verify HTTP status codes and request validation.
@@ -790,6 +791,19 @@ async def test_create_session_rate_limit_isolated_by_authenticated_user(mock_db)
         assert other_user.status_code == 201
 
     app.dependency_overrides.clear()
+
+
+async def test_main_app_does_not_mount_ingest_routes():
+    from app.main import app as main_app
+
+    transport = ASGITransport(app=main_app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/ingest",
+            files={"file": ("cookbook.pdf", b"%PDF-1.4\n", "application/pdf")},
+        )
+
+    assert resp.status_code == 404
 
 
 async def test_create_session_with_authored_recipe_201(app_with_overrides, mock_db, test_user):

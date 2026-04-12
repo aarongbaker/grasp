@@ -65,8 +65,8 @@ export function getRecipeProvenanceDisplay(provenance: RecipeProvenance): Recipe
     return {
       label: getProvenanceLabel(provenance.kind),
       detail: sourceLabel
-        ? `Recovered from the cookbook collection “${sourceLabel}”.`
-        : 'Recovered from one of your cookbook collections.',
+        ? `Shelved in your cookbook folder “${sourceLabel}”.`
+        : 'Shelved in one of your cookbook folders.',
     };
   }
 

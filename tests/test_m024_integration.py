@@ -250,7 +250,7 @@ def _compile_graph_with_controlled_generator(*, generator_side_effect, dag_merge
 
     with (
         patch("app.graph.graph.recipe_generator_node", AsyncMock(side_effect=generator_side_effect)) as generator,
-        patch("app.graph.graph.rag_enricher_node", AsyncMock(side_effect=_enricher_side_effect)) as enricher,
+        patch("app.graph.graph.enrich_recipe_steps_node", AsyncMock(side_effect=_enricher_side_effect)) as enricher,
         patch("app.graph.graph.validator_node", AsyncMock(side_effect=_validator_side_effect)) as validator,
         patch("app.graph.graph.dag_builder_node", AsyncMock(side_effect=_dag_builder_side_effect)) as dag_builder,
         patch("app.graph.graph.dag_merger_node", AsyncMock(side_effect=dag_merger_side_effect)) as dag_merger,

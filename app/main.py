@@ -5,8 +5,7 @@ FastAPI application entry point with lifespan hook.
 Lifespan hook runs at startup:
   1. Validate JWT secret — refuse to start production with the default placeholder
   2. Validate CORS origins — refuse production deploys with only dev origins
-  3. Initialise Pinecone client — stored on app.state for ingestion routes
-  4. Ensure LangGraph checkpoint tables exist — avoids Celery startup race condition
+  3. Ensure LangGraph checkpoint tables exist — avoids Celery startup race condition
 
 The compiled graph is stored as a module-level variable and accessed
 via get_graph() by route handlers that need status_projection().
@@ -161,24 +160,7 @@ async def lifespan(app: FastAPI):
     # explicit Alembic migrations run before the app deploys. create_all is
     # left to tests only, where it's safe to recreate schema from scratch.
 
-    # ── 2. Initialise Pinecone ────────────────────────────────────────────────
-    # Stores the Pinecone client on app.state so ingestion routes can access
-    # it without re-initialising on every request. If Pinecone init fails
-    # (wrong key, network issue), we warn and continue — ingestion will fail
-    # but the rest of the app remains functional.
-    try:
-        from pinecone import Pinecone
-
-        from app.core.settings import get_settings
-
-        settings = get_settings()
-        if settings.pinecone_api_key:
-            pc = Pinecone(api_key=settings.pinecone_api_key)
-            app.state.pinecone = pc
-    except Exception as e:
-        logger.warning("Pinecone init failed (%s). Ingestion will not work.", e)
-
-    # ── 3. Graph initialisation is lazy, but checkpoint tables must exist ───
+    # ── 2. Graph initialisation is lazy, but checkpoint tables must exist ───
     # This retires fresh-database failures where Celery reaches LangGraph before
     # any route has lazily initialised the PostgresSaver tables. Without this,
     # the first pipeline run on a fresh deploy would fail with "table not found".
@@ -292,7 +274,6 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.authored_recipes import router as authored_recipes_router
 from app.api.routes.catalog import router as catalog_router
 from app.api.routes.health import router as health_router
-from app.api.routes.ingest import router as ingest_router
 from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
 from app.api.routes.sessions import router as sessions_router
 from app.api.routes.users import router as users_router
@@ -302,7 +283,6 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
-app.include_router(ingest_router, prefix="/api/v1")
 app.include_router(authored_recipes_router, prefix="/api/v1")
 app.include_router(recipe_cookbooks_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")

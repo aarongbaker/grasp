@@ -472,7 +472,7 @@ class TestCompiledGraphRetryRouting:
             return {}
 
         generator = AsyncMock(return_value=node_returns.get("recipe_generator", {}))
-        enricher = AsyncMock(return_value=node_returns.get("rag_enricher", {}))
+        enricher = AsyncMock(return_value=node_returns.get("enricher", {}))
         validator = AsyncMock(return_value=node_returns.get("validator", {}))
         dag_builder = AsyncMock(return_value=node_returns.get("dag_builder", {}))
         dag_merger_return = node_returns.get("dag_merger", {})
@@ -485,7 +485,7 @@ class TestCompiledGraphRetryRouting:
 
         with (
             patch("app.graph.graph.recipe_generator_node", generator),
-            patch("app.graph.graph.rag_enricher_node", enricher),
+            patch("app.graph.graph.enrich_recipe_steps_node", enricher),
             patch("app.graph.graph.validator_node", validator),
             patch("app.graph.graph.dag_builder_node", dag_builder),
             patch("app.graph.graph.dag_merger_node", dag_merger),
@@ -498,7 +498,7 @@ class TestCompiledGraphRetryRouting:
 
         return graph, {
             "recipe_generator": generator,
-            "rag_enricher": enricher,
+            "enricher": enricher,
             "validator": validator,
             "dag_builder": dag_builder,
             "dag_merger": dag_merger,
@@ -509,7 +509,7 @@ class TestCompiledGraphRetryRouting:
     async def test_compiled_graph_routes_beyond_tolerance_single_oven_conflict_back_to_generation_with_retry_state(self):
         graph, calls = self._compile_graph_with_mocked_nodes(
             recipe_generator={"raw_recipes": [{"name": "Initial recipe"}]},
-            rag_enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
+            enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
             validator={"validated_recipes": [{"name": "Initial recipe"}]},
             dag_builder={"recipe_dags": [{"recipe_name": "Initial recipe", "edges": []}]},
             dag_merger={"errors": [self._retryable_dag_merger_error()]},
@@ -557,7 +557,7 @@ class TestCompiledGraphRetryRouting:
         non_retryable_error = self._retryable_dag_merger_error(classification="compatible", gap_f=12)
         graph, calls = self._compile_graph_with_mocked_nodes(
             recipe_generator={"raw_recipes": [{"name": "Initial recipe"}]},
-            rag_enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
+            enricher={"enriched_recipes": [{"name": "Initial recipe"}]},
             validator={"validated_recipes": [{"name": "Initial recipe"}]},
             dag_builder={"recipe_dags": [{"recipe_name": "Initial recipe", "edges": []}]},
             dag_merger={"errors": [non_retryable_error]},
@@ -1321,7 +1321,7 @@ class TestFallbackSummary:
         """Error with recipe_name metadata mentions the dropped recipe."""
         errors = [
             {
-                "node_name": "rag_enricher",
+                "node_name": "enricher",
                 "error_type": "rag_failure",
                 "recoverable": True,
                 "message": "Failed",
@@ -1377,7 +1377,7 @@ class TestBuildSummaryPrompt:
         concept = DinnerConcept.model_validate(CONCEPT_DICT)
         errors = [
             {
-                "node_name": "rag_enricher",
+                "node_name": "enricher",
                 "message": "Fondant enrichment failed",
                 "metadata": {"recipe_name": "Chocolate Fondant"},
             }
@@ -1556,7 +1556,7 @@ class TestScheduleRendererNode:
 
         errors = [
             {
-                "node_name": "rag_enricher",
+                "node_name": "enricher",
                 "error_type": "rag_failure",
                 "recoverable": True,
                 "message": "Enrichment failed for 'Chocolate Fondant'",
@@ -1628,7 +1628,7 @@ class TestScheduleRendererNode:
 
         errors = [
             {
-                "node_name": "rag_enricher",
+                "node_name": "enricher",
                 "error_type": "rag_failure",
                 "recoverable": True,
                 "message": "Failed",

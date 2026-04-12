@@ -78,6 +78,9 @@ describe('RecipeLibraryPage', () => {
     expect(draftLinks.some((link) => link.getAttribute('href') === '/recipes/new')).toBe(true);
     expect(screen.getByRole('link', { name: 'Planning a whole dinner instead?' })).toHaveAttribute('href', '/sessions/new');
     expect(screen.queryByText(/No data found/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/upload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/detected[- ]recipes?/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/recovered from the cookbook collection/i)).not.toBeInTheDocument();
   });
 
   it('keeps the pathway guidance and authored scheduling CTAs visible on the library surface', async () => {

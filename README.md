@@ -18,7 +18,7 @@ In the hosted app, a user can:
 3. Run the scheduling pipeline
 4. Review the generated schedule and results
 
-Cookbook and culinary text ingestion/retrieval machinery still exists behind the scenes, but only as an internal curated-text enrichment seam. The hosted product no longer promises user-managed cookbook upload, browse, or exact uploaded-recipe scheduling workflows.
+Historical cookbook and culinary-text ingestion/retrieval machinery still exists behind the scenes, but only as an internal curated-text enrichment seam while later cleanup slices retire it. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or detected-recipe recovery workflows.
 
 ### Hosted architecture
 

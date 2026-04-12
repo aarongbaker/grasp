@@ -127,6 +127,8 @@ describe('NewSessionPage', () => {
     expect(screen.getByText('Catalog cookbook included')).toBeInTheDocument();
     expect(screen.getByText('Weeknight Foundations')).toBeInTheDocument();
     expect(screen.queryByLabelText('Planner anchor')).not.toBeInTheDocument();
+    expect(screen.queryByText(/pre-existing cookbook recipes/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cookbook shelf/i)).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build a weeknight dinner from the catalog lane');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
@@ -262,6 +264,7 @@ describe('NewSessionPage', () => {
     expect(
       screen.getByText(/Keep this route for menu-intent planning\. It stays focused on a single dinner brief and does not switch into/i),
     ).toBeInTheDocument();
+    expect(screen.getByText(/a platform catalog cookbook handoff, or one owned recipe or cookbook folder\./i)).toBeInTheDocument();
     expect(screen.getByLabelText('Dishes')).toHaveValue(3);
     expect(
       screen.getByText(/No owned reference is required unless you want the planner anchored/i),

@@ -7,7 +7,7 @@ Tests numeric Fahrenheit, Celsius conversion, and vague heat inference.
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from app.graph.nodes.enricher import rag_enricher_node
+from app.graph.nodes.enricher import enrich_recipe_steps_node
 from app.models.recipe import RawRecipe, Ingredient, RecipeStep
 
 
@@ -20,16 +20,8 @@ def mock_llm():
         yield mock_instance
 
 
-@pytest.fixture
-def mock_rag():
-    """Mock RAG retrieval to return empty context."""
-    with patch("app.graph.nodes.enricher._retrieve_rag_context") as mock_rag:
-        mock_rag.return_value = []
-        yield mock_rag
-
-
 @pytest.mark.asyncio
-async def test_numeric_temp_extraction(mock_llm, mock_rag):
+async def test_numeric_temp_extraction(mock_llm):
     """
     Test that numeric Fahrenheit temperatures are extracted correctly.
     
@@ -100,7 +92,7 @@ async def test_numeric_temp_extraction(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     # Verify temperature extraction
     assert len(result["enriched_recipes"]) == 1
@@ -120,7 +112,7 @@ async def test_numeric_temp_extraction(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_celsius_conversion(mock_llm, mock_rag):
+async def test_celsius_conversion(mock_llm):
     """
     Test that Celsius temperatures are converted to Fahrenheit.
     
@@ -177,7 +169,7 @@ async def test_celsius_conversion(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
@@ -195,7 +187,7 @@ async def test_celsius_conversion(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_vague_heat_inference(mock_llm, mock_rag):
+async def test_vague_heat_inference(mock_llm):
     """
     Test that vague heat levels are mapped to predefined ranges.
     
@@ -261,7 +253,7 @@ async def test_vague_heat_inference(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
@@ -283,7 +275,7 @@ async def test_vague_heat_inference(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_preheat_injection_single_oven_step(mock_llm, mock_rag):
+async def test_preheat_injection_single_oven_step(mock_llm):
     """
     Test that preheat step is injected before first oven usage.
     
@@ -350,7 +342,7 @@ async def test_preheat_injection_single_oven_step(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
@@ -374,7 +366,7 @@ async def test_preheat_injection_single_oven_step(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_preheat_injection_no_oven_steps(mock_llm, mock_rag):
+async def test_preheat_injection_no_oven_steps(mock_llm):
     """
     Test that no preheat is injected when recipe has no oven steps.
     
@@ -438,7 +430,7 @@ async def test_preheat_injection_no_oven_steps(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
@@ -456,7 +448,7 @@ async def test_preheat_injection_no_oven_steps(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_preheat_injection_multiple_oven_steps(mock_llm, mock_rag):
+async def test_preheat_injection_multiple_oven_steps(mock_llm):
     """
     Test that only ONE preheat is injected before first oven step when multiple oven steps exist.
     
@@ -529,7 +521,7 @@ async def test_preheat_injection_multiple_oven_steps(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
@@ -556,7 +548,7 @@ async def test_preheat_injection_multiple_oven_steps(mock_llm, mock_rag):
 
 
 @pytest.mark.asyncio
-async def test_preheat_injection_oven_with_none_temp(mock_llm, mock_rag):
+async def test_preheat_injection_oven_with_none_temp(mock_llm):
     """
     Test that preheat is NOT injected when oven step has oven_temp_f=None.
     
@@ -612,7 +604,7 @@ async def test_preheat_injection_oven_with_none_temp(mock_llm, mock_rag):
         "rag_owner_key": "",
     }
     
-    result = await rag_enricher_node(state)
+    result = await enrich_recipe_steps_node(state)
     
     assert len(result["enriched_recipes"]) == 1
     enriched = result["enriched_recipes"][0]
