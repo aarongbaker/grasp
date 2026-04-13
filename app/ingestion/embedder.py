@@ -135,8 +135,12 @@ async def embed_and_upsert_chunks(
     from app.models.ingestion import CookbookChunk
     from app.models.user import UserProfile
 
-    pc = Pinecone(api_key=settings.pinecone_api_key)
-    index = pc.Index(settings.pinecone_index_name)
+    pinecone_api_key = getattr(settings, "pinecone_api_key", "")
+    pinecone_index_name = getattr(settings, "pinecone_index_name", "")
+    openai_api_key = getattr(settings, "openai_api_key", "")
+
+    pc = Pinecone(api_key=pinecone_api_key)
+    index = pc.Index(pinecone_index_name)
 
     # Apply safety-net word limit before processing
     chunks = _split_oversized_chunks(chunks)
@@ -157,7 +161,7 @@ async def embed_and_upsert_chunks(
 
     total_upserted = 0
 
-    async with AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0) as openai_client:
+    async with AsyncOpenAI(api_key=openai_api_key, timeout=60.0) as openai_client:
         # Semaphore limits concurrent per-chunk fallback calls to 10 simultaneous
         # requests — prevents overwhelming the OpenAI API rate limit during fallback.
         fallback_sem = asyncio.Semaphore(10)

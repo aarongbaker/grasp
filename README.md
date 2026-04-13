@@ -18,7 +18,7 @@ In the hosted app, a user can:
 3. Run the scheduling pipeline
 4. Review the generated schedule and results
 
-Historical cookbook ingestion and Pinecone-backed retrieval infrastructure still exists in the repository as legacy/internal code, but it is not part of the active hosted product contract. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or ingestion-worker setup.
+Historical cookbook ingestion and vector-retrieval infrastructure still exists in the repository as legacy/internal code, but it is not part of the active hosted product contract. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or ingestion-worker setup.
 
 ### Hosted architecture
 

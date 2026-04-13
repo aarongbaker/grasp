@@ -39,6 +39,8 @@ You will also need these secrets available:
 - `DATABASE_URL`
 - `LANGGRAPH_CHECKPOINT_URL`
 - `REDIS_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_RESULT_BACKEND`
 - `CORS_ALLOWED_ORIGINS`
 - `ANTHROPIC_API_KEY`
 - `VITE_API_URL` (Cloudflare side, added later)
@@ -119,6 +121,8 @@ Set these in Railway for the API service:
 - `DATABASE_URL=<Railway Postgres URL using asyncpg scheme if required by app config>`
 - `LANGGRAPH_CHECKPOINT_URL=<Postgres URL for checkpoint persistence using psycopg-style scheme>`
 - `REDIS_URL=<Railway Redis URL>`
+- `CELERY_BROKER_URL=<Railway Redis URL for broker, usually /0>`
+- `CELERY_RESULT_BACKEND=<Railway Redis URL for results, usually /1>`
 - `CORS_ALLOWED_ORIGINS=["https://<your-cloudflare-pages-domain>"]`
 - `ANTHROPIC_API_KEY=<your key>`
 
@@ -206,6 +210,8 @@ Use the same relevant env vars as the API service:
 - `DATABASE_URL=<same DB>`
 - `LANGGRAPH_CHECKPOINT_URL=<same checkpoint DB URL>`
 - `REDIS_URL=<same Redis>`
+- `CELERY_BROKER_URL=<same Redis broker URL>`
+- `CELERY_RESULT_BACKEND=<same Redis result URL>`
 - `ANTHROPIC_API_KEY=<same key>`
 
 The worker must be able to reach the same Postgres and Redis services as the API.
@@ -227,6 +233,8 @@ What you want:
 
 If the worker starts but jobs never complete later, the first things to re-check are:
 - `REDIS_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_RESULT_BACKEND`
 - `DATABASE_URL`
 - `LANGGRAPH_CHECKPOINT_URL`
 - whether the worker command is exactly `--concurrency=1 --pool=solo`
@@ -445,6 +453,8 @@ CORS_ALLOWED_ORIGINS=https://grasp-abc123.pages.dev
 - [ ] `DATABASE_URL` set
 - [ ] `LANGGRAPH_CHECKPOINT_URL` set
 - [ ] `REDIS_URL` set
+- [ ] `CELERY_BROKER_URL` set
+- [ ] `CELERY_RESULT_BACKEND` set
 - [ ] `ANTHROPIC_API_KEY` set
 - [ ] Health check passes
 
