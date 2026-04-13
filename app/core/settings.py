@@ -110,6 +110,15 @@ class Settings(BaseSettings):
     # user.email == admin_email to authorize privileged operations.
     admin_email: str = ""
 
+    # ── Billing / Stripe ───────────────────────────────────────────────────────
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id: str = ""
+    stripe_checkout_success_url: str = "http://localhost:5173/account/billing/success"
+    stripe_checkout_cancel_url: str = "http://localhost:5173/account/billing/cancel"
+    stripe_portal_return_url: str = "http://localhost:5173/account"
+    stripe_webhook_tolerance_seconds: int = 300
+
 
 @lru_cache
 def get_settings() -> Settings:

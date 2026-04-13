@@ -14,7 +14,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 from sqlalchemy import JSON
@@ -177,6 +177,8 @@ class UserProfile(SQLModel, table=True):
     # bcrypt hash. Default empty string means account has no password set yet
     # (e.g. OAuth-created accounts in future). auth.py checks for non-empty before bcrypt.
     password_hash: str = Field(default="")
+
+    stripe_customer_id: str = Field(default="", max_length=255, index=True)
 
     kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
 

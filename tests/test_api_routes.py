@@ -31,6 +31,7 @@ from sqlmodel import SQLModel, select
 from app.api.routes.auth import _build_access_token
 from app.core.settings import get_settings
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
+from app.services.stripe_billing import StripeBillingService
 from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
@@ -48,6 +49,7 @@ def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
     from app.api.routes import sessions as sessions_routes
     from app.api.routes.authored_recipes import router as authored_recipes_router
+    from app.api.routes.billing import router as billing_router
     from app.api.routes.catalog import router as catalog_router
     from app.api.routes.health import router as health_router
     from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
@@ -66,6 +68,7 @@ def _create_test_app() -> FastAPI:
 
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
+    app.include_router(billing_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
     app.include_router(authored_recipes_router, prefix="/api/v1")
     app.include_router(recipe_cookbooks_router, prefix="/api/v1")
@@ -114,6 +117,7 @@ class MockDBSession:
         self._store: dict[tuple, object] = {}
         self.exec_result = None
         self.execute_side_effect = None
+        self.committed = False
 
     def add(self, obj):
         model_class = obj.__class__
@@ -125,7 +129,7 @@ class MockDBSession:
                 break
 
     async def commit(self):
-        pass
+        self.committed = True
 
     async def flush(self):
         pass
@@ -503,6 +507,195 @@ async def test_get_profile_marks_library_access_unavailable_when_sync_failed(app
     assert payload["library_access"]["state"] == "unavailable"
     assert payload["library_access"]["reason"] == "Cookbook library access is temporarily unavailable because your subscription state could not be refreshed."
     assert payload["library_access"]["access_diagnostics"]["sync_state"] == "failed"
+
+
+def _stub_billing_service(monkeypatch, service):
+    monkeypatch.setattr("app.api.routes.billing.build_billing_service", lambda _settings: service)
+
+
+async def test_billing_checkout_returns_redirect_url_and_app_safe_state(app_with_overrides, test_user, monkeypatch):
+    service = AsyncMock(spec=StripeBillingService)
+    service.create_checkout_session.return_value = type(
+        "Bundle",
+        (),
+        {
+            "url": "https://checkout.stripe.test/session_123",
+            "snapshot_id": uuid.uuid4(),
+            "subscription_status": "cancelled",
+            "sync_state": "pending",
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/v1/billing/checkout", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://checkout.stripe.test/session_123"
+    assert payload["subscription_status"] == "cancelled"
+    assert payload["sync_state"] == "pending"
+    assert "provider_customer_ref" not in str(payload)
+    assert "provider_subscription_ref" not in str(payload)
+
+
+async def test_billing_portal_returns_redirect_url_and_snapshot_metadata(app_with_overrides, test_user, monkeypatch):
+    snapshot_id = uuid.uuid4()
+    service = AsyncMock(spec=StripeBillingService)
+    service.create_portal_session.return_value = type(
+        "Bundle",
+        (),
+        {
+            "url": "https://billing.stripe.test/session_456",
+            "snapshot_id": snapshot_id,
+            "subscription_status": "active",
+            "sync_state": "synced",
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/v1/billing/portal", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "url": "https://billing.stripe.test/session_456",
+        "subscription_status": "active",
+        "sync_state": "synced",
+        "subscription_snapshot_id": str(snapshot_id),
+    }
+
+
+async def test_billing_webhook_syncs_subscription_state_and_entitlement(app_with_overrides, test_user, monkeypatch):
+    snapshot_id = uuid.uuid4()
+    synced_snapshot = SubscriptionSnapshot(
+        subscription_snapshot_id=snapshot_id,
+        user_id=test_user.user_id,
+        provider="stripe",
+        status=SubscriptionStatus.ACTIVE,
+        sync_state=SubscriptionSyncState.SYNCED,
+    )
+    service = AsyncMock(spec=StripeBillingService)
+    service.handle_webhook.return_value = synced_snapshot
+    service.record_webhook_failure.return_value = None
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    body = {
+        "id": "evt_123",
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_123",
+                "customer": "cus_123",
+                "metadata": {"user_id": str(test_user.user_id)},
+            }
+        },
+    }
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/webhooks/stripe",
+            json=body,
+            headers={"stripe-signature": "t=1,v1=signature"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "received": True,
+        "subscription_snapshot_id": str(snapshot_id),
+        "sync_state": "synced",
+        "subscription_status": "active",
+    }
+
+
+async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_state(app_with_overrides, test_user, mock_db, monkeypatch):
+    failed_snapshot = SubscriptionSnapshot(
+        subscription_snapshot_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        provider="stripe",
+        status=SubscriptionStatus.CANCELLED,
+        sync_state=SubscriptionSyncState.FAILED,
+        sync_error_code="stripe_signature_invalid",
+    )
+    service = AsyncMock(spec=StripeBillingService)
+    service.handle_webhook.side_effect = __import__("app.services.stripe_billing", fromlist=["StripeSignatureError"]).StripeSignatureError(
+        "Invalid Stripe signature"
+    )
+    service.record_webhook_failure.return_value = failed_snapshot
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    body = {
+        "id": "evt_bad_sig",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "subscription": "sub_bad_sig",
+                "customer": "cus_bad_sig",
+                "client_reference_id": str(test_user.user_id),
+            }
+        },
+    }
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/webhooks/stripe",
+            json=body,
+            headers={"stripe-signature": "bad"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "stripe_signature_invalid",
+        "message": "Invalid Stripe signature",
+        "subscription_snapshot_id": str(failed_snapshot.subscription_snapshot_id),
+    }
+    assert mock_db.committed is True
+
+
+async def test_billing_webhook_rejects_replayed_events_and_surfaces_snapshot_context(app_with_overrides, test_user, mock_db, monkeypatch):
+    replay_snapshot = SubscriptionSnapshot(
+        subscription_snapshot_id=uuid.uuid4(),
+        user_id=test_user.user_id,
+        provider="stripe",
+        status=SubscriptionStatus.ACTIVE,
+        sync_state=SubscriptionSyncState.FAILED,
+        sync_error_code="stripe_replay",
+    )
+    stripe_module = __import__("app.services.stripe_billing", fromlist=["StripeReplayError"])
+    service = AsyncMock(spec=StripeBillingService)
+    service.handle_webhook.side_effect = stripe_module.StripeReplayError("Stripe event evt_replay already processed")
+    service.record_webhook_failure.return_value = replay_snapshot
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    body = {
+        "id": "evt_replay",
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_replay",
+                "customer": "cus_replay",
+                "metadata": {"user_id": str(test_user.user_id)},
+            }
+        },
+    }
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/webhooks/stripe",
+            json=body,
+            headers={"stripe-signature": "replay"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "stripe_replay",
+        "message": "Stripe event evt_replay already processed",
+        "subscription_snapshot_id": str(replay_snapshot.subscription_snapshot_id),
+    }
+    assert mock_db.committed is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
