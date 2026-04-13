@@ -1,6 +1,6 @@
 # GRASP
 
-**Generative Retrieval-Augmented Scheduling & Planning** - a hosted web app for creating personalized, time-coordinated cooking schedules from meal descriptions.
+**Generative Scheduling & Planning** - a hosted web app for creating personalized, time-coordinated cooking schedules from meal descriptions.
 
 GRASP uses Claude and a LangGraph-driven scheduling pipeline to:
 - generate recipes from free-text menu intent
@@ -276,6 +276,3 @@ grasp/
 ```
 
 Local machine state such as `.venv/`, `node_modules/`, `.env`, and tool runtime scratch directories is intentionally excluded from the structure above.
-tructure above.
-ture above.
-tructure above.

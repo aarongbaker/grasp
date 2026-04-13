@@ -18,6 +18,7 @@ export type PlannerReferenceKind = 'authored' | 'cookbook';
 export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous';
 export type CatalogCookbookAccessState = 'included' | 'preview' | 'locked';
 export type CatalogCookbookAudience = 'included' | 'preview' | 'premium';
+export type LibraryAccessState = 'included' | 'locked' | 'unavailable';
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
@@ -103,6 +104,20 @@ export interface UserProfile {
   created_at: string;
   kitchen_config: KitchenConfig | null;
   equipment: Equipment[];
+  library_access: LibraryAccessSummary;
+}
+
+export interface LibraryAccessSummary {
+  state: LibraryAccessState;
+  reason: string;
+  has_catalog_access: boolean;
+  billing_state_changed: boolean;
+  access_diagnostics: {
+    subscription_snapshot_id: string | null;
+    subscription_status: string | null;
+    sync_state: string | null;
+    provider: string | null;
+  };
 }
 
 // Session

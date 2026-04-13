@@ -70,7 +70,7 @@ function classifyTransportError(_error: unknown, controller: AbortController): A
   if (controller.signal.aborted) {
     return new ApiError(
       0,
-      'Request timed out while the server was processing your upload. The API may be slow, but it is still reachable.',
+      'Request timed out while the server was processing it. The API may be slow, but it is still reachable.',
       'timeout',
     );
   }
@@ -78,7 +78,7 @@ function classifyTransportError(_error: unknown, controller: AbortController): A
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return new ApiError(
       0,
-      'You appear to be offline, so the upload could not reach the API.',
+      'You appear to be offline, so the request could not reach the API.',
       'network-offline',
     );
   }

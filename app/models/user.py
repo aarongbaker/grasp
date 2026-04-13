@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import field_validator, model_validator
+from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 from sqlalchemy import JSON
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -127,6 +127,24 @@ class EntitlementKind(str, Enum):
 
     CATALOG_PREVIEW = "catalog_preview"
     CATALOG_PREMIUM = "catalog_premium"
+
+
+class LibraryAccessState(str, Enum):
+    """User-visible access state for the cookbook library surface."""
+
+    INCLUDED = "included"
+    LOCKED = "locked"
+    UNAVAILABLE = "unavailable"
+
+
+class LibraryAccessSummary(BaseModel):
+    """Provider-agnostic account-facing cookbook library access contract."""
+
+    state: LibraryAccessState
+    reason: str = PydanticField(min_length=1, max_length=300)
+    has_catalog_access: bool
+    billing_state_changed: bool
+    access_diagnostics: dict[str, str | None]
 
 
 class UserProfile(SQLModel, table=True):

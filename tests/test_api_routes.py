@@ -35,7 +35,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserProfile
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -246,6 +246,34 @@ class MockDBSession:
             mock_result.all.return_value = rows
             return mock_result
 
+        if "from subscription_snapshots" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is SubscriptionSnapshot
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            rows.sort(key=lambda record: (record.updated_at, record.created_at), reverse=True)
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from user_entitlement_grants" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is UserEntitlementGrant
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            rows.sort(key=lambda record: record.created_at, reverse=True)
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
         if "from equipment" in lowered_text:
             uuid_filters = _extract_uuid_filters()
             rows = [
@@ -376,6 +404,105 @@ def reset_session_route_limiter():
 def _auth_headers_for(user: UserProfile) -> dict[str, str]:
     token, _expires_in = _build_access_token(str(user.user_id), user.email, get_settings())
     return {"Authorization": f"Bearer {token}"}
+
+
+async def test_get_profile_includes_provider_agnostic_library_access_summary(app_with_overrides, test_user, mock_db):
+    kitchen = KitchenConfig(
+        kitchen_config_id=uuid.uuid4(),
+        max_burners=4,
+        max_oven_racks=2,
+        has_second_oven=False,
+        burners=[],
+    )
+    test_user.kitchen_config = kitchen
+    test_user.equipment = []
+    mock_db.seed(UserProfile, test_user.user_id, test_user)
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.ACTIVE,
+            sync_state=SubscriptionSyncState.SYNCED,
+        ),
+    )
+
+    mock_db.exec_result = None
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(f"/api/v1/users/{test_user.user_id}/profile", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["library_access"]["state"] == "locked"
+    assert payload["library_access"]["reason"] == "Your current subscription no longer includes cookbook library access."
+    assert payload["library_access"]["has_catalog_access"] is False
+    assert payload["library_access"]["billing_state_changed"] is True
+    assert payload["library_access"]["access_diagnostics"]["subscription_status"] == "active"
+    assert payload["library_access"]["access_diagnostics"]["sync_state"] == "synced"
+    assert "provider_customer_ref" not in str(payload["library_access"])
+    assert "provider_subscription_ref" not in str(payload["library_access"])
+
+
+async def test_get_profile_marks_library_access_included_for_explicit_entitlement(app_with_overrides, test_user, mock_db):
+    kitchen = KitchenConfig(kitchen_config_id=uuid.uuid4(), burners=[])
+    test_user.kitchen_config = kitchen
+    test_user.equipment = []
+    mock_db.seed(UserProfile, test_user.user_id, test_user)
+    mock_db.seed(
+        UserEntitlementGrant,
+        uuid.uuid4(),
+        UserEntitlementGrant(
+            entitlement_grant_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            kind=EntitlementKind.CATALOG_PREMIUM,
+            source="manual",
+            is_active=True,
+        ),
+    )
+
+    mock_db.exec_result = None
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(f"/api/v1/users/{test_user.user_id}/profile", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["library_access"]["state"] == "included"
+    assert payload["library_access"]["reason"] == "Cookbook library access is included with your account."
+    assert payload["library_access"]["has_catalog_access"] is True
+    assert payload["library_access"]["billing_state_changed"] is False
+
+
+async def test_get_profile_marks_library_access_unavailable_when_sync_failed(app_with_overrides, test_user, mock_db):
+    kitchen = KitchenConfig(kitchen_config_id=uuid.uuid4(), burners=[])
+    test_user.kitchen_config = kitchen
+    test_user.equipment = []
+    mock_db.seed(UserProfile, test_user.user_id, test_user)
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.CANCELLED,
+            sync_state=SubscriptionSyncState.FAILED,
+        ),
+    )
+
+    mock_db.exec_result = None
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(f"/api/v1/users/{test_user.user_id}/profile", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["library_access"]["state"] == "unavailable"
+    assert payload["library_access"]["reason"] == "Cookbook library access is temporarily unavailable because your subscription state could not be refreshed."
+    assert payload["library_access"]["access_diagnostics"]["sync_state"] == "failed"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

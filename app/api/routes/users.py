@@ -39,11 +39,67 @@ from app.core.deps import CurrentUser, DBSession
 from app.core.settings import get_settings
 from app.models.enums import EquipmentCategory
 from app.models.invite import Invite
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserProfile
+from app.models.user import (
+    BurnerDescriptor,
+    Equipment,
+    KitchenConfig,
+    LibraryAccessState,
+    LibraryAccessSummary,
+    SubscriptionStatus,
+    SubscriptionSyncState,
+    EntitlementKind,
+    UserProfile,
+)
+from app.services.subscriptions import build_subscription_diagnostics, get_active_subscription_snapshot, list_user_entitlement_grants
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users")
+
+
+def _derive_library_access_summary(
+    *,
+    subscription_status: SubscriptionStatus | None,
+    sync_state: SubscriptionSyncState | None,
+    has_premium_entitlement: bool,
+    diagnostics: dict[str, str | None],
+) -> LibraryAccessSummary:
+    """Derive one provider-agnostic library access summary for the account surface."""
+
+    if has_premium_entitlement:
+        return LibraryAccessSummary(
+            state=LibraryAccessState.INCLUDED,
+            reason="Cookbook library access is included with your account.",
+            has_catalog_access=True,
+            billing_state_changed=False,
+            access_diagnostics=diagnostics,
+        )
+
+    if sync_state == SubscriptionSyncState.FAILED:
+        return LibraryAccessSummary(
+            state=LibraryAccessState.UNAVAILABLE,
+            reason="Cookbook library access is temporarily unavailable because your subscription state could not be refreshed.",
+            has_catalog_access=False,
+            billing_state_changed=True,
+            access_diagnostics=diagnostics,
+        )
+
+    if subscription_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.GRACE_PERIOD}:
+        return LibraryAccessSummary(
+            state=LibraryAccessState.LOCKED,
+            reason="Your current subscription no longer includes cookbook library access.",
+            has_catalog_access=False,
+            billing_state_changed=True,
+            access_diagnostics=diagnostics,
+        )
+
+    return LibraryAccessSummary(
+        state=LibraryAccessState.LOCKED,
+        reason="Cookbook library access is not included on this account.",
+        has_catalog_access=False,
+        billing_state_changed=False,
+        access_diagnostics=diagnostics,
+    )
 
 
 def _hash_password(password: str) -> str:
@@ -227,9 +283,31 @@ async def get_profile(user_id: uuid.UUID, db: DBSession, current_user: CurrentUs
     user = result.first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    subscription_snapshot = await get_active_subscription_snapshot(db, user_id=user.user_id)
+    entitlement_grants = await list_user_entitlement_grants(db, user_id=user.user_id)
+    diagnostics = build_subscription_diagnostics(subscription_snapshot)
+    diagnostics_payload = {
+        "subscription_snapshot_id": str(diagnostics.subscription_snapshot_id) if diagnostics.subscription_snapshot_id else None,
+        "subscription_status": diagnostics.subscription_status.value if diagnostics.subscription_status else None,
+        "sync_state": diagnostics.sync_state.value if diagnostics.sync_state else None,
+        "provider": diagnostics.provider,
+    }
+    has_premium_entitlement = any(
+        grant.kind == EntitlementKind.CATALOG_PREMIUM and grant.is_active
+        for grant in entitlement_grants
+    )
+    library_access = _derive_library_access_summary(
+        subscription_status=subscription_snapshot.status if subscription_snapshot else None,
+        sync_state=subscription_snapshot.sync_state if subscription_snapshot else None,
+        has_premium_entitlement=has_premium_entitlement,
+        diagnostics=diagnostics_payload,
+    )
+
     data = user.model_dump(exclude={"password_hash"})
     data["kitchen_config"] = user.kitchen_config.model_dump() if user.kitchen_config else None
     data["equipment"] = [eq.model_dump() for eq in user.equipment]
+    data["library_access"] = library_access.model_dump()
     return data
 
 

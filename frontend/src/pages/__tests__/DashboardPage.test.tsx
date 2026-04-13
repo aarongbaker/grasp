@@ -23,6 +23,18 @@ const authValue = {
     dietary_defaults: [],
     equipment: [],
     created_at: '2026-04-01T00:00:00Z',
+    library_access: {
+      state: 'included',
+      reason: 'Cookbook library access is included with your account.',
+      has_catalog_access: true,
+      billing_state_changed: false,
+      access_diagnostics: {
+        subscription_snapshot_id: null,
+        subscription_status: null,
+        sync_state: null,
+        provider: null,
+      },
+    },
   } satisfies UserProfile,
   isAuthenticated: true,
   login: vi.fn(),

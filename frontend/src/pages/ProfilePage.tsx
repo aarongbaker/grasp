@@ -65,6 +65,7 @@ export function ProfilePage() {
   const secondOvenRacks = kc?.max_second_oven_racks ?? 2;
   const dietaryDefaults = user.dietary_defaults ?? [];
   const equipment = user.equipment ?? [];
+  const libraryAccess = user.library_access;
 
   // ─── Handlers ───
 
@@ -180,6 +181,36 @@ export function ProfilePage() {
         <div className={styles.profileField}>
           <span className={styles.profileFieldLabel}>Email</span>
           <span className={styles.profileFieldValue}>{user.email}</span>
+        </div>
+      </div>
+
+      {/* Library access */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>Cookbook Library Access</h2>
+          <span className={styles.sectionHint}>Derived from your account access state</span>
+        </div>
+
+        <div className={styles.accessCard}>
+          <div className={styles.accessHeaderRow}>
+            <span className={`${styles.accessBadge} ${styles[`accessBadge${libraryAccess.state[0].toUpperCase()}${libraryAccess.state.slice(1)}`]}`}>
+              {libraryAccess.state}
+            </span>
+            {libraryAccess.billing_state_changed ? (
+              <span className={styles.accessMeta}>Billing state changed</span>
+            ) : null}
+          </div>
+          <p className={styles.accessReason}>{libraryAccess.reason}</p>
+          <dl className={styles.accessDiagnostics}>
+            <div>
+              <dt>Catalog planning</dt>
+              <dd>{libraryAccess.has_catalog_access ? 'Available' : 'Unavailable'}</dd>
+            </div>
+            <div>
+              <dt>Sync state</dt>
+              <dd>{libraryAccess.access_diagnostics.sync_state ?? 'none'}</dd>
+            </div>
+          </dl>
         </div>
       </div>
 
