@@ -5,7 +5,7 @@ Use this when promoting GRASP to production with **Railway for the API + worker*
 The checked-in app expects a three-surface deployment contract:
 
 1. **api** service on Railway — FastAPI / `/api/v1`
-2. **worker** service on Railway — Celery background execution
+2. **worker** service on Railway — Celery background execution for session planning
 3. **frontend** on Cloudflare Pages — Vite build that calls the Railway API over HTTPS
 
 If you leave `VITE_API_URL` unset, the frontend falls back to same-origin `/api/v1`. That is only correct when the frontend and API are served from the same origin. For the normal Cloudflare Pages → Railway split, you must set `VITE_API_URL` in Cloudflare Pages at build time.
@@ -112,13 +112,9 @@ CELERY_RESULT_BACKEND=redis://default:password@host:port/1
 
 ```env
 ANTHROPIC_API_KEY=...
-OPENAI_API_KEY=...
-PINECONE_API_KEY=...
-PINECONE_INDEX_NAME=grasp-cookbooks
-PINECONE_ENVIRONMENT=us-east-1-aws
 ```
 
-The API can boot without provider keys, but cookbook ingestion / RAG / meal-planning flows will fail until they are set.
+The API can boot without provider keys, but session planning flows will fail until `ANTHROPIC_API_KEY` is set.
 
 ### Frontend build env (Cloudflare Pages only)
 
@@ -139,7 +135,6 @@ Before deploy, confirm:
 - [ ] `.venv/bin/python -m pytest tests/ -m "not integration" -q` passes
 - [ ] `npm --prefix frontend run build` passes if deploying the frontend
 - [ ] `npm --prefix frontend run lint` passes if deploying the frontend
-- [ ] Pinecone index exists
 - [ ] JWT secret is not the default value
 - [ ] `CORS_ALLOWED_ORIGINS` is a JSON array string containing only real frontend origin(s), not localhost defaults
 - [ ] Railway API env includes both `DATABASE_URL` and `LANGGRAPH_CHECKPOINT_URL` with the correct schemes
@@ -171,8 +166,7 @@ Run these against the live stack.
 
 ## Known Constraints
 
-- PDF ingestion currently sends PDF bytes through the API into Celery. This works for staging and small usage, but object storage is still the right production follow-up.
-- Provider keys are not enforced at API boot. Missing `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `PINECONE_API_KEY` shows up when ingestion / RAG / planning flows execute.
 - The worker process must still be pinned to `--pool=solo --concurrency=1` for current Railway memory assumptions, even though the checked-in Celery config makes broker startup retry explicit.
+- Provider keys are not enforced at API boot. Missing `ANTHROPIC_API_KEY` shows up when planning flows execute.
 - Celery may still emit a warning when the worker runs as root inside a container. Treat that as container-user hygiene, not as a reachability or broker-startup blocker.
 - Frontend deployment is separate and must be validated with the Cloudflare build-time `VITE_API_URL` value, not only with API health.

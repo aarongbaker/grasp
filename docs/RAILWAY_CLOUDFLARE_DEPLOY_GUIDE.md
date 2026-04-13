@@ -41,8 +41,6 @@ You will also need these secrets available:
 - `REDIS_URL`
 - `CORS_ALLOWED_ORIGINS`
 - `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `PINECONE_API_KEY`
 - `VITE_API_URL` (Cloudflare side, added later)
 
 Important project-specific notes:
@@ -123,10 +121,6 @@ Set these in Railway for the API service:
 - `REDIS_URL=<Railway Redis URL>`
 - `CORS_ALLOWED_ORIGINS=["https://<your-cloudflare-pages-domain>"]`
 - `ANTHROPIC_API_KEY=<your key>`
-- `OPENAI_API_KEY=<your key>`
-- `PINECONE_API_KEY=<your key>`
-
-You may also need any Pinecone index-related variables your existing `.env` or app setup expects.
 
 ### Very important: database URL formats
 
@@ -186,7 +180,7 @@ Common failure examples:
 ## Step 6: Create the Railway worker service
 
 This project needs a separate worker service.
-The worker processes background pipeline jobs.
+The worker processes background planning jobs.
 
 ### Create the worker
 
@@ -213,8 +207,6 @@ Use the same relevant env vars as the API service:
 - `LANGGRAPH_CHECKPOINT_URL=<same checkpoint DB URL>`
 - `REDIS_URL=<same Redis>`
 - `ANTHROPIC_API_KEY=<same key>`
-- `OPENAI_API_KEY=<same key>`
-- `PINECONE_API_KEY=<same key>`
 
 The worker must be able to reach the same Postgres and Redis services as the API.
 
@@ -398,7 +390,7 @@ Check worker logs for:
 - Redis connection errors
 - Postgres/checkpoint errors
 - crash loops
-- missing API keys
+- missing `ANTHROPIC_API_KEY`
 
 Re-check:
 - `REDIS_URL`
@@ -453,13 +445,13 @@ CORS_ALLOWED_ORIGINS=https://grasp-abc123.pages.dev
 - [ ] `DATABASE_URL` set
 - [ ] `LANGGRAPH_CHECKPOINT_URL` set
 - [ ] `REDIS_URL` set
-- [ ] AI provider keys set
+- [ ] `ANTHROPIC_API_KEY` set
 - [ ] Health check passes
 
 ### Railway worker
 - [ ] Worker service created from same repo
 - [ ] Worker command set to `celery -A app.workers.celery_app worker --concurrency=1 --pool=solo --loglevel=INFO`
-- [ ] Same DB/Redis/API key env vars set
+- [ ] Same DB/Redis/provider env vars set
 - [ ] Worker logs show successful startup
 
 ### Cloudflare Pages

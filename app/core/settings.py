@@ -89,12 +89,6 @@ class Settings(BaseSettings):
 
     # ── LLM Providers ────────────────────────────────────────────────────────
     anthropic_api_key: str = ""  # required for generator, enricher, renderer nodes
-    openai_api_key: str = ""     # required for Pinecone embeddings (text-embedding-3-small)
-
-    # ── Pinecone ──────────────────────────────────────────────────────────────
-    pinecone_api_key: str = ""
-    pinecone_index_name: str = "grasp-cookbooks"  # index name in the Pinecone project
-    pinecone_environment: str = "us-east-1-aws"   # Pinecone environment (legacy pods)
 
     # ── RAG ───────────────────────────────────────────────────────────────────
     # Number of chunks retrieved per RAG query. Higher = more context, more tokens.

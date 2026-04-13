@@ -2,9 +2,9 @@
 
 **Generative Retrieval-Augmented Scheduling & Planning** - a hosted web app for creating personalized, time-coordinated cooking schedules from meal descriptions.
 
-GRASP combines Claude for recipe generation, OpenAI embeddings + Pinecone for curated culinary-text enrichment, and a LangGraph-driven scheduling pipeline to:
+GRASP uses Claude and a LangGraph-driven scheduling pipeline to:
 - generate recipes from free-text menu intent
-- enrich with curated culinary knowledge
+- enrich and validate the working plan
 - build dependency-aware cooking timelines
 - render a step-by-step schedule for service
 
@@ -18,14 +18,14 @@ In the hosted app, a user can:
 3. Run the scheduling pipeline
 4. Review the generated schedule and results
 
-Historical cookbook and culinary-text ingestion/retrieval machinery still exists behind the scenes, but only as an internal curated-text enrichment seam while later cleanup slices retire it. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or detected-recipe recovery workflows.
+Historical cookbook ingestion and Pinecone-backed retrieval infrastructure still exists in the repository as legacy/internal code, but it is not part of the active hosted product contract. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or ingestion-worker setup.
 
 ### Hosted architecture
 
 Production GRASP runs as a three-surface system:
 
 1. **Railway API service** - FastAPI at `/api/v1`
-2. **Railway worker service** - Celery worker for ingestion and planning jobs
+2. **Railway worker service** - Celery worker for session planning jobs
 3. **Cloudflare Pages frontend** - the public web UI
 
 Background work such as meal-planning execution happens asynchronously in the worker. The frontend polls the API for pipeline status, terminal results, and recoverable failure details while the backend handles generation, enrichment, validation, and scheduling off the request path.
@@ -112,12 +112,10 @@ Development startup should not require shell overrides for `APP_ENV`, JWT, or CO
 
 If your existing `.env` still contains `APP_ENV=production` from prior deploy testing, the repo-root API command will fail fast with production CORS/JWT guards. Reset local startup to the documented development contract by re-copying `.env.example` or setting `.env` back to `APP_ENV=development`.
 
-The meal-planning flow requires real provider keys:
+The meal-planning flow requires a real provider key:
 - `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `PINECONE_API_KEY`
 
-The API can boot without those keys, but LLM / RAG workflows will fail until they are set.
+The API can boot without that key, but recipe generation / planning workflows will fail until it is set.
 
 ## Local development quick start
 
@@ -186,26 +184,17 @@ This starts:
 
 ## API keys
 
-GRASP requires three API keys for the full LLM / RAG pipeline:
+GRASP requires one API key for the active hosted planning pipeline:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-proj-...
-PINECONE_API_KEY=pcsk_...
 ```
 
 | Key | What it does | Where to get it |
 |-----|-------------|-----------------|
 | `ANTHROPIC_API_KEY` | Powers Claude for recipe generation, step enrichment, and schedule summaries | [console.anthropic.com](https://console.anthropic.com/) |
-| `OPENAI_API_KEY` | Generates text embeddings for curated content enrichment | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| `PINECONE_API_KEY` | Vector database for curated content embeddings | [app.pinecone.io](https://app.pinecone.io/) |
 
-You'll also want to configure your Pinecone index:
-
-```env
-PINECONE_INDEX_NAME=grasp-content
-PINECONE_ENVIRONMENT=us-east-1-aws
-```
+Legacy ingestion / vector-retrieval modules may still reference additional provider variables in historical code paths, but they are not part of the supported hosted runtime contract documented here.
 
 The remaining `.env` values can stay at their development defaults for local work.
 
@@ -230,7 +219,7 @@ docker compose up --build
 This launches:
 - **app** on port 8000 - FastAPI API server
 - **worker** - Celery background worker with memory-safe local settings
-- **Postgres** on port 5432 - stores users, sessions, and ingestion records
+- **Postgres** on port 5432 - stores users and sessions
 - **Redis** on port 6379 - Celery broker/result backend and rate-limit storage
 
 For local/manual database upgrades:
@@ -273,11 +262,11 @@ npm --prefix frontend run build
 ```
 grasp/
 ├── app/                # FastAPI app package
-│   ├── api/            # Routes (health, users, sessions, ingest, auth)
+│   ├── api/            # Routes (health, users, sessions, auth, catalog)
 │   ├── core/           # Settings, auth, dependency injection, status helpers
 │   ├── db/             # SQLAlchemy / SQLModel session setup
 │   ├── graph/          # LangGraph state machine & pipeline nodes
-│   ├── ingestion/      # Internal curated-text ingestion pipeline (OCR, classify, chunk, embed)
+│   ├── ingestion/      # Historical internal ingestion/vector infrastructure
 │   ├── models/         # Pydantic/SQLModel data models
 │   └── workers/        # Celery task workers
 ├── tests/              # Test suite
