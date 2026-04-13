@@ -23,9 +23,9 @@ const stages: { title: string; description: string; icon: LucideIcon }[] = [
     icon: Sparkles,
   },
   {
-    title: 'Ground',
+    title: 'Shape',
     description:
-      'Curated culinary knowledge can refine timing and technique behind the scenes.',
+      'The planner turns menu intent into workable dishes, timing assumptions, and service-ready structure before scheduling begins.',
     icon: BookOpenText,
   },
   {

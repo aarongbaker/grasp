@@ -7,7 +7,7 @@ export function Footer() {
         <div className={styles.brand}>
           <h2 className={styles.brandTitle}>GRASP</h2>
           <p className={styles.brandSub}>
-            Generative Retrieval-Augmented Scheduling &amp; Planning
+            Generative Scheduling &amp; Planning
           </p>
         </div>
 

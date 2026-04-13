@@ -163,7 +163,16 @@ class MockDBSession:
 
     async def delete(self, obj):
         model_class = obj.__class__
-        for pk_name in ("session_id", "job_id", "recipe_id", "cookbook_id", "equipment_id", "user_id"):
+        for pk_name in (
+            "subscription_snapshot_id",
+            "entitlement_grant_id",
+            "session_id",
+            "job_id",
+            "recipe_id",
+            "cookbook_id",
+            "equipment_id",
+            "user_id",
+        ):
             if hasattr(obj, pk_name):
                 pk = getattr(obj, pk_name)
                 self._store.pop((model_class, pk), None)
@@ -2016,6 +2025,7 @@ async def test_get_catalog_cookbook_returns_detail_shape_and_preserves_private_l
     assert catalog_item["slug"] == "weeknight-foundations"
     assert catalog_item["access_state"] == "included"
     assert catalog_item["sample_recipe_titles"] == ["Skillet Chicken Piccata", "Tomato Braised Chickpeas"]
+    assert catalog_item["access_diagnostics"]["subscription_snapshot_id"] is None
     assert "cookbook_id" not in catalog_item
 
     assert private_resp.status_code == 200
@@ -2423,6 +2433,8 @@ async def test_create_authored_recipe_422_preserves_validation_detail(app_with_o
     assert "Access denied" not in issue["msg"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Route inventory
 # ─────────────────────────────────────────────────────────────────────────────
 # Route inventory
 # ─────────────────────────────────────────────────────────────────────────────

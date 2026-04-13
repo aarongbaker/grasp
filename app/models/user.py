@@ -13,6 +13,7 @@ config change mid-run cannot corrupt an in-progress schedule.
 import re
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from pydantic import field_validator, model_validator
@@ -102,6 +103,32 @@ class KitchenConfig(SQLModel, table=True):
         return self
 
 
+class SubscriptionStatus(str, Enum):
+    """Normalized subscription lifecycle states persisted by the app."""
+
+    ACTIVE = "active"
+    TRIALING = "trialing"
+    PAST_DUE = "past_due"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    GRACE_PERIOD = "grace_period"
+
+
+class SubscriptionSyncState(str, Enum):
+    """Observed sync health for the persisted subscription snapshot."""
+
+    PENDING = "pending"
+    SYNCED = "synced"
+    FAILED = "failed"
+
+
+class EntitlementKind(str, Enum):
+    """Provider-agnostic app capabilities granted to a user."""
+
+    CATALOG_PREVIEW = "catalog_preview"
+    CATALOG_PREMIUM = "catalog_premium"
+
+
 class UserProfile(SQLModel, table=True):
     __tablename__ = "user_profiles"
 
@@ -146,3 +173,48 @@ class UserProfile(SQLModel, table=True):
     # ORM relationships — used for eager loading in workers/tasks.py
     kitchen_config: Optional[KitchenConfig] = Relationship(back_populates="user")
     equipment: list[Equipment] = Relationship(back_populates="user")
+    subscription_snapshots: list["SubscriptionSnapshot"] = Relationship(back_populates="user")
+    entitlement_grants: list["UserEntitlementGrant"] = Relationship(back_populates="user")
+
+
+class SubscriptionSnapshot(SQLModel, table=True):
+    __tablename__ = "subscription_snapshots"
+
+    subscription_snapshot_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+
+    provider: str = Field(min_length=1, max_length=50)
+    provider_customer_ref: Optional[str] = Field(default=None, max_length=255)
+    provider_subscription_ref: Optional[str] = Field(default=None, max_length=255)
+    plan_code: Optional[str] = Field(default=None, max_length=100)
+
+    status: SubscriptionStatus = Field(default=SubscriptionStatus.CANCELLED)
+    sync_state: SubscriptionSyncState = Field(default=SubscriptionSyncState.PENDING)
+
+    current_period_ends_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = None
+    sync_error_code: Optional[str] = Field(default=None, max_length=100)
+    sync_error_message: Optional[str] = Field(default=None, max_length=500)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="subscription_snapshots")
+
+
+class UserEntitlementGrant(SQLModel, table=True):
+    __tablename__ = "user_entitlement_grants"
+
+    entitlement_grant_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+
+    kind: EntitlementKind
+    source: str = Field(min_length=1, max_length=100)
+    is_active: bool = Field(default=True)
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="entitlement_grants")

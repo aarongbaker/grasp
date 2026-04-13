@@ -23,9 +23,9 @@ const features = [
       "Maximize your kitchen's throughput. Two burners, one oven, and a sous vide? GRASP schedules around your actual equipment.",
   },
   {
-    title: 'Curated Culinary Grounding',
+    title: 'Planner-Guided Menu Building',
     description:
-      'Behind the scenes, curated culinary references can sharpen timing, technique, and service decisions without taking over the workflow.',
+      'Move from a dinner brief to a workable menu with generated structure, service-aware sequencing, and room to bring in catalog or authored dishes when they fit the night.',
   },
   {
     title: 'Step-by-Step Timeline',

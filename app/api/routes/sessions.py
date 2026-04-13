@@ -221,6 +221,7 @@ async def _resolve_planner_catalog_cookbook(
     *,
     body: CreateSessionPlannerCatalogCookbookRequest,
     current_user: CurrentUser,
+    db: DBSession,
 ) -> dict:
     """Resolve one catalog cookbook through the backend entitlement seam.
 
@@ -228,9 +229,10 @@ async def _resolve_planner_catalog_cookbook(
     trusting client-supplied title/access fields. Preview and included catalog
     cookbooks are both planner-selectable; locked catalog items fail explicitly.
     """
-    catalog_summary = resolve_catalog_cookbook_access(
+    catalog_summary = await resolve_catalog_cookbook_access(
         body.planner_catalog_cookbook.catalog_cookbook_id,
         current_user,
+        db,
     )
     if catalog_summary.access_state == CatalogCookbookAccessState.LOCKED:
         raise HTTPException(status_code=403, detail=catalog_summary.access_state_reason)
@@ -310,7 +312,7 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     elif isinstance(body, CreateSessionPlannerCookbookTargetRequest):
         concept_fields.update(await _resolve_planner_cookbook_target(body=body, db=db, current_user=current_user))
     elif isinstance(body, CreateSessionPlannerCatalogCookbookRequest):
-        concept_fields.update(await _resolve_planner_catalog_cookbook(body=body, current_user=current_user))
+        concept_fields.update(await _resolve_planner_catalog_cookbook(body=body, current_user=current_user, db=db))
     elif isinstance(body, CreateSessionCookbookRequest):
         # Cookbook mode: selected_recipes will be resolved by the generator node
         # at pipeline start. For now, store chunk_ids in the concept.
@@ -581,3 +583,4 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
         "recipes": [r.model_dump() for r in recipes],
         "errors": errors,
     }
+

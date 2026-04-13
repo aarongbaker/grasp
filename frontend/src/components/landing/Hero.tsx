@@ -13,7 +13,7 @@ export function Hero() {
         className={styles.inner}
       >
         <span className={styles.label}>
-          Generative Retrieval-Augmented Scheduling &amp; Planning
+          Generative Scheduling &amp; Planning
         </span>
 
         <h1 className={styles.heading}>
