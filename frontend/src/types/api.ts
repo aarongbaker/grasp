@@ -120,6 +120,13 @@ export interface LibraryAccessSummary {
   };
 }
 
+export interface BillingSessionResponse {
+  url: string;
+  subscription_status: string | null;
+  sync_state: string | null;
+  subscription_snapshot_id: string | null;
+}
+
 // Session
 export interface SelectedCookbookRecipe {
   chunk_id: string;

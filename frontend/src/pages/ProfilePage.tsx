@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '../context/useAuth';
+import { createCheckoutSession, createPortalSession } from '../api/billing';
 import { updateKitchen, updateDietaryDefaults, addEquipment, deleteEquipment, getProfile } from '../api/users';
-import { Skeleton } from '../components/shared/Skeleton';
 import { Button } from '../components/shared/Button';
 import { Input } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
-import type { Equipment, EquipmentCategory } from '../types/api';
+import { Skeleton } from '../components/shared/Skeleton';
+import { useAuth } from '../context/useAuth';
+import type { BillingSessionResponse, Equipment, EquipmentCategory } from '../types/api';
 import styles from './ProfilePage.module.css';
 
 const MAX_BURNERS = 10;
@@ -21,15 +22,18 @@ const EQUIPMENT_CATEGORIES: { value: EquipmentCategory; label: string }[] = [
 export function ProfilePage() {
   const { user, userId, setUser } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [billingLoading, setBillingLoading] = useState<'checkout' | 'portal' | null>(null);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [billingActionState, setBillingActionState] = useState<Pick<
+    BillingSessionResponse,
+    'subscription_status' | 'sync_state' | 'subscription_snapshot_id'
+  > | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Equipment add form
   const [showAddForm, setShowAddForm] = useState(false);
   const [newEquipName, setNewEquipName] = useState('');
   const [newEquipCategory, setNewEquipCategory] = useState<EquipmentCategory>('prep');
   const [newEquipTechniques, setNewEquipTechniques] = useState('');
-
-  // Dietary input
   const [dietaryInput, setDietaryInput] = useState('');
 
   const showSaveIndicator = useCallback(() => {
@@ -38,8 +42,9 @@ export function ProfilePage() {
     saveTimer.current = setTimeout(() => setSaving(false), 1500);
   }, []);
 
-  // Clean up timer
-  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
 
   const refreshUser = useCallback(async () => {
     if (!userId) return;
@@ -66,8 +71,14 @@ export function ProfilePage() {
   const dietaryDefaults = user.dietary_defaults ?? [];
   const equipment = user.equipment ?? [];
   const libraryAccess = user.library_access;
-
-  // ─── Handlers ───
+  const syncStateLabel = billingActionState?.sync_state ?? libraryAccess.access_diagnostics.sync_state ?? 'none';
+  const billingStatusLabel = billingActionState?.subscription_status ?? libraryAccess.access_diagnostics.subscription_status ?? 'none';
+  const snapshotLabel = billingActionState?.subscription_snapshot_id ?? libraryAccess.access_diagnostics.subscription_snapshot_id ?? 'none';
+  const shouldOfferCheckout = libraryAccess.state !== 'included';
+  const billingActionLabel = shouldOfferCheckout ? 'Activate cookbook access' : 'Manage billing';
+  const billingActionHint = shouldOfferCheckout
+    ? 'Start secure checkout. Access state continues to come from the backend after sync completes.'
+    : 'Open billing management. Account and library state continue to reflect backend sync status.';
 
   async function handleBurnerClick(n: number) {
     if (!userId) return;
@@ -76,7 +87,9 @@ export function ProfilePage() {
       await updateKitchen(userId, { max_burners: newCount });
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to update burners', err); }
+    } catch (err) {
+      console.error('Failed to update burners', err);
+    }
   }
 
   async function handleRackChange(delta: number) {
@@ -87,7 +100,9 @@ export function ProfilePage() {
       await updateKitchen(userId, { max_oven_racks: newVal });
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to update racks', err); }
+    } catch (err) {
+      console.error('Failed to update racks', err);
+    }
   }
 
   async function handleSecondOvenRackChange(delta: number) {
@@ -98,7 +113,9 @@ export function ProfilePage() {
       await updateKitchen(userId, { max_second_oven_racks: newVal });
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to update second oven racks', err); }
+    } catch (err) {
+      console.error('Failed to update second oven racks', err);
+    }
   }
 
   async function handleSecondOvenToggle() {
@@ -107,7 +124,9 @@ export function ProfilePage() {
       await updateKitchen(userId, { has_second_oven: !hasSecondOven });
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to toggle second oven', err); }
+    } catch (err) {
+      console.error('Failed to toggle second oven', err);
+    }
   }
 
   async function handleAddDietary(value: string) {
@@ -120,7 +139,9 @@ export function ProfilePage() {
       await refreshUser();
       setDietaryInput('');
       showSaveIndicator();
-    } catch (err) { console.error('Failed to update dietary defaults', err); }
+    } catch (err) {
+      console.error('Failed to update dietary defaults', err);
+    }
   }
 
   async function handleRemoveDietary(tag: string) {
@@ -130,7 +151,9 @@ export function ProfilePage() {
       await updateDietaryDefaults(userId, updated);
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to remove dietary tag', err); }
+    } catch (err) {
+      console.error('Failed to remove dietary tag', err);
+    }
   }
 
   async function handleAddEquipment() {
@@ -151,7 +174,9 @@ export function ProfilePage() {
       setNewEquipTechniques('');
       setShowAddForm(false);
       showSaveIndicator();
-    } catch (err) { console.error('Failed to add equipment', err); }
+    } catch (err) {
+      console.error('Failed to add equipment', err);
+    }
   }
 
   async function handleDeleteEquipment(eq: Equipment) {
@@ -160,10 +185,30 @@ export function ProfilePage() {
       await deleteEquipment(userId, eq.equipment_id);
       await refreshUser();
       showSaveIndicator();
-    } catch (err) { console.error('Failed to delete equipment', err); }
+    } catch (err) {
+      console.error('Failed to delete equipment', err);
+    }
   }
 
-  // ─── Render ───
+  async function handleBillingAction(kind: 'checkout' | 'portal') {
+    setBillingLoading(kind);
+    setBillingError(null);
+
+    try {
+      const response = kind === 'checkout' ? await createCheckoutSession() : await createPortalSession();
+      setBillingActionState({
+        subscription_status: response.subscription_status,
+        sync_state: response.sync_state,
+        subscription_snapshot_id: response.subscription_snapshot_id,
+      });
+      window.location.assign(response.url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Billing is temporarily unavailable. Please try again.';
+      setBillingError(message);
+    } finally {
+      setBillingLoading(null);
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -172,7 +217,6 @@ export function ProfilePage() {
         Configure your setup so GRASP can schedule around what you actually have.
       </p>
 
-      {/* Profile */}
       <div className={styles.profileRow}>
         <div className={styles.profileField}>
           <span className={styles.profileFieldLabel}>Name</span>
@@ -184,7 +228,6 @@ export function ProfilePage() {
         </div>
       </div>
 
-      {/* Library access */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Cookbook Library Access</h2>
@@ -196,11 +239,28 @@ export function ProfilePage() {
             <span className={`${styles.accessBadge} ${styles[`accessBadge${libraryAccess.state[0].toUpperCase()}${libraryAccess.state.slice(1)}`]}`}>
               {libraryAccess.state}
             </span>
-            {libraryAccess.billing_state_changed ? (
-              <span className={styles.accessMeta}>Billing state changed</span>
-            ) : null}
+            {libraryAccess.billing_state_changed ? <span className={styles.accessMeta}>Billing state changed</span> : null}
           </div>
           <p className={styles.accessReason}>{libraryAccess.reason}</p>
+          <div className={styles.billingActions}>
+            <div className={styles.billingActionsCopy}>
+              <p className={styles.billingActionTitle}>{billingActionLabel}</p>
+              <p className={styles.billingActionHint}>{billingActionHint}</p>
+            </div>
+            <Button
+              type="button"
+              variant={shouldOfferCheckout ? 'primary' : 'secondary'}
+              onClick={() => void handleBillingAction(shouldOfferCheckout ? 'checkout' : 'portal')}
+              disabled={billingLoading !== null}
+            >
+              {billingLoading === 'checkout'
+                ? 'Starting checkout…'
+                : billingLoading === 'portal'
+                  ? 'Opening billing…'
+                  : billingActionLabel}
+            </Button>
+          </div>
+          {billingError ? <p className={styles.billingError}>{billingError}</p> : null}
           <dl className={styles.accessDiagnostics}>
             <div>
               <dt>Catalog planning</dt>
@@ -208,13 +268,20 @@ export function ProfilePage() {
             </div>
             <div>
               <dt>Sync state</dt>
-              <dd>{libraryAccess.access_diagnostics.sync_state ?? 'none'}</dd>
+              <dd>{syncStateLabel}</dd>
+            </div>
+            <div>
+              <dt>Subscription status</dt>
+              <dd>{billingStatusLabel}</dd>
+            </div>
+            <div>
+              <dt>Snapshot</dt>
+              <dd>{snapshotLabel}</dd>
             </div>
           </dl>
         </div>
       </div>
 
-      {/* Stovetop */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Stovetop</h2>
@@ -243,14 +310,11 @@ export function ProfilePage() {
           </div>
           <div className={styles.burnerCount}>
             {burners}
-            <div className={styles.burnerCountLabel}>
-              burner{burners !== 1 ? 's' : ''} active
-            </div>
+            <div className={styles.burnerCountLabel}>burner{burners !== 1 ? 's' : ''} active</div>
           </div>
         </div>
       </div>
 
-      {/* Ovens */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Ovens</h2>
@@ -270,15 +334,7 @@ export function ProfilePage() {
         </div>
 
         <div className={styles.ovenRow}>
-          {/* Primary oven */}
-          <OvenVisual
-            label="Primary Oven"
-            racks={racks}
-            maxRacks={MAX_RACKS}
-            onRackChange={handleRackChange}
-          />
-
-          {/* Second oven */}
+          <OvenVisual label="Primary Oven" racks={racks} maxRacks={MAX_RACKS} onRackChange={handleRackChange} />
           <div className={!hasSecondOven ? styles.ovenDisabled : undefined}>
             <OvenVisual
               label="Second Oven"
@@ -291,7 +347,6 @@ export function ProfilePage() {
         </div>
       </div>
 
-      {/* Dietary Defaults */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Dietary Defaults</h2>
@@ -321,14 +376,13 @@ export function ProfilePage() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                handleAddDietary(dietaryInput);
+                void handleAddDietary(dietaryInput);
               }
             }}
           />
         </div>
       </div>
 
-      {/* Equipment */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Equipment</h2>
@@ -352,7 +406,7 @@ export function ProfilePage() {
               <button
                 type="button"
                 className={styles.removeBtn}
-                onClick={() => handleDeleteEquipment(eq)}
+                onClick={() => void handleDeleteEquipment(eq)}
                 aria-label={`Remove ${eq.name}`}
               >
                 &times;
@@ -384,32 +438,23 @@ export function ProfilePage() {
                 <Button variant="ghost" size="sm" onClick={() => setShowAddForm(false)}>
                   Cancel
                 </Button>
-                <Button size="sm" onClick={handleAddEquipment} disabled={!newEquipName.trim()}>
+                <Button size="sm" onClick={() => void handleAddEquipment()} disabled={!newEquipName.trim()}>
                   Add
                 </Button>
               </div>
             </div>
           ) : (
-            <button
-              type="button"
-              className={styles.addEquipmentCard}
-              onClick={() => setShowAddForm(true)}
-            >
+            <button type="button" className={styles.addEquipmentCard} onClick={() => setShowAddForm(true)}>
               + Add equipment
             </button>
           )}
         </div>
       </div>
 
-      {/* Save indicator toast */}
-      <div className={`${styles.saveIndicator} ${saving ? styles.saveIndicatorVisible : ''}`}>
-        Saved
-      </div>
+      <div className={`${styles.saveIndicator} ${saving ? styles.saveIndicatorVisible : ''}`}>Saved</div>
     </div>
   );
 }
-
-/* ─── Oven subcomponent ─── */
 
 function OvenVisual({
   label,
@@ -424,7 +469,6 @@ function OvenVisual({
   onRackChange?: (delta: number) => void;
   disabled?: boolean;
 }) {
-  // Render rack slots — show all potential positions, highlight active ones
   const slots = Math.max(maxRacks, 3);
 
   return (
@@ -434,10 +478,7 @@ function OvenVisual({
       </div>
       <div className={styles.ovenCavity}>
         {Array.from({ length: slots }, (_, i) => (
-          <div
-            key={i}
-            className={`${styles.rack} ${i < racks ? styles.rackActive : ''}`}
-          />
+          <div key={i} className={`${styles.rack} ${i < racks ? styles.rackActive : ''}`} />
         ))}
       </div>
       {onRackChange && !disabled && (
