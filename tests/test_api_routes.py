@@ -50,7 +50,6 @@ def _create_test_app() -> FastAPI:
     from app.api.routes.authored_recipes import router as authored_recipes_router
     from app.api.routes.catalog import router as catalog_router
     from app.api.routes.health import router as health_router
-    from app.api.routes.ingest import router as ingest_router
     from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
     from app.api.routes.sessions import router as sessions_router
     from app.api.routes.users import router as users_router
@@ -68,7 +67,6 @@ def _create_test_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")
     app.include_router(sessions_router, prefix="/api/v1")
-    app.include_router(ingest_router, prefix="/api/v1")
     app.include_router(authored_recipes_router, prefix="/api/v1")
     app.include_router(recipe_cookbooks_router, prefix="/api/v1")
     app.include_router(catalog_router, prefix="/api/v1")
@@ -2426,29 +2424,18 @@ async def test_create_authored_recipe_422_preserves_validation_detail(app_with_o
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ingest routes (Fix #7)
+# Route inventory
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_upload_pdf_rejects_non_pdf(app_with_overrides):
-    transport = ASGITransport(app=app_with_overrides)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post(
-            "/api/v1/ingest",
-            files={"file": ("notes.txt", b"not a pdf", "text/plain")},
-        )
+async def test_route_contract_app_excludes_ingest_surface(app_with_overrides):
+    route_paths = {
+        route.path
+        for route in app_with_overrides.routes
+        if getattr(route, "path", None)
+    }
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "Only PDF files accepted"
-
-
-async def test_get_ingestion_status_requires_ownership(app_with_overrides, mock_db):
-    job = IngestionJob(user_id=uuid.uuid4(), status=IngestionStatus.PENDING)
-    mock_db.seed(IngestionJob, job.job_id, job)
-
-    transport = ASGITransport(app=app_with_overrides)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get(f"/api/v1/ingest/{job.job_id}")
-
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "Access denied"
+    assert "/api/v1/ingest" not in route_paths
+    assert not any(path.startswith("/api/v1/ingest/") for path in route_paths)
+    assert "/api/v1/sessions" in route_paths
+    assert "/api/v1/catalog/cookbooks" in route_paths

@@ -308,8 +308,7 @@ async def test_db_engine():
     _ensure_test_postgres_available()
     engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
-    # Import all SQLModel table models to register metadata
-    import app.models.ingestion  # noqa: F401
+    # Import the active SQLModel table models to register metadata
     import app.models.session  # noqa: F401
     import app.models.user  # noqa: F401
 

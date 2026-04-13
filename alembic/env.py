@@ -8,16 +8,18 @@ target_metadata is set.
 
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
-# Import all table models to register them with SQLModel.metadata
+# Import active table models to register them with SQLModel.metadata.
+# Historical ingestion tables remain in prior Alembic revisions but are no longer
+# part of the mounted backend/runtime surface, so they are intentionally excluded
+# from current autogenerate metadata.
 import app.models.authored_recipe  # noqa: F401
-import app.models.ingestion  # noqa: F401
 import app.models.invite  # noqa: F401
 import app.models.session  # noqa: F401
 import app.models.user  # noqa: F401
-from alembic import context
 
 # Alembic Config object
 config = context.config

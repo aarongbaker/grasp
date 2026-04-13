@@ -63,7 +63,6 @@ async def create_db_and_tables():
     """
     # Import all table models to register them with SQLModel metadata
     import app.models.authored_recipe  # noqa: F401
-    import app.models.ingestion  # noqa: F401
     import app.models.invite  # noqa: F401
     import app.models.session  # noqa: F401
     import app.models.user  # noqa: F401
