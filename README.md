@@ -18,7 +18,7 @@ In the hosted app, a user can:
 3. Run the scheduling pipeline
 4. Review the generated schedule and results
 
-Historical cookbook ingestion and vector-retrieval infrastructure still exists in the repository as legacy/internal code, but it is not part of the active hosted product contract. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows or ingestion-worker setup.
+Historical cookbook ingestion infrastructure still exists in the repository as legacy/internal code, but it is not part of the active hosted product contract. The hosted product now promises cookbook support only through the platform catalog and user-owned authored-library lanes, not through user-managed upload flows, ingestion-worker setup, or cookbook-specific retrieval.
 
 ### Hosted architecture
 
@@ -194,7 +194,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 |-----|-------------|-----------------|
 | `ANTHROPIC_API_KEY` | Powers Claude for recipe generation, step enrichment, and schedule summaries | [console.anthropic.com](https://console.anthropic.com/) |
 
-Legacy ingestion / vector-retrieval modules may still reference additional provider variables in historical code paths, but they are not part of the supported hosted runtime contract documented here.
+Legacy ingestion modules may still reference additional provider variables in historical code paths, but they are not part of the supported hosted runtime contract documented here.
 
 The remaining `.env` values can stay at their development defaults for local work.
 
@@ -266,7 +266,7 @@ grasp/
 │   ├── core/           # Settings, auth, dependency injection, status helpers
 │   ├── db/             # SQLAlchemy / SQLModel session setup
 │   ├── graph/          # LangGraph state machine & pipeline nodes
-│   ├── ingestion/      # Historical internal ingestion/vector infrastructure
+│   ├── ingestion/      # Historical internal ingestion infrastructure
 │   ├── models/         # Pydantic/SQLModel data models
 │   └── workers/        # Celery task workers
 ├── tests/              # Test suite
@@ -276,3 +276,6 @@ grasp/
 ```
 
 Local machine state such as `.venv/`, `node_modules/`, `.env`, and tool runtime scratch directories is intentionally excluded from the structure above.
+tructure above.
+ture above.
+tructure above.
