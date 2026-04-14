@@ -611,6 +611,94 @@ async def test_billing_webhook_syncs_subscription_state_and_entitlement(app_with
     }
 
 
+async def test_billing_webhook_subscription_event_falls_back_to_existing_subscription_snapshot_linkage(app_with_overrides, test_user, monkeypatch):
+    snapshot_id = uuid.uuid4()
+    synced_snapshot = SubscriptionSnapshot(
+        subscription_snapshot_id=snapshot_id,
+        user_id=test_user.user_id,
+        provider="stripe",
+        provider_customer_ref="cus_linked",
+        provider_subscription_ref="sub_linked",
+        status=SubscriptionStatus.ACTIVE,
+        sync_state=SubscriptionSyncState.SYNCED,
+    )
+    service = AsyncMock(spec=StripeBillingService)
+    service.handle_webhook.return_value = synced_snapshot
+    service.record_webhook_failure.return_value = None
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    body = {
+        "id": "evt_subscription_updated",
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_linked",
+                "customer": "cus_linked",
+                "metadata": {},
+            }
+        },
+    }
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/webhooks/stripe",
+            json=body,
+            headers={"stripe-signature": "t=1,v1=signature"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "received": True,
+        "subscription_snapshot_id": str(snapshot_id),
+        "sync_state": "synced",
+        "subscription_status": "active",
+    }
+
+
+async def test_billing_webhook_subscription_event_falls_back_to_existing_customer_snapshot_linkage(app_with_overrides, test_user, monkeypatch):
+    snapshot_id = uuid.uuid4()
+    synced_snapshot = SubscriptionSnapshot(
+        subscription_snapshot_id=snapshot_id,
+        user_id=test_user.user_id,
+        provider="stripe",
+        provider_customer_ref="cus_customer_linked",
+        provider_subscription_ref=None,
+        status=SubscriptionStatus.ACTIVE,
+        sync_state=SubscriptionSyncState.SYNCED,
+    )
+    service = AsyncMock(spec=StripeBillingService)
+    service.handle_webhook.return_value = synced_snapshot
+    service.record_webhook_failure.return_value = None
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    body = {
+        "id": "evt_subscription_created",
+        "type": "customer.subscription.created",
+        "data": {
+            "object": {
+                "id": "sub_customer_linked",
+                "customer": "cus_customer_linked",
+                "metadata": {},
+            }
+        },
+    }
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/webhooks/stripe",
+            json=body,
+            headers={"stripe-signature": "t=1,v1=signature"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "received": True,
+        "subscription_snapshot_id": str(snapshot_id),
+        "sync_state": "synced",
+        "subscription_status": "active",
+    }
+
+
 async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_state(app_with_overrides, test_user, mock_db, monkeypatch):
     failed_snapshot = SubscriptionSnapshot(
         subscription_snapshot_id=uuid.uuid4(),
