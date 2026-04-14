@@ -7,15 +7,16 @@ Create Date: 2026-04-12 21:20:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "9b1d7e6c4a2f"
-down_revision = "0f2c360d63c6"
+down_revision = "2a4b6c8d0e1f"
 branch_labels = None
 depends_on = None
 
 
-subscription_status_enum = sa.Enum(
+subscription_status_enum = postgresql.ENUM(
     "active",
     "trialing",
     "past_due",
@@ -23,17 +24,20 @@ subscription_status_enum = sa.Enum(
     "expired",
     "grace_period",
     name="subscriptionstatus",
+    create_type=False,
 )
-subscription_sync_state_enum = sa.Enum(
+subscription_sync_state_enum = postgresql.ENUM(
     "pending",
     "synced",
     "failed",
     name="subscriptionsyncstate",
+    create_type=False,
 )
-entitlement_kind_enum = sa.Enum(
+entitlement_kind_enum = postgresql.ENUM(
     "catalog_preview",
     "catalog_premium",
     name="entitlementkind",
+    create_type=False,
 )
 
 
