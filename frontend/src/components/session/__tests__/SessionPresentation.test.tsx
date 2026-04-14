@@ -295,6 +295,7 @@ const plannerCatalogCookbookSession: Session = {
       title: 'Weeknight Foundations',
       access_state: 'included',
       access_state_reason: 'Included with your current catalog access.',
+      access_diagnostics: null,
     },
   },
 };
@@ -512,6 +513,7 @@ describe('session presentation', () => {
         title: '   ',
         access_state: 'included',
         access_state_reason: 'Included with your current catalog access.',
+        access_diagnostics: null,
       },
     };
 

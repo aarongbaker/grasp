@@ -59,6 +59,14 @@ interface PlannerResolutionState {
   selectedMatchId: string;
 }
 
+interface CatalogPlannerRemediation {
+  eyebrow: string;
+  headline: string;
+  body: string;
+  hint: string;
+  links: Array<{ label: string; to: string }>;
+}
+
 const idleResolutionState: PlannerResolutionState = {
   phase: 'idle',
   status: null,
@@ -116,6 +124,73 @@ function getCatalogHandoffStatus(value: unknown): CatalogHandoffStatus {
   return value.access_state;
 }
 
+function getCatalogPlannerRemediation(
+  status: CatalogHandoffStatus,
+  plannerCatalogCookbook: PlannerCatalogCookbookReference | null,
+  links: {
+    catalog: { label: string; to: string };
+    profile: { label: string; to: string };
+  },
+): CatalogPlannerRemediation | null {
+  if (status === 'missing') {
+    return null;
+  }
+
+  if (status === 'invalid') {
+    return {
+      eyebrow: 'Catalog handoff invalid',
+      headline: 'The catalog selection could not be trusted in this planner state.',
+      body: 'The handoff shape was malformed, so the planner will not submit a catalog-backed session from this page.',
+      hint: 'Return to the catalog detail page and reopen the planner from a valid cookbook detail handoff.',
+      links: [links.catalog],
+    };
+  }
+
+  if (!plannerCatalogCookbook) {
+    return null;
+  }
+
+  const syncFailed = plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed';
+
+  if (status === 'included') {
+    return {
+      eyebrow: 'Catalog cookbook included',
+      headline: plannerCatalogCookbook.title,
+      body: 'This catalog cookbook was handed off from the platform catalog and will seed the planner through the catalog access lane rather than your private cookbook folders.',
+      hint: plannerCatalogCookbook.access_state_reason,
+      links: [links.catalog],
+    };
+  }
+
+  if (status === 'preview') {
+    return {
+      eyebrow: 'Catalog cookbook preview',
+      headline: plannerCatalogCookbook.title,
+      body: 'Preview access is valid for planning. The planner will seed one catalog anchor and keep catalog wording separate from your private cookbook shelves.',
+      hint: `${plannerCatalogCookbook.access_state_reason} If you need more catalog access after this preview, review account access from your profile.`,
+      links: [links.catalog, links.profile],
+    };
+  }
+
+  if (syncFailed) {
+    return {
+      eyebrow: 'Catalog access refresh needed',
+      headline: plannerCatalogCookbook.title,
+      body: 'This catalog handoff is temporarily blocked while your account access refresh finishes, so session creation stays disabled here until backend access settles.',
+      hint: `${plannerCatalogCookbook.access_state_reason} Review account access first, then return to the catalog when the refresh is complete.`,
+      links: [links.profile, links.catalog],
+    };
+  }
+
+  return {
+    eyebrow: 'Catalog cookbook locked',
+    headline: plannerCatalogCookbook.title,
+    body: 'This handoff is blocked by the backend-provided catalog access state, so session creation stays disabled here.',
+    hint: `${plannerCatalogCookbook.access_state_reason} Review account access to unlock more catalog access, or return to the catalog and choose an included or preview cookbook.`,
+    links: [links.profile, links.catalog],
+  };
+}
+
 export function NewSessionPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -138,6 +213,7 @@ export function NewSessionPage() {
   const recipeLibrary = pathwayByKey['recipe-library'];
   const catalogPathway = pathwayByKey.catalog;
   const authoredWorkspace = pathwayByKey['authored-workspace'];
+  const profilePath = '/profile';
   const crossLinks = useMemo(
     () => [
       {
@@ -170,6 +246,14 @@ export function NewSessionPage() {
   const plannerCatalogCookbook = useMemo(
     () => (isPlannerCatalogCookbookReference(catalogHandoffCandidate) ? catalogHandoffCandidate : null),
     [catalogHandoffCandidate],
+  );
+  const catalogPlannerRemediation = useMemo(
+    () =>
+      getCatalogPlannerRemediation(catalogHandoffStatus, plannerCatalogCookbook, {
+        catalog: { label: 'Back to catalog', to: catalogPathway.to },
+        profile: { label: 'Review account access', to: profilePath },
+      }),
+    [catalogHandoffStatus, plannerCatalogCookbook, catalogPathway.to, profilePath],
   );
 
   const selectedPlannerMatch = useMemo(() => {
@@ -434,94 +518,64 @@ export function NewSessionPage() {
             <p className={styles.anchorDescription}>{plannerAnchorDescription}</p>
           </div>
 
-          {catalogHandoffStatus !== 'missing' && (
+          {catalogPlannerRemediation && (
             <div className={styles.catalogLaneCard} aria-live="polite">
-              {catalogHandoffStatus === 'included' && plannerCatalogCookbook ? (
-                <>
-                  <p className={styles.resultEyebrow}>Catalog cookbook included</p>
-                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
-                  <p className={styles.resultText}>
-                    This catalog cookbook was handed off from the platform catalog and will seed the planner through the catalog access lane rather than your private cookbook folders.
-                  </p>
-                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
-                </>
-              ) : null}
-
-              {catalogHandoffStatus === 'preview' && plannerCatalogCookbook ? (
-                <>
-                  <p className={styles.resultEyebrow}>Catalog cookbook preview</p>
-                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
-                  <p className={styles.resultText}>
-                    Preview access is valid for planning. The planner will seed one catalog anchor and keep catalog wording separate from your private cookbook shelves.
-                  </p>
-                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
-                </>
-              ) : null}
-
-              {catalogHandoffStatus === 'locked' && plannerCatalogCookbook ? (
-                <>
-                  <p className={styles.resultEyebrow}>Catalog cookbook locked</p>
-                  <p className={styles.resultHeadline}>{plannerCatalogCookbook.title}</p>
-                  <p className={styles.resultText}>
-                    This handoff is blocked by the backend-provided catalog access state, so session creation stays disabled here.
-                  </p>
-                  <p className={styles.recoveryHint}>{plannerCatalogCookbook.access_state_reason}</p>
-                </>
-              ) : null}
-
-              {catalogHandoffStatus === 'invalid' ? (
-                <>
-                  <p className={styles.resultEyebrow}>Catalog handoff invalid</p>
-                  <p className={styles.resultHeadline}>The catalog selection could not be trusted in this planner state.</p>
-                  <p className={styles.resultText}>
-                    The handoff shape was malformed, so the planner will not submit a catalog-backed session from this page.
-                  </p>
-                  <p className={styles.recoveryHint}>Return to the catalog detail page and reopen the planner from a valid cookbook detail handoff.</p>
-                </>
-              ) : null}
+              <p className={styles.resultEyebrow}>{catalogPlannerRemediation.eyebrow}</p>
+              <p className={styles.resultHeadline}>{catalogPlannerRemediation.headline}</p>
+              <p className={styles.resultText}>{catalogPlannerRemediation.body}</p>
+              <p className={styles.recoveryHint}>{catalogPlannerRemediation.hint}</p>
+              <div className={styles.catalogLaneLinks}>
+                {catalogPlannerRemediation.links.map((link) => (
+                  <Link key={link.to} to={link.to} className={styles.catalogLaneLink}>
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
 
           {!plannerCatalogCookbook && (
-          <div className={styles.anchorGrid}>
-            <Select
-              label="Planner anchor"
-              options={plannerAnchorOptions.map((option) => ({ value: option.value, label: option.label }))}
-              value={plannerAnchorMode}
-              onChange={(e) => handlePlannerAnchorModeChange(e.target.value as PlannerAnchorMode)}
-            />
+            <div className={styles.anchorGrid}>
+              <Select
+                label="Planner anchor"
+                options={plannerAnchorOptions.map((option) => ({ value: option.value, label: option.label }))}
+                value={plannerAnchorMode}
+                onChange={(e) => handlePlannerAnchorModeChange(e.target.value as PlannerAnchorMode)}
+              />
 
-            {plannerAnchorMode !== 'none' && (
-              <div className={styles.referenceInputRow}>
-                <Input
-                  label={plannerAnchorMode === 'authored' ? 'Saved recipe reference' : 'Cookbook reference'}
-                  placeholder={
-                    plannerAnchorMode === 'authored'
-                      ? 'Type the owned recipe name the planner should anchor to'
-                      : 'Type the owned cookbook name the planner should target'
-                  }
-                  value={plannerReferenceInput}
-                  onChange={(e) => handlePlannerReferenceInputChange(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className={styles.resolveButton}
-                  onClick={() => void handleResolvePlannerReference()}
-                  disabled={isPlannerResolutionBusy}
-                >
-                  {isPlannerResolutionBusy ? 'Resolving…' : 'Resolve'}
-                </Button>
-              </div>
-            )}
-          </div>
+              {plannerAnchorMode !== 'none' && (
+                <div className={styles.referenceInputRow}>
+                  <Input
+                    label={plannerAnchorMode === 'authored' ? 'Saved recipe reference' : 'Cookbook reference'}
+                    placeholder={
+                      plannerAnchorMode === 'authored'
+                        ? 'Type the owned recipe name the planner should anchor to'
+                        : 'Type the owned cookbook name the planner should target'
+                    }
+                    value={plannerReferenceInput}
+                    onChange={(e) => handlePlannerReferenceInputChange(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className={styles.resolveButton}
+                    onClick={() => void handleResolvePlannerReference()}
+                    disabled={isPlannerResolutionBusy}
+                  >
+                    {isPlannerResolutionBusy ? 'Resolving…' : 'Resolve'}
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
 
           <div className={styles.anchorMeta}>
             <span className={styles.anchorMetaLabel}>
               {plannerCatalogCookbook
                 ? catalogHandoffStatus === 'locked'
-                  ? 'The backend marked this catalog cookbook as locked, so planner submission is intentionally blocked until you choose another catalog cookbook.'
+                  ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
+                    ? 'The backend kept this catalog cookbook out of planning because account access is still refreshing, so planner submission remains disabled until that state recovers.'
+                    : 'The backend marked this catalog cookbook as locked, so planner submission is intentionally blocked until you choose another catalog cookbook.'
                   : catalogHandoffStatus === 'preview'
                     ? 'Preview catalog access is authoritative here. The planner will submit the catalog-backed payload only while this handoff remains valid.'
                     : 'Included catalog access is authoritative here. The planner will submit the catalog-backed payload without reusing the private cookbook target lane.'
@@ -538,7 +592,9 @@ export function NewSessionPage() {
                   : catalogHandoffStatus === 'preview'
                     ? `Catalog preview lane ready with “${plannerCatalogCookbook.title}”.`
                     : catalogHandoffStatus === 'locked'
-                      ? `Catalog lane blocked for “${plannerCatalogCookbook.title}”.`
+                      ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
+                        ? `Catalog lane waiting on refreshed account access for “${plannerCatalogCookbook.title}”.`
+                        : `Catalog lane blocked for “${plannerCatalogCookbook.title}”.`
                       : 'Catalog lane is waiting for a valid handoff.'}
               </span>
             )}

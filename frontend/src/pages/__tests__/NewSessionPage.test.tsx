@@ -152,7 +152,13 @@ describe('NewSessionPage', () => {
       ),
     );
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_cookbook_target');
-    expect(createSessionSpy.mock.calls[0]?.[0].planner_catalog_cookbook).not.toHaveProperty('access_diagnostics');
+    expect(createSessionSpy.mock.calls[0]?.[0]).toEqual(
+      expect.not.objectContaining({
+        planner_catalog_cookbook: expect.objectContaining({
+          access_diagnostics: expect.anything(),
+        }),
+      }),
+    );
   });
 
   it('shows preview catalog guidance but still allows planner submission through the catalog lane', async () => {
@@ -175,6 +181,12 @@ describe('NewSessionPage', () => {
                 title: 'Spring Pastry',
                 access_state: 'preview',
                 access_state_reason: 'Preview access is available for this catalog cookbook.',
+                access_diagnostics: {
+                  subscription_snapshot_id: 'snapshot-preview',
+                  subscription_status: 'active',
+                  sync_state: 'synced',
+                  provider: 'stripe',
+                },
               },
             },
           },
@@ -186,6 +198,9 @@ describe('NewSessionPage', () => {
 
     expect(screen.getByText('Catalog cookbook preview')).toBeInTheDocument();
     expect(screen.getByText(/Preview access is valid for planning/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review account access' })).toHaveAttribute('href', '/profile');
+    expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', '/catalog');
+    expect(screen.queryByText(/stripe|active|synced|snapshot/i)).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Seed dessert service from the preview catalog lane');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
@@ -202,7 +217,7 @@ describe('NewSessionPage', () => {
     );
   });
 
-  it('blocks locked catalog handoffs inline before session creation', async () => {
+  it('blocks locked catalog handoffs inline before session creation and points to account access', async () => {
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
 
     render(
@@ -235,7 +250,51 @@ describe('NewSessionPage', () => {
     const submitButton = screen.getByRole('button', { name: 'Start Planning' });
     expect(screen.getByText('Catalog cookbook locked')).toBeInTheDocument();
     expect(screen.getByText(/session creation stays disabled here/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review account access' })).toHaveAttribute('href', '/profile');
+    expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', '/catalog');
+    expect(screen.queryByText(/stripe|past_due|stale|snapshot/i)).not.toBeInTheDocument();
     expect(submitButton).toBeDisabled();
+    expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows sync-failed catalog remediation separately from upgrade-required lock states', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession');
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-4',
+                slug: 'refresh-waiting',
+                title: 'Refresh Waiting',
+                access_state: 'locked',
+                access_state_reason: 'Catalog access is temporarily unavailable until your account refresh completes.',
+                access_diagnostics: {
+                  subscription_snapshot_id: 'snapshot-4',
+                  subscription_status: 'cancelled',
+                  sync_state: 'failed',
+                  provider: 'stripe',
+                },
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Catalog access refresh needed')).toBeInTheDocument();
+    expect(
+      screen.getByText(/temporarily blocked while your account access refresh finishes/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/waiting on refreshed account access/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review account access' })).toHaveAttribute('href', '/profile');
+    expect(screen.queryByText(/stripe|cancelled|failed|snapshot/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Planning' })).toBeDisabled();
     expect(createSessionSpy).not.toHaveBeenCalled();
   });
 
@@ -263,6 +322,7 @@ describe('NewSessionPage', () => {
     const submitButton = screen.getByRole('button', { name: 'Start Planning' });
     expect(screen.getByText('Catalog handoff invalid')).toBeInTheDocument();
     expect(screen.getByText(/The handoff shape was malformed/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', '/catalog');
     expect(submitButton).toBeDisabled();
     expect(createSessionSpy).not.toHaveBeenCalled();
   });
@@ -280,9 +340,7 @@ describe('NewSessionPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/a platform catalog cookbook handoff, or one owned recipe or cookbook folder\./i)).toBeInTheDocument();
     expect(screen.getByLabelText('Dishes')).toHaveValue(3);
-    expect(
-      screen.getByText(/No owned reference is required unless you want the planner anchored/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No owned reference is required unless you want the planner anchored/i)).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
 
@@ -481,7 +539,6 @@ describe('NewSessionPage', () => {
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('selected_authored_recipe');
   });
 
-
   it('still blocks ambiguous cookbook matches before any planner-created cookbook session can post', async () => {
     vi.spyOn(sessionsApi, 'resolvePlannerReference').mockResolvedValue(ambiguousCookbookResponse());
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
@@ -499,12 +556,8 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Resolve' }));
 
     expect(await screen.findByText(/Choose the exact cookbook before starting the planner/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/The planner stays blocked in this lane until you choose one exact match\./i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Review the owned matches below, choose the one you mean, then continue with this dinner brief\./i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/The planner stays blocked in this lane until you choose one exact match\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Review the owned matches below, choose the one you mean, then continue with this dinner brief\./i)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
     expect(await screen.findByText('Choose the intended cookbook before starting the plan.')).toBeInTheDocument();
@@ -512,12 +565,8 @@ describe('NewSessionPage', () => {
 
     await userEvent.click(screen.getByRole('radio', { name: /^DessertsPlated desserts\.$/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
-    expect(
-      await screen.findByText('Choose how tightly the planner should follow that cookbook before starting the plan.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/The planner remains blocked until you pick one mode, so the target cookbook guidance is explicit before session creation\./i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Choose how tightly the planner should follow that cookbook before starting the plan.')).toBeInTheDocument();
+    expect(screen.getByText(/The planner remains blocked until you pick one mode, so the target cookbook guidance is explicit before session creation\./i)).toBeInTheDocument();
     expect(createSessionSpy).not.toHaveBeenCalled();
   });
 
@@ -534,9 +583,7 @@ describe('NewSessionPage', () => {
 
     expect(await screen.findByText('The planner could not confirm that owned reference right now.')).toBeInTheDocument();
     expect(screen.getByText('Resolution unavailable')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Keep the dinner brief here, adjust the reference if needed, and resolve again when the library is reachable\./i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Keep the dinner brief here, adjust the reference if needed, and resolve again when the library is reachable\./i)).toBeInTheDocument();
     expect(screen.getByLabelText('Cookbook reference')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
@@ -680,4 +727,3 @@ describe('NewSessionPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/');
   });
 });
-

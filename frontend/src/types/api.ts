@@ -167,6 +167,7 @@ export interface PlannerCatalogCookbookReference {
   title: string;
   access_state: CatalogCookbookAccessState;
   access_state_reason: string;
+  access_diagnostics: CatalogAccessDiagnostics | null;
 }
 
 export interface PlannerReferenceResolutionRequest {
@@ -545,9 +546,11 @@ export interface CatalogCookbookSummary {
   audience: CatalogCookbookAudience;
   access_state: CatalogCookbookAccessState;
   access_state_reason: string;
+  access_diagnostics: CatalogAccessDiagnostics | null;
 }
 
 export interface CatalogCookbookDetail extends CatalogCookbookSummary {
+  access_diagnostics: CatalogAccessDiagnostics | null;
   description: string;
   sample_recipe_titles: string[];
   tags: string[];
