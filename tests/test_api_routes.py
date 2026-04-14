@@ -1239,6 +1239,7 @@ async def test_create_session_with_planner_catalog_cookbook_included_201(app_wit
         "access_state": "included",
         "access_state_reason": "Included with the base catalog",
     }
+    assert "access_diagnostics" not in concept["planner_catalog_cookbook"]
 
 
 async def test_create_session_with_planner_catalog_cookbook_preview_201(app_with_overrides, test_user):
@@ -1272,6 +1273,68 @@ async def test_create_session_with_planner_catalog_cookbook_preview_201(app_with
         "access_state": "preview",
         "access_state_reason": "Preview access enabled for this chef",
     }
+    assert "access_diagnostics" not in concept["planner_catalog_cookbook"]
+
+
+async def test_list_catalog_cookbooks_includes_backend_safe_access_diagnostics(app_with_overrides, test_user, mock_db):
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.ACTIVE,
+            sync_state=SubscriptionSyncState.SYNCED,
+        ),
+    )
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks")
+
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 3
+    included = next(item for item in items if item["catalog_cookbook_id"] == "11111111-1111-1111-1111-111111111111")
+    assert included["access_state"] == "included"
+    assert included["access_diagnostics"] == {
+        "subscription_snapshot_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subscription_status": "active",
+        "sync_state": "synced",
+        "provider": "stripe",
+    }
+
+
+async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnostics(app_with_overrides, test_user, mock_db):
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.CANCELLED,
+            sync_state=SubscriptionSyncState.FAILED,
+        ),
+    )
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks/33333333-3333-3333-3333-333333333333")
+
+    assert resp.status_code == 200
+    item = resp.json()["item"]
+    assert item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333"
+    assert item["access_state"] == "locked"
+    assert item["access_diagnostics"] == {
+        "subscription_snapshot_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "subscription_status": "cancelled",
+        "sync_state": "failed",
+        "provider": "stripe",
+    }
+    assert "provider_customer_ref" not in str(item)
+    assert "provider_subscription_ref" not in str(item)
 
 
 async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(app_with_overrides, test_user):
