@@ -16,6 +16,7 @@ import {
   type CreateSessionRequest,
   type MealType,
   type Occasion,
+  type CatalogAccessDiagnostics,
   type PlannerAuthoredResolutionMatch,
   type PlannerCatalogCookbookReference,
   type PlannerCookbookPlanningMode,
@@ -71,6 +72,23 @@ function getPlannerMatchId(match: PlannerAuthoredResolutionMatch | PlannerCookbo
   return match.kind === 'authored' ? match.recipe_id : match.cookbook_id;
 }
 
+function isCatalogAccessDiagnostics(value: unknown): value is CatalogAccessDiagnostics {
+  if (value == null) {
+    return true;
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const diagnostics = value as Partial<CatalogAccessDiagnostics>;
+  return (
+    (diagnostics.subscription_snapshot_id == null || typeof diagnostics.subscription_snapshot_id === 'string') &&
+    (diagnostics.subscription_status == null || typeof diagnostics.subscription_status === 'string') &&
+    (diagnostics.sync_state == null || typeof diagnostics.sync_state === 'string') &&
+    (diagnostics.provider == null || typeof diagnostics.provider === 'string')
+  );
+}
+
 function isPlannerCatalogCookbookReference(value: unknown): value is PlannerCatalogCookbookReference {
   if (!value || typeof value !== 'object') {
     return false;
@@ -83,7 +101,8 @@ function isPlannerCatalogCookbookReference(value: unknown): value is PlannerCata
     typeof item.slug === 'string' &&
     typeof item.title === 'string' &&
     (item.access_state === 'included' || item.access_state === 'preview' || item.access_state === 'locked') &&
-    typeof item.access_state_reason === 'string'
+    typeof item.access_state_reason === 'string' &&
+    isCatalogAccessDiagnostics(item.access_diagnostics)
   );
 }
 

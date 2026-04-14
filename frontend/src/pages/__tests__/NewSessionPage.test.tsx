@@ -115,6 +115,12 @@ describe('NewSessionPage', () => {
                 title: 'Weeknight Foundations',
                 access_state: 'included',
                 access_state_reason: 'Included with your current catalog access.',
+                access_diagnostics: {
+                  subscription_snapshot_id: 'snapshot-1',
+                  subscription_status: 'active',
+                  sync_state: 'synced',
+                  provider: 'stripe',
+                },
               },
             },
           },
@@ -129,6 +135,7 @@ describe('NewSessionPage', () => {
     expect(screen.queryByLabelText('Planner anchor')).not.toBeInTheDocument();
     expect(screen.queryByText(/pre-existing cookbook recipes/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cookbook shelf/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/stripe|active|synced|snapshot/i)).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build a weeknight dinner from the catalog lane');
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
@@ -145,6 +152,7 @@ describe('NewSessionPage', () => {
       ),
     );
     expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty('planner_cookbook_target');
+    expect(createSessionSpy.mock.calls[0]?.[0].planner_catalog_cookbook).not.toHaveProperty('access_diagnostics');
   });
 
   it('shows preview catalog guidance but still allows planner submission through the catalog lane', async () => {
@@ -209,6 +217,12 @@ describe('NewSessionPage', () => {
                 title: 'Premium Desserts',
                 access_state: 'locked',
                 access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+                access_diagnostics: {
+                  subscription_snapshot_id: 'snapshot-3',
+                  subscription_status: 'past_due',
+                  sync_state: 'stale',
+                  provider: 'stripe',
+                },
               },
             },
           },
@@ -666,3 +680,4 @@ describe('NewSessionPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/');
   });
 });
+
