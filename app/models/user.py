@@ -17,10 +17,10 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
-from sqlalchemy import JSON
+from sqlalchemy import JSON, String
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from app.models.enums import EquipmentCategory
+from app.models.enums import EquipmentCategory, SessionStatus
 
 
 class Equipment(SQLModel, table=True):
@@ -147,6 +147,23 @@ class LibraryAccessSummary(BaseModel):
     access_diagnostics: dict[str, str | None]
 
 
+class GenerationBillingState(str, Enum):
+    """App-owned lifecycle for one session's post-finalisation billing record."""
+
+    READY = "ready"
+    SKIPPED = "skipped"
+    CHARGE_PENDING = "charge_pending"
+    CHARGED = "charged"
+    CHARGE_FAILED = "charge_failed"
+
+
+class GenerationBillingProvider(str, Enum):
+    """Provider enum kept app-owned so the ledger can outlive any vendor swap."""
+
+    APP = "app"
+    STRIPE = "stripe"
+
+
 class UserProfile(SQLModel, table=True):
     __tablename__ = "user_profiles"
 
@@ -195,6 +212,7 @@ class UserProfile(SQLModel, table=True):
     equipment: list[Equipment] = Relationship(back_populates="user")
     subscription_snapshots: list["SubscriptionSnapshot"] = Relationship(back_populates="user")
     entitlement_grants: list["UserEntitlementGrant"] = Relationship(back_populates="user")
+    generation_billing_records: list["GenerationBillingRecord"] = Relationship(back_populates="user")
 
 
 class SubscriptionSnapshot(SQLModel, table=True):
@@ -238,3 +256,34 @@ class UserEntitlementGrant(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user: Optional[UserProfile] = Relationship(back_populates="entitlement_grants")
+
+
+class GenerationBillingRecord(SQLModel, table=True):
+    __tablename__ = "generation_billing_records"
+
+    generation_billing_record_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="sessions.session_id", unique=True, index=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+
+    session_status: SessionStatus = Field(sa_column=Column(String, nullable=False))
+    billing_state: GenerationBillingState = Field(default=GenerationBillingState.READY)
+    provider: GenerationBillingProvider = Field(default=GenerationBillingProvider.APP)
+
+    provider_charge_ref: Optional[str] = Field(default=None, max_length=255)
+    provider_error_code: Optional[str] = Field(default=None, max_length=100)
+    provider_error_message: Optional[str] = Field(default=None, max_length=500)
+    billing_reason: Optional[str] = Field(default=None, max_length=200)
+
+    total_input_tokens: int = Field(default=0)
+    total_output_tokens: int = Field(default=0)
+    token_usage_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    billing_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
+
+    charge_attempted_at: Optional[datetime] = None
+    charged_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="generation_billing_records")
+
+
