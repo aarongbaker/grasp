@@ -14,6 +14,7 @@ from enum import Enum
 
 from app.models.catalog import CatalogCookbookAccessState, CatalogCookbookAudience
 from app.models.user import SubscriptionStatus, SubscriptionSyncState
+from app.services.catalog_purchases import CatalogPurchaseService
 from app.services.subscriptions import SubscriptionDiagnostics
 
 
@@ -30,8 +31,10 @@ class AccessResolverInput:
 
     user_id: uuid.UUID | None
     audience: CatalogCookbookAudience
+    catalog_cookbook_id: uuid.UUID | None = None
     has_preview_entitlement: bool = False
     has_premium_entitlement: bool = False
+    has_durable_purchase_ownership: bool = False
     subscription_status: SubscriptionStatus | None = None
     sync_state: SubscriptionSyncState | None = None
     diagnostics: SubscriptionDiagnostics | None = None
@@ -60,6 +63,13 @@ def derive_catalog_cookbook_access(input: AccessResolverInput) -> DerivedCookboo
         return DerivedCookbookAccess(
             access_state=CatalogCookbookAccessState.PREVIEW,
             access_state_reason="Preview access enabled for this chef",
+            diagnostics=input.diagnostics,
+        )
+
+    if input.has_durable_purchase_ownership:
+        return DerivedCookbookAccess(
+            access_state=CatalogCookbookAccessState.INCLUDED,
+            access_state_reason="Previously purchased cookbook access is included",
             diagnostics=input.diagnostics,
         )
 

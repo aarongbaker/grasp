@@ -30,6 +30,7 @@ from app.models.catalog import (
 from app.models.recipe import Ingredient, RawRecipe, RecipeProvenance
 from app.models.user import EntitlementKind
 from app.services.access import AccessResolverInput, derive_catalog_cookbook_access
+from app.services.catalog_purchases import CatalogPurchaseService
 from app.services.subscriptions import (
     build_subscription_diagnostics,
     get_active_subscription_snapshot,
@@ -216,12 +217,22 @@ async def _build_summary(
     entitlement_grants = await list_user_entitlement_grants(db, user_id=current_user.user_id)
     active_entitlements = {grant.kind for grant in entitlement_grants if grant.is_active}
     diagnostics = build_subscription_diagnostics(subscription_snapshot)
+    purchase_service = CatalogPurchaseService(
+        known_catalog_cookbook_ids={catalog_fixture.catalog_cookbook_id for catalog_fixture in _CATALOG_COOKBOOKS}
+    )
+    has_durable_purchase_ownership = await purchase_service.has_owned_catalog_cookbook(
+        db,
+        user_id=current_user.user_id,
+        catalog_cookbook_id=fixture.catalog_cookbook_id,
+    )
     derived_access = derive_catalog_cookbook_access(
         AccessResolverInput(
             user_id=current_user.user_id,
             audience=fixture.audience,
+            catalog_cookbook_id=fixture.catalog_cookbook_id,
             has_preview_entitlement=EntitlementKind.CATALOG_PREVIEW in active_entitlements,
             has_premium_entitlement=EntitlementKind.CATALOG_PREMIUM in active_entitlements,
+            has_durable_purchase_ownership=has_durable_purchase_ownership,
             subscription_status=subscription_snapshot.status if subscription_snapshot else None,
             sync_state=subscription_snapshot.sync_state if subscription_snapshot else None,
             diagnostics=diagnostics,

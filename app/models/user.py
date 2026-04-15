@@ -137,6 +137,22 @@ class LibraryAccessState(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class CatalogPurchaseState(str, Enum):
+    """App-owned lifecycle for one catalog cookbook purchase attempt."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class CatalogPurchaseProvider(str, Enum):
+    """Provider enum for catalog purchases kept app-owned and replaceable."""
+
+    APP = "app"
+    STRIPE = "stripe"
+
+
 class LibraryAccessSummary(BaseModel):
     """Provider-agnostic account-facing cookbook library access contract."""
 
@@ -216,6 +232,8 @@ class UserProfile(SQLModel, table=True):
     subscription_snapshots: list["SubscriptionSnapshot"] = Relationship(back_populates="user")
     entitlement_grants: list["UserEntitlementGrant"] = Relationship(back_populates="user")
     generation_billing_records: list["GenerationBillingRecord"] = Relationship(back_populates="user")
+    catalog_purchase_records: list["CatalogCookbookPurchaseRecord"] = Relationship(back_populates="user")
+    catalog_cookbook_ownerships: list["CatalogCookbookOwnershipRecord"] = Relationship(back_populates="user")
 
 
 class SubscriptionSnapshot(SQLModel, table=True):
@@ -288,5 +306,51 @@ class GenerationBillingRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user: Optional[UserProfile] = Relationship(back_populates="generation_billing_records")
+
+
+class CatalogCookbookPurchaseRecord(SQLModel, table=True):
+    __tablename__ = "catalog_cookbook_purchase_records"
+
+    catalog_cookbook_purchase_record_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    catalog_cookbook_id: uuid.UUID = Field(index=True)
+
+    provider: CatalogPurchaseProvider = Field(default=CatalogPurchaseProvider.APP)
+    provider_checkout_ref: Optional[str] = Field(default=None, max_length=255, index=True)
+    provider_completion_ref: Optional[str] = Field(default=None, max_length=255, index=True)
+    purchase_state: CatalogPurchaseState = Field(default=CatalogPurchaseState.PENDING)
+    access_reason: str = Field(min_length=1, max_length=200)
+    purchase_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    failure_code: Optional[str] = Field(default=None, max_length=100)
+    failure_message: Optional[str] = Field(default=None, max_length=500)
+    completed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="catalog_purchase_records")
+    ownerships: list["CatalogCookbookOwnershipRecord"] = Relationship(back_populates="purchase_record")
+
+
+class CatalogCookbookOwnershipRecord(SQLModel, table=True):
+    __tablename__ = "catalog_cookbook_ownership_records"
+
+    catalog_cookbook_ownership_record_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    catalog_cookbook_id: uuid.UUID = Field(index=True)
+    purchase_record_id: uuid.UUID = Field(
+        foreign_key="catalog_cookbook_purchase_records.catalog_cookbook_purchase_record_id",
+        unique=True,
+        index=True,
+    )
+
+    ownership_source: str = Field(default="purchase", min_length=1, max_length=100)
+    access_reason: str = Field(min_length=1, max_length=200)
+    ownership_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    acquired_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="catalog_cookbook_ownerships")
+    purchase_record: Optional[CatalogCookbookPurchaseRecord] = Relationship(back_populates="ownerships")
 
 

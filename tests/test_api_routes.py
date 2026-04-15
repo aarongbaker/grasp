@@ -37,7 +37,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -169,6 +169,8 @@ class MockDBSession:
     async def delete(self, obj):
         model_class = obj.__class__
         for pk_name in (
+            "catalog_cookbook_ownership_record_id",
+            "catalog_cookbook_purchase_record_id",
             "subscription_snapshot_id",
             "entitlement_grant_id",
             "session_id",
@@ -311,6 +313,32 @@ class MockDBSession:
                 obj
                 for (model_class, _), obj in self._store.items()
                 if model_class is GenerationBillingRecord
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from catalog_cookbook_ownership_records" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is CatalogCookbookOwnershipRecord
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from catalog_cookbook_purchase_records" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is CatalogCookbookPurchaseRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             mock_result = MagicMock()
@@ -1481,6 +1509,64 @@ async def test_list_catalog_cookbooks_includes_backend_safe_access_diagnostics(a
     }
 
 
+async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_after_subscription_cancellation(app_with_overrides, test_user, mock_db):
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.CANCELLED,
+            sync_state=SubscriptionSyncState.SYNCED,
+        ),
+    )
+    purchase_record_id = uuid.uuid4()
+    mock_db.seed(
+        CatalogCookbookPurchaseRecord,
+        purchase_record_id,
+        CatalogCookbookPurchaseRecord(
+            catalog_cookbook_purchase_record_id=purchase_record_id,
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            provider="stripe",
+            provider_checkout_ref="cs_owned",
+            provider_completion_ref="evt_owned",
+            purchase_state="completed",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+    ownership_record_id = uuid.uuid4()
+    mock_db.seed(
+        CatalogCookbookOwnershipRecord,
+        ownership_record_id,
+        CatalogCookbookOwnershipRecord(
+            catalog_cookbook_ownership_record_id=ownership_record_id,
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            purchase_record_id=purchase_record_id,
+            ownership_source="purchase",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks")
+
+    assert resp.status_code == 200
+    premium = next(item for item in resp.json()["items"] if item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333")
+    assert premium["access_state"] == "included"
+    assert premium["access_state_reason"] == "Previously purchased cookbook access is included"
+    assert premium["access_diagnostics"] == {
+        "subscription_snapshot_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "subscription_status": "cancelled",
+        "sync_state": "synced",
+        "provider": "stripe",
+    }
+    assert "provider_completion_ref" not in str(premium)
+
+
 async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnostics(app_with_overrides, test_user, mock_db):
     mock_db.seed(
         SubscriptionSnapshot,
@@ -1536,6 +1622,77 @@ async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(a
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Upgrade required for this catalog cookbook"
+
+
+async def test_create_session_with_planner_catalog_cookbook_owned_purchase_allows_access(app_with_overrides, test_user, mock_db):
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.CANCELLED,
+            sync_state=SubscriptionSyncState.SYNCED,
+        ),
+    )
+    purchase_record_id = uuid.uuid4()
+    mock_db.seed(
+        CatalogCookbookPurchaseRecord,
+        purchase_record_id,
+        CatalogCookbookPurchaseRecord(
+            catalog_cookbook_purchase_record_id=purchase_record_id,
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            provider="stripe",
+            provider_checkout_ref="cs_owned_session",
+            provider_completion_ref="evt_owned_session",
+            purchase_state="completed",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+    mock_db.seed(
+        CatalogCookbookOwnershipRecord,
+        uuid.uuid4(),
+        CatalogCookbookOwnershipRecord(
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            purchase_record_id=purchase_record_id,
+            ownership_source="purchase",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/v1/sessions",
+            json={
+                "concept_source": "planner_catalog_cookbook",
+                "free_text": "Plan dinner from my purchased premium cookbook.",
+                "planner_catalog_cookbook": {
+                    "catalog_cookbook_id": "33333333-3333-3333-3333-333333333333",
+                    "slug": "client-slug-ignored",
+                    "title": "Client title ignored",
+                    "access_state": "locked",
+                    "access_state_reason": "Client reason ignored",
+                },
+                "guest_count": 4,
+                "meal_type": "dinner",
+                "occasion": "dinner_party",
+                "dietary_restrictions": [],
+            },
+        )
+
+    assert resp.status_code == 201
+    concept = resp.json()["concept_json"]
+    assert concept["planner_catalog_cookbook"] == {
+        "catalog_cookbook_id": "33333333-3333-3333-3333-333333333333",
+        "slug": "chef-tasting-menus",
+        "title": "Chef Tasting Menus",
+        "access_state": "included",
+        "access_state_reason": "Previously purchased cookbook access is included",
+    }
 
 
 async def test_create_session_with_planner_catalog_cookbook_unknown_returns_404(app_with_overrides, test_user):
