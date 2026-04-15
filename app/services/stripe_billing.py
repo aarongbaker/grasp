@@ -14,14 +14,17 @@ from fastapi import HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.pipeline import SessionOutstandingBalanceSummary
 from app.models.user import (
     EntitlementKind,
+    GenerationBillingState,
     SubscriptionSnapshot,
     SubscriptionStatus,
     SubscriptionSyncState,
     UserEntitlementGrant,
     UserProfile,
 )
+from app.services.generation_billing import GenerationBillingService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,27 @@ class BillingUrlBundle:
     snapshot_id: uuid.UUID | None
     subscription_status: str | None
     sync_state: str | None
+
+
+@dataclass(frozen=True)
+class BillingSetupBundle:
+    url: str
+    customer_state: str
+    payment_method_status: str
+    session_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class BillingRecoveryBundle:
+    url: str
+    session_id: uuid.UUID
+    outstanding_balance: SessionOutstandingBalanceSummary
+
+
+@dataclass(frozen=True)
+class PaymentMethodStatusBundle:
+    has_saved_payment_method: bool
+    payment_method_label: str | None
 
 
 @dataclass(frozen=True)
@@ -184,6 +208,71 @@ class StripeBillingService:
             sync_state=snapshot.sync_state.value if snapshot else None,
         )
 
+    async def create_generation_setup_session(
+        self,
+        db: AsyncSession,
+        *,
+        user: UserProfile,
+        session_id: uuid.UUID | None = None,
+    ) -> BillingSetupBundle:
+        customer_ref = await self._ensure_customer_ref(db, user=user)
+        portal = await self._gateway.create_billing_portal_session(
+            customer=customer_ref,
+            return_url=self._settings.stripe_portal_return_url,
+        )
+        customer_state = "existing" if user.stripe_customer_id else "created"
+        return BillingSetupBundle(
+            url=portal["url"],
+            customer_state=customer_state,
+            payment_method_status="saved" if user.has_saved_generation_payment_method else "missing",
+            session_id=session_id,
+        )
+
+    async def create_generation_recovery_session(
+        self,
+        db: AsyncSession,
+        *,
+        user: UserProfile,
+        session_id: uuid.UUID,
+    ) -> BillingRecoveryBundle:
+        session = await self._require_owned_session(db, session_id=session_id, user=user)
+        customer_ref = await self._ensure_customer_ref(db, user=user)
+        portal = await self._gateway.create_billing_portal_session(
+            customer=customer_ref,
+            return_url=self._settings.stripe_portal_return_url,
+        )
+        outstanding = await self._build_outstanding_balance_summary(db, session=session)
+        return BillingRecoveryBundle(url=portal["url"], session_id=session_id, outstanding_balance=outstanding)
+
+    async def get_generation_payment_method_status(self, db: AsyncSession, *, user: UserProfile) -> PaymentMethodStatusBundle:
+        return PaymentMethodStatusBundle(
+            has_saved_payment_method=user.has_saved_generation_payment_method,
+            payment_method_label=user.default_generation_payment_method_label,
+        )
+
+    async def mark_generation_payment_method_ready(
+        self,
+        db: AsyncSession,
+        *,
+        user: UserProfile,
+        label: str | None = None,
+    ) -> PaymentMethodStatusBundle:
+        user.has_saved_generation_payment_method = True
+        user.default_generation_payment_method_label = (label or user.default_generation_payment_method_label or "Saved card")[:120]
+        db.add(user)
+        await db.commit()
+        return await self.get_generation_payment_method_status(db, user=user)
+
+    async def get_generation_recovery_status(
+        self,
+        db: AsyncSession,
+        *,
+        user: UserProfile,
+        session_id: uuid.UUID,
+    ) -> SessionOutstandingBalanceSummary:
+        session = await self._require_owned_session(db, session_id=session_id, user=user)
+        return await self._build_outstanding_balance_summary(db, session=session)
+
     async def handle_webhook(self, db: AsyncSession, *, body: bytes, signature: str | None) -> SubscriptionSnapshot:
         envelope = self._verify_and_parse_webhook(body=body, signature=signature)
         event_object = envelope.payload.get("data", {}).get("object") or {}
@@ -228,6 +317,32 @@ class StripeBillingService:
 
         await db.commit()
         return snapshot
+
+    async def _build_outstanding_balance_summary(self, db: AsyncSession, *, session) -> SessionOutstandingBalanceSummary:
+        status = await GenerationBillingService().get_outstanding_balance_status(db, session=session)
+        return SessionOutstandingBalanceSummary(
+            has_outstanding_balance=status.has_outstanding_balance,
+            can_retry_charge=status.can_retry_charge,
+            billing_state=status.billing_state.value if status.billing_state else None,
+            reason_code=status.reason_code,
+            reason=status.reason,
+            retry_attempted_at=status.retry_attempted_at,
+            recovery_action={
+                "kind": "update_payment_method",
+                "label": "Update payment method",
+                "session_id": session.session_id,
+            } if status.can_retry_charge else None,
+        )
+
+    async def _require_owned_session(self, db: AsyncSession, *, session_id: uuid.UUID, user: UserProfile):
+        from app.models.session import Session
+
+        session = await db.get(Session, session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.user_id != user.user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        return session
 
     async def _resolve_subscription_webhook_user_id(
         self,
@@ -370,12 +485,16 @@ class StripeBillingService:
         existing = await self._get_latest_snapshot(db, user_id=user.user_id)
         if existing and existing.provider_customer_ref:
             return existing.provider_customer_ref
+        if user.stripe_customer_id:
+            return user.stripe_customer_id
 
         customer = await self._gateway.create_customer(
             email=user.email,
             name=user.name,
             metadata={"user_id": str(user.user_id)},
         )
+        user.stripe_customer_id = customer["id"]
+        db.add(user)
         snapshot = await self._upsert_snapshot(
             db,
             user_id=user.user_id,

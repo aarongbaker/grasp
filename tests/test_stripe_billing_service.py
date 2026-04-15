@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
+from app.models.session import Session
 from app.models.user import SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile
+from app.services.generation_billing import GenerationBillingService
 from app.services.stripe_billing import StripeBillingService, StripeWebhookPayloadError
 from tests.conftest import _ensure_test_postgres_available
 
@@ -22,14 +24,14 @@ class _GatewayStub:
             "items": {"data": [{"price": {"id": "price_test_catalog"}}]},
         }
 
-    async def create_customer(self, **kwargs):  # pragma: no cover - not used here
-        raise NotImplementedError
+    async def create_customer(self, **kwargs):
+        return {"id": "cus_test_generated"}
 
     async def create_checkout_session(self, **kwargs):  # pragma: no cover - not used here
         raise NotImplementedError
 
-    async def create_billing_portal_session(self, **kwargs):  # pragma: no cover - not used here
-        raise NotImplementedError
+    async def create_billing_portal_session(self, **kwargs):
+        return {"url": "https://billing.stripe.test/portal_session"}
 
     async def retrieve_customer(self, customer_id: str):  # pragma: no cover - not used here
         return {"id": customer_id}
@@ -144,3 +146,63 @@ async def test_subscription_webhook_rejects_invalid_metadata_user_id_before_fall
             customer_id="cus_any",
             metadata_user_id="not-a-uuid",
         )
+
+
+@pytest.mark.asyncio
+async def test_create_generation_setup_session_uses_customer_boundary_and_hides_provider_refs(stripe_service_db):
+    service = _service()
+    user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Chef Setup",
+        email="chef-setup@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("chef-setup@test.com"),
+        generation_payment_method_required=True,
+        has_saved_generation_payment_method=False,
+    )
+    stripe_service_db.add(user)
+    await stripe_service_db.commit()
+
+    bundle = await service.create_generation_setup_session(stripe_service_db, user=user)
+
+    assert bundle.url == "https://billing.stripe.test/portal_session"
+    assert bundle.customer_state == "created"
+    assert bundle.payment_method_status == "missing"
+    assert not hasattr(bundle, "provider_customer_ref")
+
+
+@pytest.mark.asyncio
+async def test_create_generation_recovery_session_returns_app_safe_outstanding_balance_summary(stripe_service_db):
+    service = _service()
+    user = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Chef Recovery",
+        email="chef-recovery@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("chef-recovery@test.com"),
+        stripe_customer_id="cus_recovery",
+        has_saved_generation_payment_method=True,
+    )
+    session = Session(user_id=user.user_id, status="complete", concept_json={})
+    stripe_service_db.add(user)
+    stripe_service_db.add(session)
+    await stripe_service_db.commit()
+
+    billing_service = GenerationBillingService()
+    outcome = await billing_service.record_finalized_session(stripe_service_db, session=session, final_state={})
+    assert outcome.record is not None
+    await billing_service.mark_charge_failed(
+        stripe_service_db,
+        record=outcome.record,
+        error_code="card_declined",
+        error_message="saved card was declined",
+    )
+    await stripe_service_db.commit()
+
+    bundle = await service.create_generation_recovery_session(stripe_service_db, user=user, session_id=session.session_id)
+
+    assert bundle.url == "https://billing.stripe.test/portal_session"
+    assert bundle.session_id == session.session_id
+    assert bundle.outstanding_balance.has_outstanding_balance is True
+    assert bundle.outstanding_balance.can_retry_charge is True
+    assert bundle.outstanding_balance.billing_state == "charge_failed"
+    assert bundle.outstanding_balance.recovery_action is not None
+    assert "provider" not in bundle.outstanding_balance.model_dump_json()

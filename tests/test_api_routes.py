@@ -32,11 +32,12 @@ from app.api.routes.auth import _build_access_token
 from app.core.settings import get_settings
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.services.stripe_billing import StripeBillingService
+from app.services.generation_billing import GenerationBillingService
 from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -297,6 +298,19 @@ class MockDBSession:
                 obj
                 for (model_class, _), obj in self._store.items()
                 if model_class is Session
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from generation_billing_records" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is GenerationBillingRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             mock_result = MagicMock()
@@ -567,6 +581,79 @@ async def test_billing_portal_returns_redirect_url_and_snapshot_metadata(app_wit
         "sync_state": "synced",
         "subscription_snapshot_id": str(snapshot_id),
     }
+
+
+async def test_generation_billing_setup_route_returns_app_safe_saved_card_contract(app_with_overrides, test_user, monkeypatch):
+    service = AsyncMock(spec=StripeBillingService)
+    service.create_generation_setup_session.return_value = type(
+        "SetupBundle",
+        (),
+        {
+            "url": "https://billing.stripe.test/setup_123",
+            "customer_state": "created",
+            "payment_method_status": "missing",
+            "session_id": None,
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/v1/billing/generation/setup", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "url": "https://billing.stripe.test/setup_123",
+        "setup_state": "requires_action",
+        "payment_method_status": "missing",
+        "session_id": None,
+        "customer_state": "created",
+    }
+    assert "provider_customer_ref" not in str(payload)
+
+
+async def test_generation_billing_recovery_route_returns_app_safe_outstanding_balance_contract(app_with_overrides, test_user, monkeypatch):
+    session_id = uuid.uuid4()
+    service = AsyncMock(spec=StripeBillingService)
+    service.create_generation_recovery_session.return_value = type(
+        "RecoveryBundle",
+        (),
+        {
+            "url": "https://billing.stripe.test/recovery_123",
+            "session_id": session_id,
+            "outstanding_balance": {
+                "has_outstanding_balance": True,
+                "can_retry_charge": True,
+                "billing_state": "charge_failed",
+                "reason_code": "outstanding_balance_recoverable",
+                "reason": "A completed session still has an unpaid balance that can be recovered.",
+                "retry_attempted_at": None,
+                "recovery_action": {
+                    "kind": "update_payment_method",
+                    "label": "Update payment method",
+                    "session_id": session_id,
+                },
+            },
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/generation/recovery",
+            headers=_auth_headers_for(test_user),
+            json={"session_id": str(session_id)},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://billing.stripe.test/recovery_123"
+    assert payload["recovery_state"] == "requires_payment_update"
+    assert payload["session_id"] == str(session_id)
+    assert payload["outstanding_balance"]["billing_state"] == "charge_failed"
+    assert "provider" not in str(payload)
 
 
 async def test_billing_webhook_syncs_subscription_state_and_entitlement(app_with_overrides, test_user, monkeypatch):
@@ -2123,6 +2210,69 @@ async def test_run_pipeline_rejects_non_pending_session(app_with_overrides, mock
 
     assert resp.status_code == 409
     assert "already" in resp.json()["detail"]
+
+
+async def test_run_pipeline_returns_blocked_response_without_mutating_session_status(app_with_overrides, mock_db, test_user):
+    test_user.generation_payment_method_required = True
+    test_user.has_saved_generation_payment_method = False
+    session = Session(user_id=test_user.user_id, status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 202
+    payload = resp.json()
+    assert payload["status"] == "blocked"
+    assert payload["reason_code"] == "payment_method_required"
+    assert payload["requires_payment_method"] is True
+    assert payload["next_action"] == {
+        "kind": "update_payment_method",
+        "label": "Add payment method",
+        "session_id": str(session.session_id),
+    }
+    stored_session = await mock_db.get(Session, session.session_id)
+    assert stored_session is not None
+    assert stored_session.status == SessionStatus.PENDING
+
+
+async def test_get_session_status_includes_app_safe_outstanding_balance_summary(app_with_overrides, mock_db, test_user):
+    session = Session(
+        user_id=test_user.user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={},
+        completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    record = GenerationBillingRecord(
+        session_id=session.session_id,
+        user_id=test_user.user_id,
+        session_status=SessionStatus.COMPLETE,
+        billing_state="charge_failed",
+        provider="stripe",
+        provider_error_code="card_declined",
+        provider_error_message="saved card was declined",
+        charge_attempted_at=datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    mock_db.seed(Session, session.session_id, session)
+    mock_db.seed(GenerationBillingRecord, record.generation_billing_record_id, record)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/sessions/{session.session_id}")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["billing"]["outstanding_balance"]["has_outstanding_balance"] is True
+    assert payload["billing"]["outstanding_balance"]["can_retry_charge"] is True
+    assert payload["billing"]["outstanding_balance"]["billing_state"] == "charge_failed"
+    assert payload["billing"]["outstanding_balance"]["recovery_action"] == {
+        "kind": "retry_outstanding_balance",
+        "label": "Resolve outstanding balance",
+        "session_id": str(session.session_id),
+    }
+    assert "provider_error_code" not in str(payload)
+    assert "stripe" not in str(payload["billing"]["outstanding_balance"])
 
 
 async def test_cancel_pipeline_returns_cancelled_for_already_cancelled_session(app_with_overrides, mock_db, test_user):

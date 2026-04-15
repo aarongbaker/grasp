@@ -3,10 +3,17 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel
 
 from app.core.deps import CurrentUser, DBSession
 from app.core.settings import get_settings
+from app.models.pipeline import (
+    BillingRecoverySessionResponse,
+    BillingRecoveryStatusResponse,
+    BillingSetupSessionResponse,
+    BillingSetupStatusResponse,
+)
 from app.services.stripe_billing import (
     StripeReplayError,
     StripeSignatureError,
@@ -15,6 +22,10 @@ from app.services.stripe_billing import (
 )
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+class GenerationBillingRecoveryRequest(BaseModel):
+    session_id: uuid.UUID
 
 
 def _app_safe_sync_payload(bundle) -> dict:
@@ -38,6 +49,66 @@ async def create_portal_session(db: DBSession, current_user: CurrentUser):
     service = build_billing_service(get_settings())
     bundle = await service.create_portal_session(db, user=current_user)
     return _app_safe_sync_payload(bundle)
+
+
+@router.get("/generation/payment-method", response_model=BillingSetupStatusResponse)
+async def get_generation_payment_method_status(db: DBSession, current_user: CurrentUser):
+    service = build_billing_service(get_settings())
+    bundle = await service.get_generation_payment_method_status(db, user=current_user)
+    return BillingSetupStatusResponse(
+        has_saved_payment_method=bundle.has_saved_payment_method,
+        payment_method_label=bundle.payment_method_label,
+    )
+
+
+@router.post("/generation/setup", response_model=BillingSetupSessionResponse)
+async def create_generation_setup_session(
+    db: DBSession,
+    current_user: CurrentUser,
+    session_id: uuid.UUID | None = None,
+):
+    service = build_billing_service(get_settings())
+    bundle = await service.create_generation_setup_session(db, user=current_user, session_id=session_id)
+    return BillingSetupSessionResponse(
+        url=bundle.url,
+        setup_state="requires_action",
+        payment_method_status=bundle.payment_method_status,
+        session_id=bundle.session_id,
+        customer_state=bundle.customer_state,
+    )
+
+
+@router.post("/generation/payment-method/confirm", response_model=BillingSetupStatusResponse)
+async def confirm_generation_payment_method(db: DBSession, current_user: CurrentUser):
+    service = build_billing_service(get_settings())
+    bundle = await service.mark_generation_payment_method_ready(db, user=current_user)
+    return BillingSetupStatusResponse(
+        has_saved_payment_method=bundle.has_saved_payment_method,
+        payment_method_label=bundle.payment_method_label,
+    )
+
+
+@router.get("/generation/recovery/{session_id}", response_model=BillingRecoveryStatusResponse)
+async def get_generation_recovery_status(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
+    service = build_billing_service(get_settings())
+    outstanding = await service.get_generation_recovery_status(db, user=current_user, session_id=session_id)
+    return BillingRecoveryStatusResponse(session_id=session_id, outstanding_balance=outstanding)
+
+
+@router.post("/generation/recovery", response_model=BillingRecoverySessionResponse)
+async def create_generation_recovery_session(
+    body: GenerationBillingRecoveryRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    service = build_billing_service(get_settings())
+    bundle = await service.create_generation_recovery_session(db, user=current_user, session_id=body.session_id)
+    return BillingRecoverySessionResponse(
+        url=bundle.url,
+        recovery_state="requires_payment_update",
+        session_id=bundle.session_id,
+        outstanding_balance=bundle.outstanding_balance,
+    )
 
 
 @router.post("/webhooks/stripe", status_code=status.HTTP_200_OK)

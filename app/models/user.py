@@ -196,6 +196,9 @@ class UserProfile(SQLModel, table=True):
     password_hash: str = Field(default="")
 
     stripe_customer_id: str = Field(default="", max_length=255, index=True)
+    generation_payment_method_required: bool = Field(default=False)
+    has_saved_generation_payment_method: bool = Field(default=False)
+    default_generation_payment_method_label: Optional[str] = Field(default=None, max_length=120)
 
     kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
 

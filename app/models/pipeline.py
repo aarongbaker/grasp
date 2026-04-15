@@ -21,12 +21,13 @@ every session.
 import operator
 import re
 import uuid
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
-from app.models.enums import ErrorType, MealType, Occasion
+from app.models.enums import ErrorType, MealType, Occasion, SessionStatus
 from app.models.scheduling import OneOvenConflictSummary
 
 
@@ -500,6 +501,84 @@ CreateSessionRequest = Annotated[
     | CreateSessionPlannerCatalogCookbookRequest,
     Field(discriminator=None),
 ]
+
+
+class GenerationRecoveryAction(BaseModel):
+    kind: Literal["update_payment_method", "retry_outstanding_balance"]
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    session_id: uuid.UUID
+
+
+class SessionOutstandingBalanceSummary(BaseModel):
+    has_outstanding_balance: bool = False
+    can_retry_charge: bool = False
+    billing_state: Literal["ready", "charge_pending", "charged", "charge_failed"] | None = None
+    reason_code: Annotated[str | None, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)] = None
+    reason: Annotated[str | None, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)] = None
+    retry_attempted_at: datetime | None = None
+    recovery_action: GenerationRecoveryAction | None = None
+
+
+class SessionBillingSummary(BaseModel):
+    outstanding_balance: SessionOutstandingBalanceSummary = Field(default_factory=SessionOutstandingBalanceSummary)
+
+
+class SessionRunAcceptedResponse(BaseModel):
+    session_id: uuid.UUID
+    status: Literal["generating"] = "generating"
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class SessionRunBlockedResponse(BaseModel):
+    session_id: uuid.UUID
+    status: Literal["blocked"] = "blocked"
+    reason_code: Literal["payment_method_required"]
+    message: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    requires_payment_method: bool = True
+    next_action: GenerationRecoveryAction
+
+
+class SessionDetailResponse(BaseModel):
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    status: SessionStatus
+    concept_json: dict = Field(default_factory=dict)
+    schedule_summary: str | None = None
+    total_duration_minutes: int | None = None
+    error_summary: str | None = None
+    result_recipes: list | None = None
+    result_schedule: dict | None = None
+    token_usage: dict | None = None
+    celery_task_id: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    billing: SessionBillingSummary = Field(default_factory=SessionBillingSummary)
+
+
+class BillingSetupSessionResponse(BaseModel):
+    url: str
+    setup_state: Literal["requires_action"] = "requires_action"
+    payment_method_status: Literal["missing", "saved"]
+    session_id: uuid.UUID | None = None
+    customer_state: Literal["existing", "created"]
+
+
+class BillingRecoverySessionResponse(BaseModel):
+    url: str
+    recovery_state: Literal["requires_payment_update"] = "requires_payment_update"
+    session_id: uuid.UUID
+    outstanding_balance: SessionOutstandingBalanceSummary
+
+
+class BillingSetupStatusResponse(BaseModel):
+    has_saved_payment_method: bool
+    payment_method_label: Annotated[str | None, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)] = None
+
+
+class BillingRecoveryStatusResponse(BaseModel):
+    session_id: uuid.UUID
+    outstanding_balance: SessionOutstandingBalanceSummary
 
 
 class InitialPipelineState(TypedDict):

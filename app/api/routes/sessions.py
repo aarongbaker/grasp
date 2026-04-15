@@ -25,7 +25,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import asc, desc, func
@@ -52,11 +51,17 @@ from app.models.pipeline import (
     PlannerReferenceResolutionResponse,
     PlannerResolutionMatch,
     PlannerResolutionMatchStatus,
+    SessionBillingSummary,
+    SessionDetailResponse,
+    SessionOutstandingBalanceSummary,
+    SessionRunAcceptedResponse,
+    SessionRunBlockedResponse,
 )
 from app.models.recipe import ValidatedRecipe
 from app.models.session import Session
 from app.models.scheduling import NaturalLanguageSchedule
 from app.api.routes.catalog import resolve_catalog_cookbook_access
+from app.services.generation_billing import GenerationBillingService
 
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
@@ -84,15 +89,6 @@ async def _resolve_planner_reference_matches(
     db: DBSession,
     current_user: CurrentUser,
 ) -> PlannerReferenceResolutionResponse:
-    """Resolve a planner reference string to matching authored recipes or cookbooks.
-
-    Uses a case-insensitive LIKE query with % wildcards so partial name matches
-    work (e.g. "pasta" matches "Pasta al Limone"). Results are sorted by
-    updated_at DESC so the most recently edited item appears first.
-
-    Returns RESOLVED if exactly 1 match, AMBIGUOUS if multiple, NO_MATCH if zero.
-    The frontend uses this to prompt the user to clarify before creating a session.
-    """
     normalized_reference = _normalize_reference_search(reference)
     search_term = f"%{normalized_reference}%"
 
@@ -147,12 +143,6 @@ async def _resolve_authored_selection(
     db: DBSession,
     current_user: CurrentUser,
 ) -> dict:
-    """Verify the authored recipe exists and belongs to current_user.
-
-    Returns a concept_fields dict fragment with the resolved authored recipe data.
-    We re-read the title from the DB rather than trusting the request body —
-    the client may have sent a stale title if the recipe was renamed since selection.
-    """
     authored_recipe = await db.get(AuthoredRecipeRecord, body.selected_authored_recipe.recipe_id)
     if authored_recipe is None:
         raise HTTPException(status_code=404, detail="Authored recipe not found")
@@ -164,7 +154,7 @@ async def _resolve_authored_selection(
         "free_text": body.free_text,
         "selected_authored_recipe": {
             "recipe_id": str(authored_recipe.recipe_id),
-            "title": authored_recipe.title,  # Canonical title from DB, not request
+            "title": authored_recipe.title,
         },
     }
 
@@ -175,7 +165,6 @@ async def _resolve_planner_authored_anchor(
     db: DBSession,
     current_user: CurrentUser,
 ) -> dict:
-    """Verify the planner authored anchor exists and belongs to current_user."""
     authored_recipe = await db.get(AuthoredRecipeRecord, body.planner_authored_recipe_anchor.recipe_id)
     if authored_recipe is None:
         raise HTTPException(status_code=404, detail="Authored recipe not found")
@@ -198,7 +187,6 @@ async def _resolve_planner_cookbook_target(
     db: DBSession,
     current_user: CurrentUser,
 ) -> dict:
-    """Verify the planner cookbook target exists and belongs to current_user."""
     cookbook = await db.get(RecipeCookbookRecord, body.planner_cookbook_target.cookbook_id)
     if cookbook is None:
         raise HTTPException(status_code=404, detail="Recipe cookbook not found")
@@ -223,12 +211,6 @@ async def _resolve_planner_catalog_cookbook(
     current_user: CurrentUser,
     db: DBSession,
 ) -> dict:
-    """Resolve one catalog cookbook through the backend entitlement seam.
-
-    Persist canonical catalog metadata from the backend fixture seam rather than
-    trusting client-supplied title/access fields. Preview and included catalog
-    cookbooks are both planner-selectable; locked catalog items fail explicitly.
-    """
     catalog_summary = await resolve_catalog_cookbook_access(
         body.planner_catalog_cookbook.catalog_cookbook_id,
         current_user,
@@ -250,6 +232,26 @@ async def _resolve_planner_catalog_cookbook(
     }
 
 
+def _build_outstanding_balance_response(*, session: Session, outstanding_balance: SessionOutstandingBalanceSummary) -> SessionDetailResponse:
+    return SessionDetailResponse(
+        session_id=session.session_id,
+        user_id=session.user_id,
+        status=_session_status(session.status),
+        concept_json=session.concept_json,
+        schedule_summary=session.schedule_summary,
+        total_duration_minutes=session.total_duration_minutes,
+        error_summary=session.error_summary,
+        result_recipes=session.result_recipes,
+        result_schedule=session.result_schedule,
+        token_usage=session.token_usage,
+        celery_task_id=session.celery_task_id,
+        created_at=session.created_at,
+        started_at=session.started_at,
+        completed_at=session.completed_at,
+        billing=SessionBillingSummary(outstanding_balance=outstanding_balance),
+    )
+
+
 @router.post("/planner/resolve", response_model=PlannerReferenceResolutionResponse)
 @limiter.limit("30/minute")
 async def resolve_planner_reference(
@@ -258,13 +260,6 @@ async def resolve_planner_reference(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Resolve a planner reference string to matching library items.
-
-    Used by the planner UI to resolve natural-language references to specific
-    authored recipes or cookbooks before session creation. The frontend calls
-    this endpoint, shows the matches, lets the user confirm, then calls POST /sessions
-    with the exact recipe_id or cookbook_id from the resolved match.
-    """
     return await _resolve_planner_reference_matches(
         kind=body.kind,
         reference=body.reference,
@@ -276,22 +271,6 @@ async def resolve_planner_reference(
 @router.post("", status_code=201)
 @limiter.limit(create_session_limit, key_func=user_identity_or_ip_key)
 async def create_session(request: Request, body: CreateSessionRequest, db: DBSession, current_user: CurrentUser):
-    """Create a new session with PENDING status.
-
-    Does NOT start the pipeline — call POST /sessions/{id}/run after creation.
-    Separating creation from enqueue allows the frontend to show a confirmation
-    screen before committing to a potentially expensive LLM pipeline run.
-
-    Dietary defaults from the user's profile are merged with the request's
-    dietary_restrictions using set union — the chef doesn't have to re-specify
-    their dietary defaults every session. Duplicates are removed.
-
-    concept_fields is built progressively: shared fields first, then
-    source-specific fields from the resolution helpers. DinnerConcept.model_validate()
-    runs validate_source_contract to catch any misconfiguration.
-    """
-    # Merge chef's dietary_defaults into every session automatically.
-    # set() deduplicates — "vegan" from profile + "vegan" from request → ["vegan"].
     merged_restrictions = list(set(current_user.dietary_defaults + body.dietary_restrictions))
 
     concept_fields: dict = {
@@ -303,8 +282,6 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
         "serving_time": body.serving_time,
     }
 
-    # Source-specific fields are resolved and merged into concept_fields.
-    # Each _resolve_* function validates ownership and returns a dict fragment.
     if isinstance(body, CreateSessionAuthoredRequest):
         concept_fields.update(await _resolve_authored_selection(body=body, db=db, current_user=current_user))
     elif isinstance(body, CreateSessionPlannerAuthoredAnchorRequest):
@@ -314,8 +291,6 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     elif isinstance(body, CreateSessionPlannerCatalogCookbookRequest):
         concept_fields.update(await _resolve_planner_catalog_cookbook(body=body, current_user=current_user, db=db))
     elif isinstance(body, CreateSessionCookbookRequest):
-        # Cookbook mode: selected_recipes will be resolved by the generator node
-        # at pipeline start. For now, store chunk_ids in the concept.
         concept_fields.update(
             {
                 "concept_source": body.concept_source,
@@ -323,7 +298,6 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
             }
         )
     else:
-        # Legacy free_text mode
         concept_fields.update(
             {
                 "concept_source": "free_text",
@@ -331,15 +305,11 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
             }
         )
 
-    # model_validate() runs the full validate_source_contract cross-field validator.
-    # If concept_fields is inconsistent, this raises ValidationError → HTTP 422.
     concept = DinnerConcept.model_validate(concept_fields)
 
     session = Session(
         user_id=current_user.user_id,
         status=SessionStatus.PENDING,
-        # concept_json is the authoritative source for the pipeline.
-        # Stored as a plain dict — no Pydantic dependency on read.
         concept_json=concept.model_dump(mode="json"),
     )
     db.add(session)
@@ -348,24 +318,9 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     return session
 
 
-@router.post("/{session_id}/run", status_code=202)
+@router.post("/{session_id}/run", status_code=202, response_model=SessionRunAcceptedResponse | SessionRunBlockedResponse)
 @limiter.limit("5/minute")
 async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
-    """
-    Enqueues the LangGraph pipeline as a Celery task.
-    Returns 202 immediately — does NOT wait for pipeline completion.
-
-    This is the ONLY place that writes GENERATING to Session.status.
-    V1.6 state ownership contract: two writers, no more.
-      Writer 1 (this route): PENDING → GENERATING
-      Writer 2 (finalise_session): GENERATING → COMPLETE/FAILED/PARTIAL
-
-    Idempotency guard: returns 409 if the session is already in progress
-    or terminal. The frontend should not call /run twice, but this guard
-    prevents double-billing if it does.
-
-    celery_task_id is stored so POST /sessions/{id}/cancel can revoke the task.
-    """
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -375,17 +330,27 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
     if session_status != SessionStatus.PENDING:
         raise HTTPException(status_code=409, detail=f"Session is already {session_status.value}")
 
-    # Direct DB write — the one exception to the checkpoint-derived rule.
-    # GENERATING is the only status written by the API server (not finalise_session).
+    billing_service = GenerationBillingService()
+    gate = await billing_service.evaluate_run_gate(db, session=session, user=current_user)
+    if not gate.can_run:
+        return SessionRunBlockedResponse(
+            session_id=session.session_id,
+            status="blocked",
+            reason_code="payment_method_required",
+            message=gate.reason,
+            requires_payment_method=True,
+            next_action={
+                "kind": "update_payment_method",
+                "label": "Add payment method",
+                "session_id": session.session_id,
+            },
+        )
+
     session.status = SessionStatus.GENERATING
     session.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.add(session)
     await db.commit()
 
-    # Enqueue Celery task and store task ID for cancellation.
-    # The task ID is needed by POST /cancel to revoke the task via Celery's
-    # control interface. Without it, cancellation can only set the DB status
-    # but cannot stop the already-running Celery worker.
     from app.workers.tasks import run_grasp_pipeline
 
     result = run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))  # type: ignore[attr-defined]
@@ -393,24 +358,15 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
     db.add(session)
     await db.commit()
 
-    return {"session_id": str(session_id), "status": "generating", "message": "Pipeline enqueued"}
+    return SessionRunAcceptedResponse(
+        session_id=session_id,
+        status="generating",
+        message="Pipeline enqueued",
+    )
 
 
 @router.post("/{session_id}/cancel", status_code=200)
 async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
-    """
-    Cancels an in-progress pipeline by revoking its Celery task and
-    marking the session as CANCELLED. Idempotent — returns 200 if already cancelled.
-
-    Uses SELECT FOR UPDATE to prevent a race condition with finalise_session():
-    if the pipeline completes at the same moment as the cancel request,
-    the lock ensures only one writer wins. The CANCELLED status guard in
-    finalise_session() ensures it respects the cancellation.
-
-    Task revocation: best-effort — if the Celery task has already completed
-    or the broker is unavailable, revoke() will fail silently. The DB status
-    is still written to CANCELLED regardless, preventing any future /run calls.
-    """
     stmt = (
         select(Session)
         .where(Session.session_id == session_id)
@@ -426,23 +382,19 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
         raise HTTPException(status_code=403, detail="Access denied")
     session_status = _session_status(session.status)
     if session_status == SessionStatus.CANCELLED:
-        # Idempotent — already cancelled, return success without re-writing.
         await db.rollback()
         return {"session_id": str(session_id), "status": "cancelled"}
     if not session_status.is_in_progress:
         await db.rollback()
         raise HTTPException(status_code=409, detail=f"Session is {session_status.value}, not in progress")
 
-    # Revoke the Celery task (best-effort — don't fail cancel if revoke fails).
-    # SIGTERM allows the task to do cleanup before stopping. If the task has
-    # already committed its final state, revoke is a no-op.
     if session.celery_task_id:
         try:
             from app.workers.celery_app import celery_app
 
             celery_app.control.revoke(session.celery_task_id, terminate=True, signal="SIGTERM")
         except Exception:
-            pass  # Task may already be done; cancellation still marks status
+            pass
 
     session.status = SessionStatus.CANCELLED
     session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -454,12 +406,6 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
 
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
-    """Delete a session and its DB record. Does not affect the LangGraph checkpoint.
-
-    The checkpoint is not deleted here — checkpoint cleanup is out-of-scope for V1.
-    Stale checkpoints in Postgres don't cause correctness issues because each
-    session has its own thread_id namespace.
-    """
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -469,69 +415,53 @@ async def delete_session(session_id: uuid.UUID, db: DBSession, current_user: Cur
     await db.commit()
 
 
-@router.get("/{session_id}")
+@router.get("/{session_id}", response_model=SessionDetailResponse)
 async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
-    """
-    Two-tier read (§2.9):
-      terminal status → return Session row directly (fast path)
-      in-progress     → derive status from LangGraph checkpoint via status_projection()
-
-    The fast path is important for performance: once a session completes,
-    all subsequent reads serve the DB row without touching the checkpoint.
-    This is especially important when the UI refreshes a completed session.
-
-    The slow path (status_projection) reads the live checkpoint to derive
-    the current pipeline stage (GENERATING → ENRICHING → VALIDATING → SCHEDULING).
-    On checkpoint failure, falls back to the DB row (showing GENERATING).
-    """
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    billing_service = GenerationBillingService()
+    outstanding = await billing_service.get_outstanding_balance_status(db, session=session)
+    outstanding_summary = SessionOutstandingBalanceSummary(
+        has_outstanding_balance=outstanding.has_outstanding_balance,
+        can_retry_charge=outstanding.can_retry_charge,
+        billing_state=(outstanding.billing_state.value if hasattr(outstanding.billing_state, "value") else outstanding.billing_state) if outstanding.billing_state else None,
+        reason_code=outstanding.reason_code,
+        reason=outstanding.reason,
+        retry_attempted_at=outstanding.retry_attempted_at,
+        recovery_action={
+            "kind": "retry_outstanding_balance",
+            "label": "Resolve outstanding balance",
+            "session_id": session.session_id,
+        } if outstanding.can_retry_charge else None,
+    )
+
     session_status = _session_status(session.status)
     if session_status.is_terminal:
-        # Fast path: read the DB row directly — terminal status never changes.
-        return session
+        return _build_outstanding_balance_response(session=session, outstanding_balance=outstanding_summary)
 
     if session_status.is_in_progress:
-        # Slow path: derive live status from checkpoint.
-        # status_projection() uses graph.aget_state() to read the latest
-        # checkpoint without acquiring a write lock.
         from app.core.status import status_projection
-        from app.main import get_graph  # injected at startup
+        from app.main import get_graph
 
         try:
             graph = await get_graph()
             live_status = await status_projection(session_id, graph)
-            # Return the session dict with the live status overriding the DB status.
-            # The DB still shows GENERATING; only this response shows the live stage.
-            return {**session.model_dump(), "status": live_status}
+            return _build_outstanding_balance_response(
+                session=Session.model_validate({**session.model_dump(), "status": live_status}),
+                outstanding_balance=outstanding_summary,
+            )
         except Exception:
-            # Fall back to DB row if checkpoint unavailable.
-            # This happens during graph initialization or Postgres downtime.
-            return session
+            return _build_outstanding_balance_response(session=session, outstanding_balance=outstanding_summary)
 
-    return session
+    return _build_outstanding_balance_response(session=session, outstanding_balance=outstanding_summary)
 
 
 @router.get("/{session_id}/results")
 async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
-    """
-    Returns the full pipeline output (schedule, recipes, errors) for a terminal session.
-
-    Two paths:
-      Fast path: read result_schedule + result_recipes from Session columns.
-        Populated by finalise_session() when the pipeline completes.
-        Avoids checkpoint lookup — suitable for high-frequency polling.
-      Slow path (backward compat): read from LangGraph checkpoint.
-        Used for sessions finalised before the result_schedule column existed.
-        Will be removed in a future migration.
-
-    Only callable when session is COMPLETE or PARTIAL — returns 409 otherwise.
-    FAILED sessions have no schedule to return.
-    """
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -543,8 +473,6 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
     if session_status == SessionStatus.FAILED:
         raise HTTPException(status_code=409, detail="Session failed — no results available")
 
-    # Fast path: read from persisted columns (populated by finalise_session).
-    # model_validate() re-parses the stored JSON to validate and provide type safety.
     if session.result_schedule and session.result_recipes is not None:
         persisted_schedule = NaturalLanguageSchedule.model_validate(session.result_schedule)
         persisted_recipes = [ValidatedRecipe.model_validate(recipe) for recipe in session.result_recipes]
@@ -554,8 +482,6 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
             "errors": [],
         }
 
-    # Slow path (backward compat for sessions finalized before migration).
-    # Read from checkpoint — requires the graph to be initialised.
     from app.main import get_graph
 
     graph = await get_graph()
@@ -583,4 +509,3 @@ async def get_session_results(session_id: uuid.UUID, db: DBSession, current_user
         "recipes": [r.model_dump() for r in recipes],
         "errors": errors,
     }
-
