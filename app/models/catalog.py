@@ -146,3 +146,87 @@ class CatalogCookbookDetailResponse(BaseModel):
     """Read-only detail response wrapper for the catalog seam."""
 
     item: CatalogCookbookDetail
+
+
+class SellerPayoutReadinessSummary(BaseModel):
+    """Provider-safe seller payout readiness contract."""
+
+    onboarding_status: str = Field(min_length=1, max_length=40)
+    can_accept_sales: bool
+    charges_enabled: bool
+    payouts_enabled: bool
+    details_submitted: bool
+    requirements_due: list[str] = Field(default_factory=list)
+    status_reason: str | None = Field(default=None, max_length=300)
+    has_onboarding_action: bool = False
+
+
+class SellerPayoutOnboardingLinkResponse(BaseModel):
+    """Action response for seller payout onboarding without leaking provider refs."""
+
+    onboarding_url: str
+    onboarding_status: str
+    can_accept_sales: bool
+    expires_in_seconds: int | None = None
+
+
+class MarketplacePublicationUpsertRequest(BaseModel):
+    """Seller-authored publication payload for marketplace listing management."""
+
+    source_cookbook_id: uuid.UUID
+    publication_status: MarketplaceCookbookPublicationStatus = MarketplaceCookbookPublicationStatus.PUBLISHED
+    slug: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: Optional[str] = Field(default=None, max_length=300)
+    description: str = Field(min_length=1, max_length=4000)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    list_price_cents: int = Field(ge=0)
+    currency: str = Field(default="usd", min_length=3, max_length=3)
+    publication_notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class MarketplacePublicationListResponse(BaseModel):
+    items: list[MarketplaceCookbookPublicationSummary] = Field(default_factory=list)
+
+
+class CookbookRevenueShare(BaseModel):
+    """Backend-authored, provider-safe revenue split metadata."""
+
+    seller_share_cents: int = Field(ge=0)
+    platform_share_cents: int = Field(ge=0)
+    seller_share_ratio: str
+    platform_share_ratio: str
+    list_price_cents: int = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3)
+
+
+class MarketplaceCheckoutResponse(BaseModel):
+    """Buyer-facing checkout creation response for one marketplace cookbook."""
+
+    checkout_url: str
+    checkout_status: str
+    catalog_cookbook_id: uuid.UUID
+    marketplace_cookbook_publication_id: uuid.UUID
+    revenue_share: CookbookRevenueShare
+
+
+class MarketplacePurchaseCompletionRequest(BaseModel):
+    """Backend-authored sale completion payload, fed by provider/webhook-safe metadata."""
+
+    marketplace_cookbook_publication_id: uuid.UUID
+    provider_checkout_ref: str | None = Field(default=None, max_length=255)
+    provider_completion_ref: str = Field(min_length=1, max_length=255)
+    checkout_status: str = Field(min_length=1, max_length=40)
+    provider: str = Field(default="stripe", min_length=1, max_length=50)
+
+
+class MarketplacePurchaseCompletionResponse(BaseModel):
+    """Completion outcome without exposing provider or transfer internals."""
+
+    checkout_status: str
+    purchase_state: str
+    ownership_granted: bool
+    ownership_recorded: bool
+    replayed_completion: bool
+    catalog_cookbook_id: uuid.UUID
+    marketplace_cookbook_publication_id: uuid.UUID

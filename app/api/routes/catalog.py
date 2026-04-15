@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
+from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.models.authored_recipe import RecipeCookbookRecord
 from app.models.catalog import (
     CatalogCookbookAudience,
     CatalogCookbookDetail,
@@ -27,11 +30,30 @@ from app.models.catalog import (
     CatalogCookbookListResponse,
     CatalogCookbookOwnershipStatus,
     CatalogCookbookSummary,
+    MarketplaceCheckoutResponse,
+    MarketplaceCookbookPublicationListResponse,
+    MarketplaceCookbookPublicationStatus,
+    MarketplaceCookbookPublicationSummary,
+    MarketplacePublicationListResponse,
+    MarketplacePublicationUpsertRequest,
+    MarketplacePurchaseCompletionRequest,
+    MarketplacePurchaseCompletionResponse,
 )
 from app.models.recipe import Ingredient, RawRecipe, RecipeProvenance
-from app.models.user import EntitlementKind
+from app.models.user import (
+    EntitlementKind,
+    MarketplaceCookbookPublicationRecord,
+    MarketplaceCookbookPublicationStatus as MarketplaceRecordStatus,
+)
 from app.services.access import AccessResolverInput, derive_catalog_cookbook_access
 from app.services.catalog_purchases import CatalogPurchaseService
+from app.services.marketplace_publications import (
+    MarketplacePublicationOwnershipError,
+    assert_source_cookbook_owned_by_chef,
+    build_marketplace_publication_view,
+    get_marketplace_publication_by_source,
+)
+from app.services.stripe_billing import build_billing_service
 from app.services.subscriptions import (
     build_subscription_diagnostics,
     get_active_subscription_snapshot,
@@ -323,6 +345,24 @@ def load_catalog_runtime_seed_recipes(catalog_cookbook_id: uuid.UUID) -> list[Ra
     return [_build_catalog_runtime_seed_recipe(fixture, recipe) for recipe in fixture.runtime_seed_recipes]
 
 
+def _publication_to_summary(record: MarketplaceCookbookPublicationRecord) -> MarketplaceCookbookPublicationSummary:
+    view = build_marketplace_publication_view(record)
+    payload = view.model_dump()
+    if isinstance(payload.get("published_at"), str):
+        payload["published_at"] = datetime.fromisoformat(payload["published_at"])
+    else:
+        payload["published_at"] = None
+    payload.pop("unpublished_at", None)
+    return MarketplaceCookbookPublicationSummary(**payload)
+
+
+async def _get_publication_or_404(db: DBSession, *, publication_id: uuid.UUID) -> MarketplaceCookbookPublicationRecord:
+    publication = await db.get(MarketplaceCookbookPublicationRecord, publication_id)
+    if publication is None:
+        raise HTTPException(status_code=404, detail="Marketplace publication not found")
+    return publication
+
+
 @router.get("", response_model=CatalogCookbookListResponse)
 async def list_catalog_cookbooks(current_user: CurrentUser, db: DBSession):
     """Return the platform-managed catalog seam with derived access states."""
@@ -347,4 +387,108 @@ async def get_catalog_cookbook(catalog_cookbook_id: uuid.UUID, current_user: Cur
             sample_recipe_titles=fixture.sample_recipe_titles,
             tags=fixture.tags,
         )
+    )
+
+
+@router.get("/marketplace/publications", response_model=MarketplacePublicationListResponse)
+async def list_marketplace_publications(current_user: CurrentUser, db: DBSession):
+    result = await db.exec(
+        select(MarketplaceCookbookPublicationRecord)
+        .where(MarketplaceCookbookPublicationRecord.chef_user_id == current_user.user_id)
+        .order_by(MarketplaceCookbookPublicationRecord.updated_at.desc())
+    )
+    return MarketplacePublicationListResponse(items=[_publication_to_summary(row) for row in result.all()])
+
+
+@router.post("/marketplace/publications", response_model=MarketplaceCookbookPublicationSummary, status_code=status.HTTP_201_CREATED)
+async def upsert_marketplace_publication(body: MarketplacePublicationUpsertRequest, current_user: CurrentUser, db: DBSession):
+    try:
+        source_cookbook = await assert_source_cookbook_owned_by_chef(
+            db,
+            chef_user_id=current_user.user_id,
+            source_cookbook_id=body.source_cookbook_id,
+        )
+    except MarketplacePublicationOwnershipError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    publication = await get_marketplace_publication_by_source(
+        db,
+        chef_user_id=current_user.user_id,
+        source_cookbook_id=body.source_cookbook_id,
+    )
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if publication is None:
+        publication = MarketplaceCookbookPublicationRecord(
+            chef_user_id=current_user.user_id,
+            source_cookbook_id=body.source_cookbook_id,
+            publication_status=MarketplaceRecordStatus(body.publication_status.value),
+            slug=body.slug,
+            title=body.title,
+            subtitle=body.subtitle,
+            description=body.description,
+            cover_image_url=body.cover_image_url,
+            list_price_cents=body.list_price_cents,
+            currency=body.currency.lower(),
+            recipe_count_snapshot=len(source_cookbook.recipes) if getattr(source_cookbook, "recipes", None) else 0,
+            publication_notes=body.publication_notes,
+            published_at=now if body.publication_status == MarketplaceCookbookPublicationStatus.PUBLISHED else None,
+            unpublished_at=now if body.publication_status == MarketplaceCookbookPublicationStatus.UNPUBLISHED else None,
+        )
+        db.add(publication)
+    else:
+        publication.publication_status = MarketplaceRecordStatus(body.publication_status.value)
+        publication.slug = body.slug
+        publication.title = body.title
+        publication.subtitle = body.subtitle
+        publication.description = body.description
+        publication.cover_image_url = body.cover_image_url
+        publication.list_price_cents = body.list_price_cents
+        publication.currency = body.currency.lower()
+        publication.recipe_count_snapshot = len(source_cookbook.recipes) if getattr(source_cookbook, "recipes", None) else publication.recipe_count_snapshot
+        publication.publication_notes = body.publication_notes
+        publication.updated_at = now
+        if publication.publication_status == MarketplaceRecordStatus.PUBLISHED:
+            publication.published_at = publication.published_at or now
+            publication.unpublished_at = None
+        elif publication.publication_status == MarketplaceRecordStatus.UNPUBLISHED:
+            publication.unpublished_at = now
+        db.add(publication)
+
+    await db.commit()
+    await db.refresh(publication)
+    return _publication_to_summary(publication)
+
+
+@router.post("/marketplace/publications/{publication_id}/checkout", response_model=MarketplaceCheckoutResponse)
+async def create_marketplace_checkout(publication_id: uuid.UUID, current_user: CurrentUser, db: DBSession):
+    publication = await _get_publication_or_404(db, publication_id=publication_id)
+    if publication.publication_status != MarketplaceRecordStatus.PUBLISHED:
+        raise HTTPException(status_code=409, detail="Marketplace publication is not available for sale")
+
+    service = build_billing_service(get_settings())
+    bundle = await service.create_marketplace_checkout_session(db, buyer=current_user, publication=publication)
+    return MarketplaceCheckoutResponse(**bundle.__dict__)
+
+
+@router.post("/marketplace/purchases/complete", response_model=MarketplacePurchaseCompletionResponse)
+async def complete_marketplace_purchase(body: MarketplacePurchaseCompletionRequest, current_user: CurrentUser, db: DBSession):
+    publication = await _get_publication_or_404(db, publication_id=body.marketplace_cookbook_publication_id)
+    service = build_billing_service(get_settings())
+    bundle = await service.finalize_marketplace_purchase(
+        db,
+        buyer=current_user,
+        publication=publication,
+        provider_checkout_ref=body.provider_checkout_ref,
+        provider_completion_ref=body.provider_completion_ref,
+        checkout_status=body.checkout_status,
+        provider=body.provider,
+    )
+    return MarketplacePurchaseCompletionResponse(
+        checkout_status=bundle.checkout_status,
+        purchase_state=bundle.purchase_state,
+        ownership_granted=bundle.ownership_granted,
+        ownership_recorded=bundle.ownership_recorded,
+        replayed_completion=bundle.replayed_completion,
+        catalog_cookbook_id=bundle.catalog_cookbook_id,
+        marketplace_cookbook_publication_id=bundle.marketplace_cookbook_publication_id,
     )

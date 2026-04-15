@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.core.deps import CurrentUser, DBSession
 from app.core.settings import get_settings
+from app.models.catalog import SellerPayoutOnboardingLinkResponse, SellerPayoutReadinessSummary
 from app.models.pipeline import (
     BillingRecoverySessionResponse,
     BillingRecoveryStatusResponse,
@@ -49,6 +50,20 @@ async def create_portal_session(db: DBSession, current_user: CurrentUser):
     service = build_billing_service(get_settings())
     bundle = await service.create_portal_session(db, user=current_user)
     return _app_safe_sync_payload(bundle)
+
+
+@router.get("/seller/payout", response_model=SellerPayoutReadinessSummary)
+async def get_seller_payout_readiness(db: DBSession, current_user: CurrentUser):
+    service = build_billing_service(get_settings())
+    bundle = await service.get_or_create_seller_payout_readiness(db, user=current_user)
+    return SellerPayoutReadinessSummary(**bundle.__dict__)
+
+
+@router.post("/seller/payout/onboarding", response_model=SellerPayoutOnboardingLinkResponse)
+async def create_seller_payout_onboarding(db: DBSession, current_user: CurrentUser):
+    service = build_billing_service(get_settings())
+    bundle = await service.create_seller_payout_onboarding_session(db, user=current_user)
+    return SellerPayoutOnboardingLinkResponse(**bundle.__dict__)
 
 
 @router.get("/generation/payment-method", response_model=BillingSetupStatusResponse)

@@ -14,16 +14,23 @@ from fastapi import HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.catalog import CookbookRevenueShare
 from app.models.pipeline import SessionOutstandingBalanceSummary
 from app.models.user import (
+    CatalogPurchaseProvider,
+    CatalogPurchaseState,
     EntitlementKind,
     GenerationBillingState,
+    MarketplaceCookbookPublicationRecord,
+    SellerPayoutAccountRecord,
+    SellerPayoutOnboardingStatus,
     SubscriptionSnapshot,
     SubscriptionStatus,
     SubscriptionSyncState,
     UserEntitlementGrant,
     UserProfile,
 )
+from app.services.catalog_purchases import CatalogPurchaseOutcome, CatalogPurchaseService
 from app.services.generation_billing import GenerationBillingService
 
 logger = logging.getLogger(__name__)
@@ -31,6 +38,9 @@ logger = logging.getLogger(__name__)
 STRIPE_PROVIDER = "stripe"
 _PREMIUM_PLAN_CODE = "stripe:catalog-premium"
 _STRIPE_SIGNATURE_HEADER = "stripe-signature"
+_MARKETPLACE_SELLER_SHARE_BPS = 7000
+_MARKETPLACE_PLATFORM_SHARE_BPS = 3000
+_MARKETPLACE_CATALOG_ID_NAMESPACE = uuid.UUID("4f7e5ab3-7fc4-41de-a34a-2f87c4fe64a6")
 
 
 class StripeGatewayProtocol(Protocol):
@@ -88,6 +98,47 @@ class StripeWebhookEnvelope:
     event_id: str
     event_type: str
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SellerPayoutReadinessBundle:
+    onboarding_status: str
+    can_accept_sales: bool
+    charges_enabled: bool
+    payouts_enabled: bool
+    details_submitted: bool
+    requirements_due: list[str]
+    status_reason: str | None
+    has_onboarding_action: bool
+
+
+@dataclass(frozen=True)
+class SellerPayoutOnboardingBundle:
+    onboarding_url: str
+    onboarding_status: str
+    can_accept_sales: bool
+    expires_in_seconds: int | None
+
+
+@dataclass(frozen=True)
+class MarketplaceCheckoutBundle:
+    checkout_url: str
+    checkout_status: str
+    catalog_cookbook_id: uuid.UUID
+    marketplace_cookbook_publication_id: uuid.UUID
+    revenue_share: CookbookRevenueShare
+
+
+@dataclass(frozen=True)
+class MarketplaceCompletionBundle:
+    checkout_status: str
+    purchase_state: str
+    ownership_granted: bool
+    ownership_recorded: bool
+    replayed_completion: bool
+    catalog_cookbook_id: uuid.UUID
+    marketplace_cookbook_publication_id: uuid.UUID
+    purchase_outcome: CatalogPurchaseOutcome | None = None
 
 
 class StripeSignatureError(Exception):
@@ -208,6 +259,33 @@ class StripeBillingService:
             sync_state=snapshot.sync_state.value if snapshot else None,
         )
 
+    async def get_or_create_seller_payout_readiness(self, db: AsyncSession, *, user: UserProfile) -> SellerPayoutReadinessBundle:
+        record = await self._get_or_create_seller_payout_account(db, user=user)
+        return self._build_seller_payout_readiness(record)
+
+    async def create_seller_payout_onboarding_session(
+        self,
+        db: AsyncSession,
+        *,
+        user: UserProfile,
+    ) -> SellerPayoutOnboardingBundle:
+        record = await self._get_or_create_seller_payout_account(db, user=user)
+        now = self._now_fn()
+        if record.onboarding_status == SellerPayoutOnboardingStatus.NOT_STARTED:
+            record.onboarding_status = SellerPayoutOnboardingStatus.INCOMPLETE
+        record.status_reason = record.status_reason or "Complete payout onboarding to publish and sell cookbooks."
+        record.updated_at = now
+        if not record.provider_account_ref:
+            record.provider_account_ref = f"acct_{user.user_id.hex[:16]}"
+        db.add(record)
+        await db.commit()
+        return SellerPayoutOnboardingBundle(
+            onboarding_url=f"{self._settings.stripe_portal_return_url.rstrip('/')}/seller/onboarding",
+            onboarding_status=record.onboarding_status.value,
+            can_accept_sales=record.charges_enabled and record.payouts_enabled,
+            expires_in_seconds=1800,
+        )
+
     async def create_generation_setup_session(
         self,
         db: AsyncSession,
@@ -272,6 +350,115 @@ class StripeBillingService:
     ) -> SessionOutstandingBalanceSummary:
         session = await self._require_owned_session(db, session_id=session_id, user=user)
         return await self._build_outstanding_balance_summary(db, session=session)
+
+    async def create_marketplace_checkout_session(
+        self,
+        db: AsyncSession,
+        *,
+        buyer: UserProfile,
+        publication: MarketplaceCookbookPublicationRecord,
+    ) -> MarketplaceCheckoutBundle:
+        revenue_share = self.build_marketplace_revenue_share(
+            list_price_cents=publication.list_price_cents,
+            currency=publication.currency,
+        )
+        checkout_ref = f"mkt_chk_{publication.marketplace_cookbook_publication_id.hex[:12]}_{buyer.user_id.hex[:8]}"
+        return MarketplaceCheckoutBundle(
+            checkout_url=f"{self._settings.stripe_checkout_success_url.rstrip('/')}/marketplace/{publication.marketplace_cookbook_publication_id}",
+            checkout_status="requires_payment",
+            catalog_cookbook_id=self.catalog_cookbook_id_for_publication(publication.marketplace_cookbook_publication_id),
+            marketplace_cookbook_publication_id=publication.marketplace_cookbook_publication_id,
+            revenue_share=revenue_share,
+        )
+
+    async def finalize_marketplace_purchase(
+        self,
+        db: AsyncSession,
+        *,
+        buyer: UserProfile,
+        publication: MarketplaceCookbookPublicationRecord,
+        provider_checkout_ref: str | None,
+        provider_completion_ref: str,
+        checkout_status: str,
+        provider: str = STRIPE_PROVIDER,
+    ) -> MarketplaceCompletionBundle:
+        catalog_cookbook_id = self.catalog_cookbook_id_for_publication(publication.marketplace_cookbook_publication_id)
+        purchase_service = CatalogPurchaseService(known_catalog_cookbook_ids={catalog_cookbook_id})
+        normalized_status = checkout_status.strip().lower()
+        purchase_metadata = {
+            "marketplace_cookbook_publication_id": str(publication.marketplace_cookbook_publication_id),
+            "source_cookbook_id": str(publication.source_cookbook_id),
+            "chef_user_id": str(publication.chef_user_id),
+            "publication_status": publication.publication_status.value,
+            "revenue_share": self.build_marketplace_revenue_share(
+                list_price_cents=publication.list_price_cents,
+                currency=publication.currency,
+            ).model_dump(),
+        }
+        provider_enum = CatalogPurchaseProvider.STRIPE if provider.strip().lower() == STRIPE_PROVIDER else CatalogPurchaseProvider.APP
+
+        if normalized_status in {"completed", "succeeded", "paid"}:
+            outcome = await purchase_service.record_successful_purchase(
+                db,
+                user_id=buyer.user_id,
+                catalog_cookbook_id=catalog_cookbook_id,
+                provider_checkout_ref=provider_checkout_ref,
+                provider_completion_ref=provider_completion_ref,
+                provider=provider_enum,
+                purchase_metadata=purchase_metadata,
+                access_reason="Purchased cookbook access is now included for this chef",
+            )
+            await db.commit()
+            return MarketplaceCompletionBundle(
+                checkout_status=normalized_status,
+                purchase_state=outcome.decision.purchase_state.value,
+                ownership_granted=outcome.ownership_record is not None,
+                ownership_recorded=outcome.created_ownership_record,
+                replayed_completion=outcome.reused_existing_completion,
+                catalog_cookbook_id=catalog_cookbook_id,
+                marketplace_cookbook_publication_id=publication.marketplace_cookbook_publication_id,
+                purchase_outcome=outcome,
+            )
+
+        failed_state = CatalogPurchaseState.CANCELLED if normalized_status in {"cancelled", "canceled"} else CatalogPurchaseState.FAILED
+        outcome = await purchase_service.record_non_completed_purchase(
+            db,
+            user_id=buyer.user_id,
+            catalog_cookbook_id=catalog_cookbook_id,
+            state=failed_state,
+            provider_checkout_ref=provider_checkout_ref,
+            provider_completion_ref=provider_completion_ref,
+            provider=provider_enum,
+            failure_code=f"checkout_{normalized_status}",
+            failure_message=f"Cookbook checkout ended with {normalized_status}.",
+            purchase_metadata=purchase_metadata,
+        )
+        await db.commit()
+        return MarketplaceCompletionBundle(
+            checkout_status=normalized_status,
+            purchase_state=outcome.decision.purchase_state.value,
+            ownership_granted=False,
+            ownership_recorded=False,
+            replayed_completion=outcome.reused_existing_completion,
+            catalog_cookbook_id=catalog_cookbook_id,
+            marketplace_cookbook_publication_id=publication.marketplace_cookbook_publication_id,
+            purchase_outcome=outcome,
+        )
+
+    def build_marketplace_revenue_share(self, *, list_price_cents: int, currency: str) -> CookbookRevenueShare:
+        seller_share_cents = (list_price_cents * _MARKETPLACE_SELLER_SHARE_BPS) // 10000
+        platform_share_cents = list_price_cents - seller_share_cents
+        return CookbookRevenueShare(
+            seller_share_cents=seller_share_cents,
+            platform_share_cents=platform_share_cents,
+            seller_share_ratio="70%",
+            platform_share_ratio="30%",
+            list_price_cents=list_price_cents,
+            currency=currency.lower(),
+        )
+
+    def catalog_cookbook_id_for_publication(self, publication_id: uuid.UUID) -> uuid.UUID:
+        return uuid.uuid5(_MARKETPLACE_CATALOG_ID_NAMESPACE, str(publication_id))
 
     async def handle_webhook(self, db: AsyncSession, *, body: bytes, signature: str | None) -> SubscriptionSnapshot:
         envelope = self._verify_and_parse_webhook(body=body, signature=signature)
@@ -343,6 +530,37 @@ class StripeBillingService:
         if session.user_id != user.user_id:
             raise HTTPException(status_code=403, detail="Access denied")
         return session
+
+    async def _get_or_create_seller_payout_account(self, db: AsyncSession, *, user: UserProfile) -> SellerPayoutAccountRecord:
+        result = await db.exec(select(SellerPayoutAccountRecord).where(SellerPayoutAccountRecord.user_id == user.user_id))
+        record = result.first()
+        if record is not None:
+            return record
+        record = SellerPayoutAccountRecord(
+            user_id=user.user_id,
+            onboarding_status=SellerPayoutOnboardingStatus.NOT_STARTED,
+            charges_enabled=False,
+            payouts_enabled=False,
+            details_submitted=False,
+            requirements_due=["identity_verification", "payout_account"],
+            status_reason="Complete payout onboarding to publish and sell cookbooks.",
+        )
+        db.add(record)
+        await db.flush()
+        return record
+
+    def _build_seller_payout_readiness(self, record: SellerPayoutAccountRecord) -> SellerPayoutReadinessBundle:
+        can_accept_sales = record.charges_enabled and record.payouts_enabled
+        return SellerPayoutReadinessBundle(
+            onboarding_status=record.onboarding_status.value,
+            can_accept_sales=can_accept_sales,
+            charges_enabled=record.charges_enabled,
+            payouts_enabled=record.payouts_enabled,
+            details_submitted=record.details_submitted,
+            requirements_due=list(record.requirements_due or []),
+            status_reason=record.status_reason,
+            has_onboarding_action=not can_accept_sales,
+        )
 
     async def _resolve_subscription_webhook_user_id(
         self,

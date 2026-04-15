@@ -8,8 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
+from app.models.catalog import MarketplaceCookbookPublicationStatus
 from app.models.session import Session
-from app.models.user import SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile
+from app.models.user import (
+    MarketplaceCookbookPublicationRecord,
+    SellerPayoutAccountRecord,
+    SellerPayoutOnboardingStatus,
+    SubscriptionSnapshot,
+    SubscriptionStatus,
+    SubscriptionSyncState,
+    UserProfile,
+)
 from app.services.generation_billing import GenerationBillingService
 from app.services.stripe_billing import StripeBillingService, StripeWebhookPayloadError
 from tests.conftest import _ensure_test_postgres_available
@@ -171,38 +180,136 @@ async def test_create_generation_setup_session_uses_customer_boundary_and_hides_
 
 
 @pytest.mark.asyncio
-async def test_create_generation_recovery_session_returns_app_safe_outstanding_balance_summary(stripe_service_db):
+async def test_seller_payout_readiness_is_provider_safe_and_actionable(stripe_service_db):
     service = _service()
     user = UserProfile(
         user_id=uuid.uuid4(),
-        name="Chef Recovery",
-        email="chef-recovery@test.com",
-        rag_owner_key=UserProfile.build_rag_owner_key("chef-recovery@test.com"),
-        stripe_customer_id="cus_recovery",
-        has_saved_generation_payment_method=True,
+        name="Chef Seller",
+        email="chef-seller@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("chef-seller@test.com"),
     )
-    session = Session(user_id=user.user_id, status="complete", concept_json={})
     stripe_service_db.add(user)
-    stripe_service_db.add(session)
     await stripe_service_db.commit()
 
-    billing_service = GenerationBillingService()
-    outcome = await billing_service.record_finalized_session(stripe_service_db, session=session, final_state={})
-    assert outcome.record is not None
-    await billing_service.mark_charge_failed(
-        stripe_service_db,
-        record=outcome.record,
-        error_code="card_declined",
-        error_message="saved card was declined",
+    readiness = await service.get_or_create_seller_payout_readiness(stripe_service_db, user=user)
+
+    assert readiness.onboarding_status == "not_started"
+    assert readiness.can_accept_sales is False
+    assert readiness.has_onboarding_action is True
+    assert "provider_account_ref" not in repr(readiness)
+
+
+@pytest.mark.asyncio
+async def test_marketplace_revenue_share_is_deterministic_70_30(stripe_service_db):
+    service = _service()
+
+    revenue_share = service.build_marketplace_revenue_share(list_price_cents=3200, currency="usd")
+
+    assert revenue_share.seller_share_cents == 2240
+    assert revenue_share.platform_share_cents == 960
+    assert revenue_share.seller_share_ratio == "70%"
+    assert revenue_share.platform_share_ratio == "30%"
+
+
+@pytest.mark.asyncio
+async def test_finalize_marketplace_purchase_records_exactly_once_ownership_for_completed_checkout(stripe_service_db):
+    service = _service()
+    buyer = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Buyer Chef",
+        email="buyer-chef@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("buyer-chef@test.com"),
     )
+    chef = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Seller Chef",
+        email="seller-chef@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("seller-chef@test.com"),
+    )
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=uuid.uuid4(),
+        chef_user_id=chef.user_id,
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="seller-book",
+        title="Seller Book",
+        description="For sale.",
+        list_price_cents=3200,
+        currency="usd",
+        recipe_count_snapshot=4,
+    )
+    stripe_service_db.add(buyer)
+    stripe_service_db.add(chef)
+    stripe_service_db.add(publication)
     await stripe_service_db.commit()
 
-    bundle = await service.create_generation_recovery_session(stripe_service_db, user=user, session_id=session.session_id)
+    first = await service.finalize_marketplace_purchase(
+        stripe_service_db,
+        buyer=buyer,
+        publication=publication,
+        provider_checkout_ref="cs_marketplace_1",
+        provider_completion_ref="evt_marketplace_complete_1",
+        checkout_status="completed",
+    )
+    second = await service.finalize_marketplace_purchase(
+        stripe_service_db,
+        buyer=buyer,
+        publication=publication,
+        provider_checkout_ref="cs_marketplace_1",
+        provider_completion_ref="evt_marketplace_complete_1",
+        checkout_status="completed",
+    )
 
-    assert bundle.url == "https://billing.stripe.test/portal_session"
-    assert bundle.session_id == session.session_id
-    assert bundle.outstanding_balance.has_outstanding_balance is True
-    assert bundle.outstanding_balance.can_retry_charge is True
-    assert bundle.outstanding_balance.billing_state == "charge_failed"
-    assert bundle.outstanding_balance.recovery_action is not None
-    assert "provider" not in bundle.outstanding_balance.model_dump_json()
+    assert first.ownership_granted is True
+    assert first.ownership_recorded is True
+    assert second.ownership_granted is True
+    assert second.ownership_recorded is False
+    assert second.replayed_completion is True
+
+
+@pytest.mark.asyncio
+async def test_finalize_marketplace_purchase_does_not_grant_ownership_for_cancelled_checkout(stripe_service_db):
+    service = _service()
+    buyer = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Cancelled Buyer",
+        email="cancelled-buyer@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("cancelled-buyer@test.com"),
+    )
+    chef = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Seller Chef Two",
+        email="seller-chef-two@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("seller-chef-two@test.com"),
+    )
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=uuid.uuid4(),
+        chef_user_id=chef.user_id,
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="seller-book-two",
+        title="Seller Book Two",
+        description="For sale too.",
+        list_price_cents=2100,
+        currency="usd",
+        recipe_count_snapshot=5,
+    )
+    stripe_service_db.add(buyer)
+    stripe_service_db.add(chef)
+    stripe_service_db.add(publication)
+    await stripe_service_db.commit()
+
+    outcome = await service.finalize_marketplace_purchase(
+        stripe_service_db,
+        buyer=buyer,
+        publication=publication,
+        provider_checkout_ref="cs_marketplace_cancelled",
+        provider_completion_ref="evt_marketplace_cancelled",
+        checkout_status="cancelled",
+    )
+
+    assert outcome.purchase_state == "cancelled"
+    assert outcome.ownership_granted is False
+    assert outcome.ownership_recorded is False
+
+

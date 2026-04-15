@@ -927,6 +927,199 @@ async def test_billing_webhook_rejects_replayed_events_and_surfaces_snapshot_con
     assert mock_db.committed is True
 
 
+async def test_get_seller_payout_readiness_redacts_provider_refs(app_with_overrides, test_user, monkeypatch):
+    service = AsyncMock(spec=StripeBillingService)
+    service.get_or_create_seller_payout_readiness.return_value = type(
+        "PayoutBundle",
+        (),
+        {
+            "onboarding_status": "incomplete",
+            "can_accept_sales": False,
+            "charges_enabled": False,
+            "payouts_enabled": False,
+            "details_submitted": True,
+            "requirements_due": ["external_account"],
+            "status_reason": "Complete onboarding to accept marketplace sales.",
+            "has_onboarding_action": True,
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/billing/seller/payout", headers=_auth_headers_for(test_user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["onboarding_status"] == "incomplete"
+    assert payload["has_onboarding_action"] is True
+    assert "provider_account_ref" not in str(payload)
+    assert "provider_snapshot" not in str(payload)
+
+
+async def test_create_marketplace_publication_rejects_cross_user_source_cookbook(app_with_overrides, test_user, mock_db):
+    foreign_cookbook = RecipeCookbookRecord(
+        cookbook_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Foreign Source",
+        description="Not yours",
+    )
+    mock_db.seed(RecipeCookbookRecord, foreign_cookbook.cookbook_id, foreign_cookbook)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/catalog/cookbooks/marketplace/publications",
+            headers=_auth_headers_for(test_user),
+            json={
+                "source_cookbook_id": str(foreign_cookbook.cookbook_id),
+                "publication_status": "published",
+                "slug": "foreign-source",
+                "title": "Foreign Source",
+                "description": "Should not publish.",
+                "list_price_cents": 2200,
+                "currency": "usd",
+            },
+        )
+
+    assert response.status_code == 403
+    assert "owned by the publishing chef" in response.json()["detail"]
+
+
+async def test_marketplace_purchase_completion_is_replay_safe_and_grants_ownership_once(app_with_overrides, test_user, mock_db, monkeypatch):
+    publication_id = uuid.uuid4()
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=publication_id,
+        chef_user_id=uuid.uuid4(),
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="marketplace-book",
+        title="Marketplace Book",
+        description="Published listing.",
+        list_price_cents=3200,
+        currency="usd",
+        recipe_count_snapshot=6,
+    )
+    mock_db.seed(MarketplaceCookbookPublicationRecord, publication_id, publication)
+
+    completion_bundle = type(
+        "CompletionBundle",
+        (),
+        {
+            "checkout_status": "completed",
+            "purchase_state": "completed",
+            "ownership_granted": True,
+            "ownership_recorded": True,
+            "replayed_completion": False,
+            "catalog_cookbook_id": uuid.uuid4(),
+            "marketplace_cookbook_publication_id": publication_id,
+        },
+    )()
+    replay_bundle = type(
+        "CompletionBundle",
+        (),
+        {
+            "checkout_status": "completed",
+            "purchase_state": "completed",
+            "ownership_granted": True,
+            "ownership_recorded": False,
+            "replayed_completion": True,
+            "catalog_cookbook_id": completion_bundle.catalog_cookbook_id,
+            "marketplace_cookbook_publication_id": publication_id,
+        },
+    )()
+    service = AsyncMock(spec=StripeBillingService)
+    service.finalize_marketplace_purchase.side_effect = [completion_bundle, replay_bundle]
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first = await client.post(
+            "/api/v1/catalog/cookbooks/marketplace/purchases/complete",
+            headers=_auth_headers_for(test_user),
+            json={
+                "marketplace_cookbook_publication_id": str(publication_id),
+                "provider_checkout_ref": "cs_marketplace",
+                "provider_completion_ref": "evt_marketplace_complete",
+                "checkout_status": "completed",
+                "provider": "stripe",
+            },
+        )
+        second = await client.post(
+            "/api/v1/catalog/cookbooks/marketplace/purchases/complete",
+            headers=_auth_headers_for(test_user),
+            json={
+                "marketplace_cookbook_publication_id": str(publication_id),
+                "provider_checkout_ref": "cs_marketplace",
+                "provider_completion_ref": "evt_marketplace_complete",
+                "checkout_status": "completed",
+                "provider": "stripe",
+            },
+        )
+
+    assert first.status_code == 200
+    assert first.json()["ownership_granted"] is True
+    assert first.json()["ownership_recorded"] is True
+    assert first.json()["replayed_completion"] is False
+    assert second.status_code == 200
+    assert second.json()["ownership_granted"] is True
+    assert second.json()["ownership_recorded"] is False
+    assert second.json()["replayed_completion"] is True
+
+
+async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownership(app_with_overrides, test_user, mock_db, monkeypatch):
+    publication_id = uuid.uuid4()
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=publication_id,
+        chef_user_id=uuid.uuid4(),
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="marketplace-book-cancelled",
+        title="Marketplace Book Cancelled",
+        description="Published listing.",
+        list_price_cents=1900,
+        currency="usd",
+        recipe_count_snapshot=2,
+    )
+    mock_db.seed(MarketplaceCookbookPublicationRecord, publication_id, publication)
+
+    service = AsyncMock(spec=StripeBillingService)
+    service.finalize_marketplace_purchase.return_value = type(
+        "CompletionBundle",
+        (),
+        {
+            "checkout_status": "cancelled",
+            "purchase_state": "cancelled",
+            "ownership_granted": False,
+            "ownership_recorded": False,
+            "replayed_completion": False,
+            "catalog_cookbook_id": uuid.uuid4(),
+            "marketplace_cookbook_publication_id": publication_id,
+        },
+    )()
+    _stub_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/catalog/cookbooks/marketplace/purchases/complete",
+            headers=_auth_headers_for(test_user),
+            json={
+                "marketplace_cookbook_publication_id": str(publication_id),
+                "provider_checkout_ref": "cs_marketplace_cancelled",
+                "provider_completion_ref": "evt_marketplace_cancelled",
+                "checkout_status": "cancelled",
+                "provider": "stripe",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["purchase_state"] == "cancelled"
+    assert payload["ownership_granted"] is False
+    assert payload["ownership_recorded"] is False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Kitchen config burner descriptor support
 # ─────────────────────────────────────────────────────────────────────────────
