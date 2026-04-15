@@ -3,12 +3,13 @@ from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
+from sqlmodel import select
 
 from app.api.routes.sessions import cancel_pipeline
 from app.core.status import finalise_session
 from app.models.enums import SessionStatus
 from app.models.session import Session
-from app.models.user import UserProfile
+from app.models.user import GenerationBillingRecord, GenerationBillingState, UserProfile
 
 
 def _current_user(user_id: uuid.UUID) -> UserProfile:
@@ -55,11 +56,17 @@ async def test_finalise_session_preserves_cancelled_status(test_db_session, test
     )
 
     refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.CANCELLED
     assert refreshed.schedule_summary is None
     assert refreshed.result_schedule is None
     assert refreshed.completed_at == completed_at
+    assert ledger_rows == []
 
 
 @pytest.mark.asyncio
@@ -84,6 +91,11 @@ async def test_finalise_session_persists_terminal_payload_for_uncancelled_sessio
     await finalise_session(session_id, final_state, test_db_session)
 
     refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.COMPLETE
     assert refreshed.schedule_summary == "Dinner ready"
@@ -93,6 +105,118 @@ async def test_finalise_session_persists_terminal_payload_for_uncancelled_sessio
     assert refreshed.token_usage["total_input_tokens"] == 12
     assert refreshed.token_usage["total_output_tokens"] == 8
     assert refreshed.completed_at is not None
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].billing_state == GenerationBillingState.READY
+    assert ledger_rows[0].session_status == SessionStatus.COMPLETE
+    assert ledger_rows[0].total_input_tokens == 12
+    assert ledger_rows[0].total_output_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_reuses_existing_ledger_record_on_duplicate_call(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.GENERATING,
+        concept_json={"free_text": "dedupe me"},
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    final_state = {
+        "schedule": _schedule_payload("Dinner ready"),
+        "validated_recipes": [],
+        "errors": [],
+        "token_usage": [{"input_tokens": 3, "output_tokens": 2, "node_name": "renderer"}],
+    }
+
+    await finalise_session(session_id, final_state, test_db_session)
+    await finalise_session(session_id, final_state, test_db_session)
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.COMPLETE
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].billing_state == GenerationBillingState.READY
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_failed_run_does_not_create_ledger_row(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.GENERATING,
+        concept_json={"free_text": "sad path"},
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    await finalise_session(
+        session_id,
+        {
+            "schedule": None,
+            "validated_recipes": [],
+            "errors": [{"node_name": "renderer", "message": "boom"}],
+            "token_usage": [{"input_tokens": 5, "output_tokens": 1, "node_name": "renderer"}],
+        },
+        test_db_session,
+    )
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.FAILED
+    assert refreshed.error_summary == "renderer: boom"
+    assert refreshed.token_usage["total_input_tokens"] == 5
+    assert refreshed.token_usage["total_output_tokens"] == 1
+    assert ledger_rows == []
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_marks_partial_and_records_ledger_once(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.GENERATING,
+        concept_json={"free_text": "partial path"},
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    await finalise_session(
+        session_id,
+        {
+            "schedule": _schedule_payload("Dinner mostly ready"),
+            "validated_recipes": [],
+            "errors": [{"node_name": "enricher", "message": "dropped dessert"}],
+        },
+        test_db_session,
+    )
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.PARTIAL
+    assert refreshed.error_summary == "enricher: dropped dessert"
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].session_status == SessionStatus.PARTIAL
+    assert ledger_rows[0].billing_state == GenerationBillingState.READY
 
 
 @pytest.mark.asyncio

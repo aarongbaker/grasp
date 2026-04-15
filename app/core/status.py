@@ -44,10 +44,10 @@ from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.enums import SessionStatus
-from app.models.errors import NodeError
 from app.models.recipe import ValidatedRecipe
 from app.models.scheduling import NaturalLanguageSchedule
 from app.models.session import Session
+from app.services.generation_billing import GenerationBillingService
 
 
 async def finalise_session(
@@ -95,7 +95,7 @@ async def finalise_session(
         schedule = NaturalLanguageSchedule.model_validate(schedule_dict)
         result.schedule_summary = schedule.summary
         result.total_duration_minutes = schedule.total_duration_minutes
-        result.status = SessionStatus.COMPLETE
+        result.status = SessionStatus.PARTIAL if has_errors else SessionStatus.COMPLETE
 
         # Persist full results to avoid checkpoint lookups on GET /results.
         # model_dump(mode="json") ensures datetime and UUID fields are
@@ -132,6 +132,13 @@ async def finalise_session(
     # the TIMESTAMP WITHOUT TIME ZONE column type.
     result.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.add(result)
+
+    billing_service = GenerationBillingService()
+    await billing_service.record_finalized_session(
+        db,
+        session=result,
+        final_state=final_state,
+    )
     await db.commit()
 
 
