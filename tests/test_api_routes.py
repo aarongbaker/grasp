@@ -37,7 +37,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord, MarketplaceCookbookPublicationRecord, MarketplaceCookbookPublicationStatus, SellerPayoutAccountRecord, SellerPayoutOnboardingStatus
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -339,6 +339,32 @@ class MockDBSession:
                 obj
                 for (model_class, _), obj in self._store.items()
                 if model_class is CatalogCookbookPurchaseRecord
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from seller_payout_account_records" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is SellerPayoutAccountRecord
+                and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
+            ]
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            return mock_result
+
+        if "from marketplace_cookbook_publications" in lowered_text:
+            uuid_filters = _extract_uuid_filters()
+            rows = [
+                obj
+                for (model_class, _), obj in self._store.items()
+                if model_class is MarketplaceCookbookPublicationRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             mock_result = MagicMock()
@@ -1667,6 +1693,81 @@ async def test_get_catalog_cookbook_detail_surfaces_owned_status_without_provide
     }
     assert "provider_checkout_ref" not in str(item)
     assert "provider_completion_ref" not in str(item)
+
+
+@pytest.mark.asyncio
+async def test_marketplace_publication_and_payout_rows_are_queryable_without_touching_catalog_purchase_rows(db_session_for_routes):
+    chef_email = f"marketplace-chef-{uuid.uuid4()}@example.com"
+    chef = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Marketplace Chef",
+        email=chef_email,
+        rag_owner_key=UserProfile.build_rag_owner_key(chef_email),
+    )
+    db_session_for_routes.add(chef)
+    await db_session_for_routes.commit()
+
+    source_cookbook = RecipeCookbookRecord(
+        user_id=chef.user_id,
+        name="Private Source Cookbook",
+        description="Private authored cookbook container used as marketplace source.",
+    )
+    db_session_for_routes.add(source_cookbook)
+    await db_session_for_routes.commit()
+    await db_session_for_routes.refresh(source_cookbook)
+
+    payout = SellerPayoutAccountRecord(
+        user_id=chef.user_id,
+        onboarding_status=SellerPayoutOnboardingStatus.ENABLED,
+        charges_enabled=True,
+        payouts_enabled=True,
+        details_submitted=True,
+        provider_account_ref="acct_private_enabled",
+        requirements_due=[],
+        status_reason="Ready to accept marketplace sales.",
+        provider_snapshot={"capabilities": {"transfers": "active"}},
+    )
+    publication = MarketplaceCookbookPublicationRecord(
+        chef_user_id=chef.user_id,
+        source_cookbook_id=source_cookbook.cookbook_id,
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        title="Marketplace Listing",
+        description="Chef-authored cookbook published into the marketplace catalog.",
+        slug="marketplace-listing",
+        list_price_cents=3200,
+        currency="usd",
+        recipe_count_snapshot=5,
+    )
+    db_session_for_routes.add(payout)
+    db_session_for_routes.add(publication)
+    await db_session_for_routes.commit()
+
+    stored_payout = (
+        await db_session_for_routes.exec(
+            select(SellerPayoutAccountRecord).where(SellerPayoutAccountRecord.user_id == chef.user_id)
+        )
+    ).first()
+    stored_publication = (
+        await db_session_for_routes.exec(
+            select(MarketplaceCookbookPublicationRecord).where(
+                MarketplaceCookbookPublicationRecord.chef_user_id == chef.user_id,
+                MarketplaceCookbookPublicationRecord.source_cookbook_id == source_cookbook.cookbook_id,
+            )
+        )
+    ).first()
+    purchases = (await db_session_for_routes.exec(select(CatalogCookbookPurchaseRecord))).all()
+    ownerships = (await db_session_for_routes.exec(select(CatalogCookbookOwnershipRecord))).all()
+
+    assert stored_payout is not None
+    assert stored_payout.onboarding_status == SellerPayoutOnboardingStatus.ENABLED
+    assert stored_payout.status_reason == "Ready to accept marketplace sales."
+    assert stored_payout.provider_account_ref == "acct_private_enabled"
+    assert stored_publication is not None
+    assert stored_publication.publication_status == MarketplaceCookbookPublicationStatus.PUBLISHED
+    assert stored_publication.source_cookbook_id == source_cookbook.cookbook_id
+    assert stored_publication.chef_user_id == chef.user_id
+    assert purchases == []
+    assert ownerships == []
 
 
 async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(app_with_overrides, test_user):

@@ -1,7 +1,7 @@
-"""Platform-managed catalog cookbook contract models.
+"""Platform-managed and marketplace cookbook contract models.
 
-These types represent the public, platform-managed cookbook catalog surfaced to
-clients as a read-only discovery seam. They are intentionally separate from:
+These types represent cookbook catalog contracts surfaced to clients. They are
+intentionally separate from:
 
 - RecipeCookbookRecord: a chef-owned private container for authored recipes
 - planner_cookbook_target: a planner request field that points at a private
@@ -14,6 +14,7 @@ surface with private-library cookbook ownership or planner request payloads.
 """
 
 import uuid
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -56,6 +57,55 @@ class CatalogCookbookAudience(str, Enum):
     INCLUDED = "included"
     PREVIEW = "preview"
     PREMIUM = "premium"
+    MARKETPLACE = "marketplace"
+
+
+class MarketplaceCookbookPublicationStatus(str, Enum):
+    """Public-facing publication status for chef-authored marketplace listings."""
+
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    UNPUBLISHED = "unpublished"
+    ARCHIVED = "archived"
+
+
+class MarketplaceCookbookPublicationSummary(BaseModel):
+    """Provider-safe marketplace listing metadata derived from persisted publication rows."""
+
+    marketplace_cookbook_publication_id: uuid.UUID
+    chef_user_id: uuid.UUID
+    source_cookbook_id: uuid.UUID
+    publication_status: MarketplaceCookbookPublicationStatus
+    slug: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: Optional[str] = Field(default=None, max_length=300)
+    description: str = Field(min_length=1, max_length=4000)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    list_price_cents: int = Field(ge=0)
+    currency: str = Field(min_length=3, max_length=3)
+    recipe_count_snapshot: int = Field(ge=0)
+    publication_notes: Optional[str] = Field(default=None, max_length=500)
+    published_at: Optional[datetime] = None
+
+
+class MarketplaceCookbookPublicationRecordView(BaseModel):
+    """Internal/backend-facing publication contract used by seller and catalog flows."""
+
+    marketplace_cookbook_publication_id: uuid.UUID
+    chef_user_id: uuid.UUID
+    source_cookbook_id: uuid.UUID
+    publication_status: MarketplaceCookbookPublicationStatus
+    slug: str
+    title: str
+    subtitle: Optional[str] = None
+    description: str
+    cover_image_url: Optional[str] = None
+    list_price_cents: int
+    currency: str
+    recipe_count_snapshot: int
+    publication_notes: Optional[str] = None
+    published_at: Optional[str] = None
+    unpublished_at: Optional[str] = None
 
 
 class CatalogCookbookSummary(BaseModel):

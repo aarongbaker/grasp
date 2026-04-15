@@ -153,6 +153,25 @@ class CatalogPurchaseProvider(str, Enum):
     STRIPE = "stripe"
 
 
+class SellerPayoutOnboardingStatus(str, Enum):
+    """App-owned snapshot of a chef's seller payout readiness."""
+
+    NOT_STARTED = "not_started"
+    INCOMPLETE = "incomplete"
+    PENDING_REVIEW = "pending_review"
+    ENABLED = "enabled"
+    RESTRICTED = "restricted"
+
+
+class MarketplaceCookbookPublicationStatus(str, Enum):
+    """Lifecycle for a cookbook publication into the public marketplace catalog."""
+
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    UNPUBLISHED = "unpublished"
+    ARCHIVED = "archived"
+
+
 class LibraryAccessSummary(BaseModel):
     """Provider-agnostic account-facing cookbook library access contract."""
 
@@ -234,6 +253,8 @@ class UserProfile(SQLModel, table=True):
     generation_billing_records: list["GenerationBillingRecord"] = Relationship(back_populates="user")
     catalog_purchase_records: list["CatalogCookbookPurchaseRecord"] = Relationship(back_populates="user")
     catalog_cookbook_ownerships: list["CatalogCookbookOwnershipRecord"] = Relationship(back_populates="user")
+    seller_payout_accounts: list["SellerPayoutAccountRecord"] = Relationship(back_populates="user")
+    marketplace_cookbook_publications: list["MarketplaceCookbookPublicationRecord"] = Relationship(back_populates="chef")
 
 
 class SubscriptionSnapshot(SQLModel, table=True):
@@ -353,4 +374,64 @@ class CatalogCookbookOwnershipRecord(SQLModel, table=True):
     user: Optional[UserProfile] = Relationship(back_populates="catalog_cookbook_ownerships")
     purchase_record: Optional[CatalogCookbookPurchaseRecord] = Relationship(back_populates="ownerships")
 
+
+class SellerPayoutAccountRecord(SQLModel, table=True):
+    """Persisted seller payout onboarding snapshot for one chef.
+
+    This stores the app's current understanding of payout readiness without
+    making raw provider account objects part of public contracts. Provider refs
+    stay private to backend billing code/routes.
+    """
+
+    __tablename__ = "seller_payout_account_records"
+
+    seller_payout_account_record_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True, unique=True)
+
+    onboarding_status: SellerPayoutOnboardingStatus = Field(default=SellerPayoutOnboardingStatus.NOT_STARTED)
+    charges_enabled: bool = Field(default=False)
+    payouts_enabled: bool = Field(default=False)
+    details_submitted: bool = Field(default=False)
+    provider_account_ref: Optional[str] = Field(default=None, max_length=255)
+    requirements_due: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    status_reason: Optional[str] = Field(default=None, max_length=300)
+    provider_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    last_provider_sync_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="seller_payout_accounts")
+
+
+class MarketplaceCookbookPublicationRecord(SQLModel, table=True):
+    """Persisted listing that publishes a private recipe cookbook into the marketplace.
+
+    Assumption: a marketplace cookbook is derived from exactly one chef-owned
+    RecipeCookbookRecord source container. Publication metadata lives here so
+    the private cookbook record can stay private and planner-focused.
+    """
+
+    __tablename__ = "marketplace_cookbook_publications"
+
+    marketplace_cookbook_publication_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    chef_user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    source_cookbook_id: uuid.UUID = Field(foreign_key="recipe_cookbooks.cookbook_id", index=True)
+
+    publication_status: MarketplaceCookbookPublicationStatus = Field(default=MarketplaceCookbookPublicationStatus.DRAFT)
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: Optional[str] = Field(default=None, max_length=300)
+    description: str = Field(min_length=1, max_length=4000)
+    slug: str = Field(min_length=1, max_length=120, index=True)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    list_price_cents: int = Field(ge=0)
+    currency: str = Field(default="usd", min_length=3, max_length=3)
+    recipe_count_snapshot: int = Field(default=0, ge=0)
+    publication_notes: Optional[str] = Field(default=None, max_length=500)
+    publication_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    published_at: Optional[datetime] = None
+    unpublished_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    chef: Optional[UserProfile] = Relationship(back_populates="marketplace_cookbook_publications")
 
