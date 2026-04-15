@@ -81,6 +81,14 @@
   color: #bfdbfe;
 }
 
+publicationText {
+  color: #d8b4fe;
+}
+
+.saleText {
+  color: #93c5fd;
+}
+
 .metricCard {
   padding: 1rem 1.05rem;
   border-radius: 1.15rem;

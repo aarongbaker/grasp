@@ -582,6 +582,10 @@ def _stub_billing_service(monkeypatch, service):
     monkeypatch.setattr("app.api.routes.billing.build_billing_service", lambda _settings: service)
 
 
+def _stub_catalog_billing_service(monkeypatch, service):
+    monkeypatch.setattr("app.api.routes.catalog.build_billing_service", lambda _settings: service)
+
+
 async def test_billing_checkout_returns_redirect_url_and_app_safe_state(app_with_overrides, test_user, monkeypatch):
     service = AsyncMock(spec=StripeBillingService)
     service.create_checkout_session.return_value = type(
@@ -930,20 +934,16 @@ async def test_billing_webhook_rejects_replayed_events_and_surfaces_snapshot_con
 
 async def test_get_seller_payout_readiness_redacts_provider_refs(app_with_overrides, test_user, monkeypatch):
     service = AsyncMock(spec=StripeBillingService)
-    service.get_or_create_seller_payout_readiness.return_value = type(
-        "PayoutBundle",
-        (),
-        {
-            "onboarding_status": "incomplete",
-            "can_accept_sales": False,
-            "charges_enabled": False,
-            "payouts_enabled": False,
-            "details_submitted": True,
-            "requirements_due": ["external_account"],
-            "status_reason": "Complete onboarding to accept marketplace sales.",
-            "has_onboarding_action": True,
-        },
-    )()
+    service.get_or_create_seller_payout_readiness.return_value = SimpleNamespace(
+        onboarding_status="incomplete",
+        can_accept_sales=False,
+        charges_enabled=False,
+        payouts_enabled=False,
+        details_submitted=True,
+        requirements_due=["external_account"],
+        status_reason="Complete onboarding to accept marketplace sales.",
+        has_onboarding_action=True,
+    )
     _stub_billing_service(monkeypatch, service)
 
     transport = ASGITransport(app=app_with_overrides)

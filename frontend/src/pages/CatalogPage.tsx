@@ -8,6 +8,9 @@ import type {
   CatalogAccessDiagnostics,
   CatalogCookbookOwnershipStatus,
   CatalogCookbookSummary,
+  MarketplaceCookbookPublicationSummary,
+  MarketplaceSaleDiagnostics,
+  SellerPayoutOnboardingStatus,
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './CatalogPage.module.css';
@@ -46,6 +49,43 @@ function isCatalogCookbookOwnershipStatus(value: unknown): value is CatalogCookb
   );
 }
 
+function isMarketplacePublicationSummary(value: unknown): value is MarketplaceCookbookPublicationSummary {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const publication = value as Partial<MarketplaceCookbookPublicationSummary>;
+  return (
+    typeof publication.marketplace_cookbook_publication_id === 'string' &&
+    typeof publication.source_cookbook_id === 'string' &&
+    typeof publication.publication_status === 'string' &&
+    typeof publication.slug === 'string' &&
+    typeof publication.title === 'string' &&
+    typeof publication.description === 'string' &&
+    typeof publication.list_price_cents === 'number' &&
+    typeof publication.currency === 'string' &&
+    typeof publication.recipe_count_snapshot === 'number'
+  );
+}
+
+function isMarketplaceSaleDiagnostics(value: unknown): value is MarketplaceSaleDiagnostics {
+  if (value == null) {
+    return true;
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const diagnostics = value as Partial<MarketplaceSaleDiagnostics>;
+  return (
+    typeof diagnostics.checkout_status === 'string' &&
+    typeof diagnostics.purchase_state === 'string' &&
+    typeof diagnostics.replayed_completion === 'boolean' &&
+    typeof diagnostics.ownership_recorded === 'boolean' &&
+    typeof diagnostics.ownership_granted === 'boolean'
+  );
+}
+
 function isCatalogCookbookSummary(value: unknown): value is CatalogCookbookSummary {
   if (!value || typeof value !== 'object') {
     return false;
@@ -61,7 +101,11 @@ function isCatalogCookbookSummary(value: unknown): value is CatalogCookbookSumma
     typeof item.access_state === 'string' &&
     typeof item.access_state_reason === 'string' &&
     isCatalogCookbookOwnershipStatus(item.ownership) &&
-    isCatalogAccessDiagnostics(item.access_diagnostics)
+    isCatalogAccessDiagnostics(item.access_diagnostics) &&
+    (item.publication == null || isMarketplacePublicationSummary(item.publication)) &&
+    (item.payout_onboarding_status == null || typeof item.payout_onboarding_status === 'string') &&
+    (item.can_accept_sales == null || typeof item.can_accept_sales === 'boolean') &&
+    isMarketplaceSaleDiagnostics(item.sale_diagnostics)
   );
 }
 
@@ -98,6 +142,9 @@ function getCatalogActionCopy(summary: CatalogCookbookSummary): string {
   if (summary.ownership.is_owned) {
     return 'Open your owned cookbook';
   }
+  if (summary.publication?.publication_status === 'published') {
+    return 'Open published cookbook';
+  }
   if (summary.access_state === 'locked') {
     return 'Review access options';
   }
@@ -105,6 +152,30 @@ function getCatalogActionCopy(summary: CatalogCookbookSummary): string {
     return 'Open preview cookbook';
   }
   return 'View cookbook details';
+}
+
+function getSellerPublicationCopy(summary: CatalogCookbookSummary): string | null {
+  if (summary.publication?.publication_status === 'published') {
+    return `Published for sale at $${(summary.publication.list_price_cents / 100).toFixed(2)} ${summary.publication.currency.toUpperCase()}.`;
+  }
+  if (summary.can_accept_sales === false && summary.payout_onboarding_status) {
+    return 'Seller payout onboarding is not ready yet, so this cookbook cannot be published for sale.';
+  }
+  return null;
+}
+
+function getBuyerSaleCopy(summary: CatalogCookbookSummary): string | null {
+  if (summary.sale_diagnostics?.ownership_granted) {
+    return 'Ownership was granted through the marketplace purchase flow.';
+  }
+  return null;
+}
+
+function getSellerPayoutBadge(status: SellerPayoutOnboardingStatus | string | null | undefined): string | null {
+  if (!status) {
+    return null;
+  }
+  return `Seller payout ${status}`;
 }
 
 export function CatalogPage() {
@@ -214,6 +285,9 @@ export function CatalogPage() {
         <section className={styles.catalogGrid} aria-label="Cookbook catalog results">
           {items.map((item) => {
             const ownershipCopy = getOwnershipCopy(item);
+            const sellerPublicationCopy = getSellerPublicationCopy(item);
+            const buyerSaleCopy = getBuyerSaleCopy(item);
+            const sellerPayoutBadge = getSellerPayoutBadge(item.payout_onboarding_status);
             return (
               <article key={item.catalog_cookbook_id} className={styles.catalogCard}>
                 {item.cover_image_url ? (
@@ -243,8 +317,11 @@ export function CatalogPage() {
                   <p className={styles.cardMeta}>{item.recipe_count} recipes</p>
                   <p className={styles.reasonText}>{item.access_state_reason}</p>
                   {ownershipCopy ? <p className={styles.ownershipText}>{ownershipCopy}</p> : null}
+                  {sellerPublicationCopy ? <p className={styles.publicationText}>{sellerPublicationCopy}</p> : null}
+                  {buyerSaleCopy ? <p className={styles.saleText}>{buyerSaleCopy}</p> : null}
 
                   <div className={styles.cardActions}>
+                    {sellerPayoutBadge ? <span className={styles.inlineStatus}>{sellerPayoutBadge}</span> : null}
                     <Link to={`/catalog/${item.catalog_cookbook_id}`} className={styles.detailLink}>
                       {getCatalogActionCopy(item)}
                     </Link>

@@ -5,6 +5,8 @@ import type {
   BillingSessionResponse,
   BillingSetupSessionResponse,
   BillingSetupStatusResponse,
+  SellerPayoutOnboardingLinkResponse,
+  SellerPayoutReadinessSummary,
 } from '../types/api';
 
 export function createCheckoutSession(): Promise<BillingSessionResponse> {
@@ -44,5 +46,15 @@ export function createGenerationRecoverySession(sessionId: string): Promise<Bill
   return apiFetch<BillingRecoverySessionResponse>('/billing/generation/recovery', {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+export function getSellerPayoutReadiness(): Promise<SellerPayoutReadinessSummary> {
+  return apiFetch<SellerPayoutReadinessSummary>('/billing/seller/payout');
+}
+
+export function createSellerPayoutOnboarding(): Promise<SellerPayoutOnboardingLinkResponse> {
+  return apiFetch<SellerPayoutOnboardingLinkResponse>('/billing/seller/payout/onboarding', {
+    method: 'POST',
   });
 }

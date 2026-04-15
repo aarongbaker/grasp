@@ -17,12 +17,14 @@ export type PlannerCookbookPlanningMode = 'strict' | 'cookbook_biased';
 export type PlannerReferenceKind = 'authored' | 'cookbook';
 export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous';
 export type CatalogCookbookAccessState = 'included' | 'preview' | 'locked';
-export type CatalogCookbookAudience = 'included' | 'preview' | 'premium';
+export type CatalogCookbookAudience = 'included' | 'preview' | 'premium' | 'marketplace';
 export type LibraryAccessState = 'included' | 'locked' | 'unavailable';
 export type BillingActionKind = 'update_payment_method' | 'retry_outstanding_balance';
 export type BillingSetupState = 'requires_action';
 export type BillingRecoveryState = 'requires_payment_update';
 export type OutstandingBalanceBillingState = 'charge_failed' | 'paid' | 'pending' | 'waived' | string;
+export type SellerPayoutOnboardingStatus = 'not_started' | 'incomplete' | 'enabled' | 'restricted';
+export type MarketplaceCookbookPublicationStatus = 'draft' | 'published' | 'unpublished' | 'archived';
 
 export interface CatalogAccessDiagnostics {
   subscription_snapshot_id: string | null;
@@ -35,6 +37,75 @@ export interface CatalogCookbookOwnershipStatus {
   is_owned: boolean;
   ownership_source: string | null;
   access_reason: string | null;
+}
+
+export interface SellerPayoutReadinessSummary {
+  onboarding_status: SellerPayoutOnboardingStatus | string;
+  can_accept_sales: boolean;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+  requirements_due: string[];
+  status_reason: string | null;
+  has_onboarding_action: boolean;
+}
+
+export interface SellerPayoutOnboardingLinkResponse {
+  onboarding_url: string;
+  onboarding_status: SellerPayoutOnboardingStatus | string;
+  can_accept_sales: boolean;
+  expires_in_seconds: number | null;
+}
+
+export interface MarketplaceCookbookPublicationSummary {
+  marketplace_cookbook_publication_id: string;
+  chef_user_id: string;
+  source_cookbook_id: string;
+  publication_status: MarketplaceCookbookPublicationStatus;
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  description: string;
+  cover_image_url: string | null;
+  list_price_cents: number;
+  currency: string;
+  recipe_count_snapshot: number;
+  publication_notes: string | null;
+  published_at: string | null;
+}
+
+export interface MarketplacePublicationListResponse {
+  items: MarketplaceCookbookPublicationSummary[];
+}
+
+export interface MarketplacePublicationUpsertRequest {
+  source_cookbook_id: string;
+  publication_status: MarketplaceCookbookPublicationStatus;
+  slug: string;
+  title: string;
+  subtitle?: string | null;
+  description: string;
+  cover_image_url?: string | null;
+  list_price_cents: number;
+  currency?: string;
+  publication_notes?: string | null;
+}
+
+export interface CookbookRevenueShare {
+  seller_share_cents: number;
+  platform_share_cents: number;
+  seller_share_ratio: string;
+  platform_share_ratio: string;
+  list_price_cents: number;
+  currency: string;
+}
+
+export interface MarketplaceSaleDiagnostics {
+  checkout_status: string;
+  purchase_state: string;
+  replayed_completion: boolean;
+  ownership_recorded: boolean;
+  ownership_granted: boolean;
 }
 
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
@@ -621,6 +692,10 @@ export interface CatalogCookbookSummary {
   access_state_reason: string;
   ownership: CatalogCookbookOwnershipStatus;
   access_diagnostics: CatalogAccessDiagnostics | null;
+  publication?: MarketplaceCookbookPublicationSummary | null;
+  payout_onboarding_status?: SellerPayoutOnboardingStatus | string | null;
+  can_accept_sales?: boolean | null;
+  sale_diagnostics?: MarketplaceSaleDiagnostics | null;
 }
 
 export interface CatalogCookbookDetail extends CatalogCookbookSummary {

@@ -1,12 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createCheckoutSession, createPortalSession } from '../api/billing';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createCheckoutSession,
+  createPortalSession,
+  createSellerPayoutOnboarding,
+  getSellerPayoutReadiness,
+} from '../api/billing';
+import { listMarketplacePublications } from '../api/catalog';
 import { updateKitchen, updateDietaryDefaults, addEquipment, deleteEquipment, getProfile } from '../api/users';
 import { Button } from '../components/shared/Button';
 import { Input } from '../components/shared/Input';
 import { Select } from '../components/shared/Select';
 import { Skeleton } from '../components/shared/Skeleton';
 import { useAuth } from '../context/useAuth';
-import type { BillingSessionResponse, Equipment, EquipmentCategory } from '../types/api';
+import type {
+  BillingSessionResponse,
+  Equipment,
+  EquipmentCategory,
+  MarketplaceCookbookPublicationSummary,
+  SellerPayoutReadinessSummary,
+} from '../types/api';
 import styles from './ProfilePage.module.css';
 
 const MAX_BURNERS = 10;
@@ -28,6 +40,13 @@ export function ProfilePage() {
     BillingSessionResponse,
     'subscription_status' | 'sync_state' | 'subscription_snapshot_id'
   > | null>(null);
+  const [sellerPayout, setSellerPayout] = useState<SellerPayoutReadinessSummary | null>(null);
+  const [sellerPayoutLoading, setSellerPayoutLoading] = useState(false);
+  const [sellerPayoutActionLoading, setSellerPayoutActionLoading] = useState(false);
+  const [sellerPayoutError, setSellerPayoutError] = useState<string | null>(null);
+  const [marketplacePublications, setMarketplacePublications] = useState<MarketplaceCookbookPublicationSummary[]>([]);
+  const [marketplaceLoading, setMarketplaceLoading] = useState(false);
+  const [marketplaceError, setMarketplaceError] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -51,6 +70,32 @@ export function ProfilePage() {
     const profile = await getProfile(userId);
     setUser(profile);
   }, [userId, setUser]);
+
+  const refreshSellerSurface = useCallback(async () => {
+    if (!userId) return;
+
+    setSellerPayoutLoading(true);
+    setMarketplaceLoading(true);
+    setSellerPayoutError(null);
+    setMarketplaceError(null);
+
+    try {
+      const [payout, publications] = await Promise.all([getSellerPayoutReadiness(), listMarketplacePublications()]);
+      setSellerPayout(payout);
+      setMarketplacePublications(publications.items);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Seller marketplace state is temporarily unavailable. Please try again.';
+      setSellerPayoutError(message);
+      setMarketplaceError(message);
+    } finally {
+      setSellerPayoutLoading(false);
+      setMarketplaceLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void refreshSellerSurface();
+  }, [refreshSellerSurface]);
 
   if (!user) {
     return (
@@ -210,6 +255,35 @@ export function ProfilePage() {
     }
   }
 
+  async function handleSellerPayoutOnboarding() {
+    setSellerPayoutActionLoading(true);
+    setSellerPayoutError(null);
+
+    try {
+      const response = await createSellerPayoutOnboarding();
+      setSellerPayout((current) =>
+        current
+          ? {
+              ...current,
+              onboarding_status: response.onboarding_status,
+              can_accept_sales: response.can_accept_sales,
+            }
+          : current,
+      );
+      window.location.assign(response.onboarding_url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Seller payout onboarding is temporarily unavailable. Please try again.';
+      setSellerPayoutError(message);
+    } finally {
+      setSellerPayoutActionLoading(false);
+    }
+  }
+
+  const publishedListings = useMemo(
+    () => marketplacePublications.filter((publication) => publication.publication_status === 'published'),
+    [marketplacePublications],
+  );
+
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>Your Kitchen</h1>
@@ -284,9 +358,112 @@ export function ProfilePage() {
 
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Stovetop</h2>
-          <span className={styles.sectionHint}>Click burners to set your count</span>
+          <h2 className={styles.sectionTitle}>Seller Marketplace</h2>
+          <span className={styles.sectionHint}>Backend-authored payout readiness and publication state</span>
         </div>
+
+        <div className={styles.accessCard}>
+          <div className={styles.accessHeaderRow}>
+            <span className={`${styles.accessBadge} ${sellerPayout?.can_accept_sales ? styles.accessBadgeIncluded : styles.accessBadgeLocked}`}>
+              {sellerPayoutLoading ? 'loading' : sellerPayout?.onboarding_status ?? 'unknown'}
+            </span>
+            <span className={styles.accessMeta}>
+              {sellerPayout?.can_accept_sales ? 'Ready to accept sales' : 'Payout setup required before publishing for sale'}
+            </span>
+          </div>
+
+          <p className={styles.accessReason}>
+            {sellerPayoutLoading
+              ? 'Loading seller payout readiness…'
+              : sellerPayout?.status_reason ?? 'Seller payout readiness is not available yet.'}
+          </p>
+
+          <div className={styles.billingActions}>
+            <div className={styles.billingActionsCopy}>
+              <p className={styles.billingActionTitle}>Payout onboarding</p>
+              <p className={styles.billingActionHint}>
+                {sellerPayout?.can_accept_sales
+                  ? 'Your payout readiness is enabled. Published cookbook sales can stay in the platform marketplace lane.'
+                  : 'Complete secure payout onboarding before publishing authored cookbooks into the platform catalog.'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={sellerPayout?.can_accept_sales ? 'secondary' : 'primary'}
+              onClick={() => void handleSellerPayoutOnboarding()}
+              disabled={sellerPayoutActionLoading}
+            >
+              {sellerPayoutActionLoading
+                ? 'Opening onboarding…'
+                : sellerPayout?.can_accept_sales
+                  ? 'Review payout onboarding'
+                  : 'Complete payout onboarding'}
+            </Button>
+          </div>
+
+          {sellerPayoutError ? <p className={styles.billingError}>{sellerPayoutError}</p> : null}
+
+          <dl className={styles.accessDiagnostics}>
+            <div>
+              <dt>Can accept sales</dt>
+              <dd>{sellerPayout?.can_accept_sales ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Charges enabled</dt>
+              <dd>{sellerPayout?.charges_enabled ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Payouts enabled</dt>
+              <dd>{sellerPayout?.payouts_enabled ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Requirements due</dt>
+              <dd>{sellerPayout?.requirements_due?.length ? sellerPayout.requirements_due.join(', ') : 'None'}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className={styles.marketplaceCard}>
+          <div className={styles.marketplaceHeader}>
+            <div>
+              <p className={styles.billingActionTitle}>Published cookbooks</p>
+              <p className={styles.billingActionHint}>
+                Track which authored cookbooks are already live in the marketplace without exposing provider payout or fee object references.
+              </p>
+            </div>
+            <span className={styles.marketplaceCount}>
+              {marketplaceLoading ? 'Loading…' : `${publishedListings.length} published`}
+            </span>
+          </div>
+
+          {marketplaceError ? <p className={styles.billingError}>{marketplaceError}</p> : null}
+
+          {marketplaceLoading ? (
+            <p className={styles.marketplaceEmpty}>Loading publication state…</p>
+          ) : publishedListings.length > 0 ? (
+            <div className={styles.marketplaceList}>
+              {publishedListings.map((publication) => (
+                <article key={publication.marketplace_cookbook_publication_id} className={styles.marketplaceItem}>
+                  <div>
+                    <p className={styles.marketplaceTitle}>{publication.title}</p>
+                    <p className={styles.marketplaceMeta}>
+                      {publication.recipe_count_snapshot} recipes · ${(publication.list_price_cents / 100).toFixed(2)} {publication.currency.toUpperCase()}
+                    </p>
+                    <p className={styles.marketplaceDescription}>{publication.description}</p>
+                  </div>
+                  <span className={`${styles.accessBadge} ${styles.accessBadgeIncluded}`}>{publication.publication_status}</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.marketplaceEmpty}>
+              No authored cookbooks are published for sale yet. Complete payout onboarding, then publish from the seller marketplace workflow when it is available.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.section}>
 
         <div className={styles.stovetop}>
           <div className={styles.burnerGrid}>

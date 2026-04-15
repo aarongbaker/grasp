@@ -168,6 +168,74 @@
   color: var(--text-primary);
 }
 
+/* ─── Seller marketplace ─── */
+
+.marketplaceCard {
+  margin-top: var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: grid;
+  gap: var(--space-md);
+}
+
+.marketplaceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.marketplaceCount {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.marketplaceList {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.marketplaceItem {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  align-items: flex-start;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+}
+
+.marketplaceTitle {
+  margin: 0 0 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.marketplaceMeta {
+  margin: 0 0 4px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.marketplaceDescription {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.marketplaceEmpty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 /* ─── Stovetop visual ─── */
 
 .stovetop {
