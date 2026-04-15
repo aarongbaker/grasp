@@ -9,7 +9,13 @@ from app.api.routes.sessions import cancel_pipeline
 from app.core.status import finalise_session
 from app.models.enums import SessionStatus
 from app.models.session import Session
-from app.models.user import GenerationBillingRecord, GenerationBillingState, UserProfile
+from app.models.user import (
+    GenerationBillingProvider,
+    GenerationBillingRecord,
+    GenerationBillingState,
+    UserProfile,
+)
+from app.services.generation_billing import GenerationBillingService
 
 
 def _current_user(user_id: uuid.UUID) -> UserProfile:
@@ -29,6 +35,10 @@ def _schedule_payload(summary: str = "Ready") -> dict:
         "total_duration_minutes": 10,
         "error_summary": None,
     }
+
+
+def _token_usage(*, input_tokens: int, output_tokens: int, node_name: str = "renderer") -> list[dict]:
+    return [{"input_tokens": input_tokens, "output_tokens": output_tokens, "node_name": node_name}]
 
 
 @pytest.mark.asyncio
@@ -128,7 +138,7 @@ async def test_finalise_session_reuses_existing_ledger_record_on_duplicate_call(
         "schedule": _schedule_payload("Dinner ready"),
         "validated_recipes": [],
         "errors": [],
-        "token_usage": [{"input_tokens": 3, "output_tokens": 2, "node_name": "renderer"}],
+        "token_usage": _token_usage(input_tokens=3, output_tokens=2),
     }
 
     await finalise_session(session_id, final_state, test_db_session)
@@ -144,6 +154,72 @@ async def test_finalise_session_reuses_existing_ledger_record_on_duplicate_call(
     assert refreshed.status == SessionStatus.COMPLETE
     assert len(ledger_rows) == 1
     assert ledger_rows[0].billing_state == GenerationBillingState.READY
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_duplicate_then_charge_failure_preserves_single_ledger_row_and_terminal_session(
+    test_db_session,
+    test_user_id,
+):
+    session_id = uuid.uuid4()
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.GENERATING,
+        concept_json={"free_text": "charge me once"},
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    final_state = {
+        "schedule": _schedule_payload("Billable dinner ready"),
+        "validated_recipes": [{"source": {"name": "Short Ribs"}, "steps": [], "chef_notes": None, "techniques_used": []}],
+        "errors": [],
+        "token_usage": _token_usage(input_tokens=13, output_tokens=8),
+    }
+
+    await finalise_session(session_id, final_state, test_db_session)
+    await finalise_session(session_id, final_state, test_db_session)
+
+    ledger_record = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).one()
+
+    billing_service = GenerationBillingService(now_fn=lambda: datetime(2026, 4, 14, 22, 0, 0))
+    await billing_service.mark_charge_pending(
+        test_db_session,
+        record=ledger_record,
+        provider=GenerationBillingProvider.STRIPE,
+    )
+    await billing_service.mark_charge_failed(
+        test_db_session,
+        record=ledger_record,
+        error_code="provider_timeout",
+        error_message="provider timed out after finalize",
+    )
+    await test_db_session.commit()
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.exec(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.COMPLETE
+    assert refreshed.token_usage == {
+        "total_input_tokens": 13,
+        "total_output_tokens": 8,
+        "per_node": _token_usage(input_tokens=13, output_tokens=8),
+    }
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].billing_state == GenerationBillingState.CHARGE_FAILED
+    assert ledger_rows[0].provider == GenerationBillingProvider.STRIPE
+    assert ledger_rows[0].provider_error_code == "provider_timeout"
+    assert ledger_rows[0].provider_error_message == "provider timed out after finalize"
+    assert ledger_rows[0].charge_attempted_at == datetime(2026, 4, 14, 22, 0, 0)
 
 
 @pytest.mark.asyncio
