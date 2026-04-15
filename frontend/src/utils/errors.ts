@@ -1,5 +1,20 @@
-import { ApiError } from '../api/client';
-import type { AuthoredRecipeValidationDetail, AuthoredRecipeValidationIssue } from '../types/api';
+import {
+  ApiError,
+  isBillingRecoverySessionResponse,
+  isBillingRecoveryStatusResponse,
+  isBillingSetupSessionResponse,
+  isBillingSetupStatusResponse,
+  isSessionRunBlockedResponse,
+} from '../api/client';
+import type {
+  AuthoredRecipeValidationDetail,
+  AuthoredRecipeValidationIssue,
+  BillingRecoverySessionResponse,
+  BillingRecoveryStatusResponse,
+  BillingSetupSessionResponse,
+  BillingSetupStatusResponse,
+  SessionRunBlockedResponse,
+} from '../types/api';
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -10,6 +25,46 @@ export function getErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+export function getSessionRunBlockedDetail(error: unknown): SessionRunBlockedResponse | null {
+  if (!(error instanceof ApiError) || error.kind !== 'session-run-blocked') {
+    return null;
+  }
+
+  return isSessionRunBlockedResponse(error.payload) ? error.payload : null;
+}
+
+export function getBillingSetupSessionDetail(error: unknown): BillingSetupSessionResponse | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+
+  return isBillingSetupSessionResponse(error.payload) ? error.payload : null;
+}
+
+export function getBillingSetupStatusDetail(error: unknown): BillingSetupStatusResponse | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+
+  return isBillingSetupStatusResponse(error.payload) ? error.payload : null;
+}
+
+export function getBillingRecoveryStatusDetail(error: unknown): BillingRecoveryStatusResponse | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+
+  return isBillingRecoveryStatusResponse(error.payload) ? error.payload : null;
+}
+
+export function getBillingRecoverySessionDetail(error: unknown): BillingRecoverySessionResponse | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+
+  return isBillingRecoverySessionResponse(error.payload) ? error.payload : null;
 }
 
 export function getAuthoredRecipeValidationDetail(error: unknown): AuthoredRecipeValidationDetail | null {

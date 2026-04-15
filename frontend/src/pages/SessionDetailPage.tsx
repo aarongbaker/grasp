@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeftIcon, DownloadIcon } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
+import { createGenerationRecoverySession, getGenerationRecoveryStatus } from '../api/billing';
 import { cancelSession, getSessionResults } from '../api/sessions';
 import { Button } from '../components/shared/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -12,7 +13,8 @@ import { RecipeCard } from '../components/session/RecipeCard';
 import { RecipePDF } from '../components/session/RecipePDF';
 import { getSessionConceptDisplay } from '../components/session/sessionConceptDisplay';
 import { useSessionStatus } from '../hooks/useSessionStatus';
-import { TERMINAL_STATUSES, type SessionResults, type OneOvenConflictSummary } from '../types/api';
+import { TERMINAL_STATUSES, type OneOvenConflictSummary, type SessionOutstandingBalanceSummary, type SessionResults } from '../types/api';
+import { getErrorMessage } from '../utils/errors';
 import styles from './SessionDetailPage.module.css';
 
 type Tab = 'schedule' | 'recipes';
@@ -43,9 +45,16 @@ function normalizeOneOvenConflict(conflict?: OneOvenConflictSummary): Required<P
   };
 }
 
+function getOutstandingBalanceSummary(sessionSummary?: SessionOutstandingBalanceSummary | null): SessionOutstandingBalanceSummary | null {
+  if (!sessionSummary?.has_outstanding_balance) {
+    return null;
+  }
+  return sessionSummary;
+}
+
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { data: session } = useSessionStatus(sessionId);
+  const { data: session, refresh: refreshSession } = useSessionStatus(sessionId);
   const [results, setResults] = useState<SessionResults | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState<string | null>(null);
@@ -53,6 +62,10 @@ export function SessionDetailPage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryBanner, setRecoveryBanner] = useState<SessionOutstandingBalanceSummary | null>(null);
+  const [recoveryWindowOpened, setRecoveryWindowOpened] = useState(false);
 
   const isTerminal = session && TERMINAL_STATUSES.includes(session.status);
   const isFailed = session?.status === 'failed';
@@ -67,6 +80,32 @@ export function SessionDetailPage() {
     session?.status === 'partial' &&
     !results &&
     session.error_summary?.includes('Oven temperature conflict:');
+
+  useEffect(() => {
+    setRecoveryBanner(getOutstandingBalanceSummary(session?.billing?.outstanding_balance));
+  }, [session]);
+
+  useEffect(() => {
+    if (!sessionId || !isTerminal || isFailed) return;
+    if (session?.billing?.outstanding_balance?.billing_state !== 'charge_failed') return;
+
+    let cancelled = false;
+    getGenerationRecoveryStatus(sessionId)
+      .then((response) => {
+        if (!cancelled) {
+          setRecoveryBanner(getOutstandingBalanceSummary(response.outstanding_balance));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecoveryBanner(getOutstandingBalanceSummary(session?.billing?.outstanding_balance));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isFailed, isTerminal, session?.billing?.outstanding_balance, sessionId]);
 
   async function handleCancel() {
     if (!sessionId || cancelling) return;
@@ -97,7 +136,26 @@ export function SessionDetailPage() {
     }
   }
 
-  // Fetch full results when session reaches terminal state
+  async function handleOutstandingBalanceRecovery() {
+    if (!sessionId || recoveryLoading) {
+      return;
+    }
+
+    setRecoveryLoading(true);
+    setRecoveryError(null);
+    try {
+      const recoverySession = await createGenerationRecoverySession(sessionId);
+      window.open(recoverySession.url, '_blank', 'noopener,noreferrer');
+      setRecoveryBanner(recoverySession.outstanding_balance);
+      setRecoveryWindowOpened(true);
+      refreshSession();
+    } catch (err: unknown) {
+      setRecoveryError(getErrorMessage(err, 'Could not open outstanding-balance recovery right now.'));
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!sessionId || !isTerminal || isFailed) return;
     setResultsLoading(true);
@@ -141,7 +199,6 @@ export function SessionDetailPage() {
         <p className={styles.conceptSourceDetail}>{conceptDisplay?.sourceDetail ?? 'Built from the current session concept.'}</p>
       </div>
 
-      {/* In-progress state */}
       {!isTerminal && (
         <>
           <div className={styles.progressRow}>
@@ -160,7 +217,6 @@ export function SessionDetailPage() {
         </>
       )}
 
-      {/* Cancelled state */}
       {isCancelled && (
         <div className={styles.errorBanner}>
           <div className={styles.errorTitle}>Session cancelled</div>
@@ -168,7 +224,6 @@ export function SessionDetailPage() {
         </div>
       )}
 
-      {/* Failed state */}
       {isFailed && (
         <div className={styles.errorBanner}>
           <div className={styles.errorTitle}>Pipeline failed</div>
@@ -187,9 +242,31 @@ export function SessionDetailPage() {
         </div>
       )}
 
-      {/* Terminal with results */}
       {isTerminal && !isFailed && (
         <>
+          {recoveryBanner?.billing_state === 'charge_failed' && (
+            <div className={styles.recoveryBanner} role="status" aria-live="polite">
+              <div className={styles.recoveryTitle}>Outstanding balance needs attention</div>
+              <div className={styles.recoveryBody}>
+                {recoveryBanner.reason ?? 'This session completed, but the follow-up charge did not go through. Update the saved card to clear the balance while keeping your schedule and recipes visible below.'}
+              </div>
+              {recoveryBanner.retry_attempted_at && (
+                <div className={styles.recoveryMeta}>Last retry attempt: {new Date(recoveryBanner.retry_attempted_at).toLocaleString()}</div>
+              )}
+              {recoveryWindowOpened && (
+                <div className={styles.recoveryMeta}>Secure payment update opened in a new tab. Return here after you finish updating the card.</div>
+              )}
+              {recoveryError && <div className={styles.recoveryError}>{recoveryError}</div>}
+              {recoveryBanner.can_retry_charge && recoveryBanner.recovery_action && (
+                <div className={styles.recoveryActions}>
+                  <Button type="button" onClick={() => void handleOutstandingBalanceRecovery()} disabled={recoveryLoading}>
+                    {recoveryLoading ? 'Opening recovery…' : recoveryBanner.recovery_action.label}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {session.status === 'partial' && session.error_summary && (
             <div className={styles.errorBanner}>
               <div className={styles.errorTitle}>Completed with issues</div>

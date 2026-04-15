@@ -2,11 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../api/client';
 import { NewSessionPage } from '../NewSessionPage';
+import * as billingApi from '../../api/billing';
 import * as sessionsApi from '../../api/sessions';
-import type { PlannerReferenceResolutionResponse, Session } from '../../types/api';
+import type { PlannerReferenceResolutionResponse, Session, SessionRunBlockedResponse } from '../../types/api';
 
 const navigateMock = vi.fn();
+const openMock = vi.fn();
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -41,9 +44,23 @@ const createdSession: Session = {
   result_recipes: null,
   result_schedule: null,
   token_usage: null,
+  billing: null,
   created_at: '2026-03-27T00:00:00Z',
   started_at: null,
   completed_at: null,
+};
+
+const blockedRun: SessionRunBlockedResponse = {
+  session_id: 'session-123',
+  status: 'blocked',
+  reason_code: 'payment_method_required',
+  message: 'Add a saved card before generation can start.',
+  requires_payment_method: true,
+  next_action: {
+    kind: 'update_payment_method',
+    label: 'Add payment method',
+    session_id: 'session-123',
+  },
 };
 
 function renderPage() {
@@ -88,7 +105,9 @@ function noMatchCookbookResponse(): PlannerReferenceResolutionResponse {
 describe('NewSessionPage', () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    openMock.mockReset();
     vi.restoreAllMocks();
+    vi.stubGlobal('open', openMock);
   });
 
   afterEach(() => {
@@ -589,6 +608,50 @@ describe('NewSessionPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
     expect(await screen.findByText('Resolve the cookbook reference before starting the plan.')).toBeInTheDocument();
     expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows inline saved-card recovery and resumes the blocked run on the same session after setup confirmation', async () => {
+    vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    const runPipelineSpy = vi
+      .spyOn(sessionsApi, 'runPipeline')
+      .mockRejectedValueOnce(new ApiError(202, blockedRun.message, 'session-run-blocked', blockedRun))
+      .mockResolvedValueOnce({
+        session_id: 'session-123',
+        status: 'generating',
+        message: 'Pipeline enqueued',
+      });
+    const createSetupSpy = vi.spyOn(billingApi, 'createGenerationSetupSession').mockResolvedValue({
+      url: 'https://billing.example/setup/session-123',
+      setup_state: 'requires_action',
+      payment_method_status: { has_saved_payment_method: false, payment_method_label: null },
+      session_id: 'session-123',
+      customer_state: 'ready',
+    });
+    const confirmSpy = vi.spyOn(billingApi, 'confirmGenerationPaymentMethod').mockResolvedValue({
+      has_saved_payment_method: true,
+      payment_method_label: 'Saved card',
+    });
+
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'A bright spring dinner');
+    await userEvent.click(screen.getByRole('button', { name: 'Start Planning' }));
+
+    expect(await screen.findByText('Finish payment setup to keep this same session moving.')).toBeInTheDocument();
+    expect(screen.getByText('Add a saved card before generation can start.')).toBeInTheDocument();
+    expect(screen.getByText(/without recreating the plan/i)).toBeInTheDocument();
+    expect(screen.queryByText(/stripe|customer_state|provider/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add payment method' }));
+    await waitFor(() => expect(createSetupSpy).toHaveBeenCalledWith('session-123'));
+    expect(openMock).toHaveBeenCalledWith('https://billing.example/setup/session-123', '_blank', 'noopener,noreferrer');
+    expect(screen.getByText(/Secure setup opened in a new tab/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'I added a card — resume this session' }));
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(runPipelineSpy).toHaveBeenCalledTimes(2));
+    expect(runPipelineSpy).toHaveBeenNthCalledWith(2, 'session-123');
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/sessions/session-123'));
   });
 
   it('adds and removes dietary restrictions', async () => {

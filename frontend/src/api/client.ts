@@ -1,4 +1,11 @@
-import type { AuthoredRecipeValidationDetail } from '../types/api';
+import type {
+  AuthoredRecipeValidationDetail,
+  BillingRecoverySessionResponse,
+  BillingRecoveryStatusResponse,
+  BillingSetupSessionResponse,
+  BillingSetupStatusResponse,
+  SessionRunBlockedResponse,
+} from '../types/api';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const normalizedApiUrl = configuredApiUrl ? configuredApiUrl.replace(/\/$/, '') : '';
@@ -10,7 +17,8 @@ export type ApiErrorKind =
   | 'network-unreachable'
   | 'network-offline'
   | 'startup-config'
-  | 'authored-validation';
+  | 'authored-validation'
+  | 'session-run-blocked';
 
 export class ApiError extends Error {
   status: number;
@@ -53,6 +61,102 @@ export function isAuthoredRecipeValidationDetail(value: unknown): value is Autho
   });
 }
 
+export function isBillingSetupStatusResponse(value: unknown): value is BillingSetupStatusResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BillingSetupStatusResponse>;
+  return (
+    typeof candidate.has_saved_payment_method === 'boolean' &&
+    (candidate.payment_method_label == null || typeof candidate.payment_method_label === 'string')
+  );
+}
+
+export function isBillingSetupSessionResponse(value: unknown): value is BillingSetupSessionResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BillingSetupSessionResponse>;
+  return (
+    typeof candidate.url === 'string' &&
+    candidate.setup_state === 'requires_action' &&
+    isBillingSetupStatusResponse(candidate.payment_method_status) &&
+    (candidate.session_id == null || typeof candidate.session_id === 'string') &&
+    typeof candidate.customer_state === 'string'
+  );
+}
+
+function isBillingAction(value: unknown): value is SessionRunBlockedResponse['next_action'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<SessionRunBlockedResponse['next_action']>;
+  return (
+    (candidate.kind === 'update_payment_method' || candidate.kind === 'retry_outstanding_balance') &&
+    typeof candidate.label === 'string' &&
+    typeof candidate.session_id === 'string'
+  );
+}
+
+export function isSessionRunBlockedResponse(value: unknown): value is SessionRunBlockedResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<SessionRunBlockedResponse>;
+  return (
+    typeof candidate.session_id === 'string' &&
+    candidate.status === 'blocked' &&
+    candidate.reason_code === 'payment_method_required' &&
+    typeof candidate.message === 'string' &&
+    candidate.requires_payment_method === true &&
+    isBillingAction(candidate.next_action)
+  );
+}
+
+function isOutstandingBalanceSummary(value: unknown): value is BillingRecoveryStatusResponse['outstanding_balance'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BillingRecoveryStatusResponse['outstanding_balance']>;
+  return (
+    typeof candidate.has_outstanding_balance === 'boolean' &&
+    typeof candidate.can_retry_charge === 'boolean' &&
+    (candidate.billing_state == null || typeof candidate.billing_state === 'string') &&
+    (candidate.reason_code == null || typeof candidate.reason_code === 'string') &&
+    (candidate.reason == null || typeof candidate.reason === 'string') &&
+    (candidate.retry_attempted_at == null || typeof candidate.retry_attempted_at === 'string') &&
+    (candidate.recovery_action == null || isBillingAction(candidate.recovery_action))
+  );
+}
+
+export function isBillingRecoveryStatusResponse(value: unknown): value is BillingRecoveryStatusResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BillingRecoveryStatusResponse>;
+  return typeof candidate.session_id === 'string' && isOutstandingBalanceSummary(candidate.outstanding_balance);
+}
+
+export function isBillingRecoverySessionResponse(value: unknown): value is BillingRecoverySessionResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BillingRecoverySessionResponse>;
+  return (
+    typeof candidate.url === 'string' &&
+    candidate.recovery_state === 'requires_payment_update' &&
+    typeof candidate.session_id === 'string' &&
+    isOutstandingBalanceSummary(candidate.outstanding_balance)
+  );
+}
+
 function looksLikeStartupConfigFailure(detail: string): boolean {
   const normalized = detail.toLowerCase();
   return [
@@ -90,8 +194,6 @@ function classifyTransportError(_error: unknown, controller: AbortController): A
   );
 }
 
-/** Tracks whether a token refresh is already in flight so concurrent
- *  401s don't trigger multiple refresh calls. */
 let refreshPromise: Promise<boolean> | null = null;
 
 async function tryRefresh(): Promise<boolean> {
@@ -136,7 +238,7 @@ async function rawFetch(
   };
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   if (!(options.body instanceof FormData)) {
@@ -189,6 +291,10 @@ export async function apiFetch<T>(
 
     if (status === 422 && path === '/authored-recipes' && isAuthoredRecipeValidationDetail(body)) {
       throw new ApiError(status, 'The recipe draft needs more detail before it can be saved.', 'authored-validation', body);
+    }
+
+    if (status === 202 && path.includes('/sessions/') && path.endsWith('/run') && isSessionRunBlockedResponse(body)) {
+      throw new ApiError(status, body.message, 'session-run-blocked', body);
     }
 
     const detail = typeof body.detail === 'string' ? body.detail : res.statusText;

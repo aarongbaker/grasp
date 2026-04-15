@@ -125,6 +125,47 @@
   margin: 0;
 }
 
+.recoveryBanner {
+  margin-top: var(--space-md);
+  margin-bottom: var(--space-xl);
+  padding: var(--space-md) var(--space-lg);
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, transparent);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+}
+
+.recoveryTitle {
+  font-size: var(--text-base);
+  font-weight: 500;
+  margin-bottom: var(--space-xs);
+}
+
+.recoveryBody {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.recoveryMeta {
+  margin-top: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.recoveryError {
+  margin-top: var(--space-sm);
+  color: var(--cost-negative);
+  font-size: var(--text-sm);
+}
+
+.recoveryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
 .infoBanner {
   margin-top: var(--space-md);
   margin-bottom: var(--space-xl);

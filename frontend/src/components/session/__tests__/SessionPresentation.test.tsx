@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCard } from '../SessionCard';
@@ -8,8 +9,11 @@ import { ScheduleTimeline } from '../ScheduleTimeline';
 import { getRecipeProvenanceDisplay, getSessionConceptDisplay } from '../sessionConceptDisplay';
 import { SessionDetailPage } from '../../../pages/SessionDetailPage';
 import type { DinnerConcept, NaturalLanguageSchedule, Session, SessionResults, ValidatedRecipe } from '../../../types/api';
+import * as billingApi from '../../../api/billing';
 import * as sessionsApi from '../../../api/sessions';
 import * as sessionStatusHook from '../../../hooks/useSessionStatus';
+
+const openMock = vi.fn();
 
 vi.mock('@react-pdf/renderer', async () => {
   const actual = await vi.importActual<typeof import('@react-pdf/renderer')>('@react-pdf/renderer');
@@ -175,9 +179,30 @@ const menuSession: Session = {
   result_recipes: null,
   result_schedule: null,
   token_usage: null,
+  billing: null,
   created_at: '2026-03-27T00:00:00Z',
   started_at: '2026-03-27T00:01:00Z',
   completed_at: '2026-03-27T00:30:00Z',
+};
+
+const chargeFailedSession: Session = {
+  ...menuSession,
+  session_id: 'session-charge-failed',
+  billing: {
+    outstanding_balance: {
+      has_outstanding_balance: true,
+      can_retry_charge: true,
+      billing_state: 'charge_failed',
+      reason_code: 'payment_update_required',
+      reason: 'A card on file could not be charged after the session finished.',
+      retry_attempted_at: '2026-03-27T00:35:00Z',
+      recovery_action: {
+        kind: 'retry_outstanding_balance',
+        label: 'Resolve outstanding balance',
+        session_id: 'session-charge-failed',
+      },
+    },
+  },
 };
 
 const freeTextSession: Session = {
@@ -353,6 +378,8 @@ function renderDetailPage(sessionId: string = menuSession.session_id) {
 describe('session presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.stubGlobal('open', openMock);
+    openMock.mockReset();
     vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
       data: menuSession,
       error: null,
@@ -360,6 +387,18 @@ describe('session presentation', () => {
       refresh: vi.fn(),
     });
     vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue(results);
+    vi.spyOn(billingApi, 'getGenerationRecoveryStatus').mockResolvedValue({
+      session_id: menuSession.session_id,
+      outstanding_balance: {
+        has_outstanding_balance: false,
+        can_retry_charge: false,
+        billing_state: null,
+        reason_code: null,
+        reason: null,
+        retry_attempted_at: null,
+        recovery_action: null,
+      },
+    });
   });
 
   afterEach(() => {
@@ -560,6 +599,7 @@ describe('session presentation', () => {
       sourceDetail: 'Built from the authored-recipe path. The saved title was missing, so the planning note is shown instead.',
     });
   });
+
   it('maps canonical recipe provenance without falling back to rag-source heuristics', () => {
     expect(getRecipeProvenanceDisplay(plannerLibraryRecipe.source.source.provenance)).toEqual({
       label: 'From your recipe library',
@@ -596,6 +636,7 @@ describe('session presentation', () => {
       detail: 'Composed by the planner to complete this service.',
     });
   });
+
   it('renders generated-planner labels on dashboard cards', () => {
     render(
       <MemoryRouter>
@@ -677,6 +718,41 @@ describe('session presentation', () => {
     expect(screen.queryByText(/recovered from the cookbook collection/i)).not.toBeInTheDocument();
   });
 
+  it('renders outstanding-balance recovery guidance on successful session detail pages without hiding results', async () => {
+    const refreshMock = vi.fn();
+    vi.spyOn(sessionStatusHook, 'useSessionStatus').mockReturnValue({
+      data: chargeFailedSession,
+      error: null,
+      isPolling: false,
+      refresh: refreshMock,
+    });
+    vi.spyOn(billingApi, 'getGenerationRecoveryStatus').mockResolvedValue({
+      session_id: 'session-charge-failed',
+      outstanding_balance: chargeFailedSession.billing!.outstanding_balance,
+    });
+    const createRecoverySpy = vi.spyOn(billingApi, 'createGenerationRecoverySession').mockResolvedValue({
+      url: 'https://billing.example/recovery/session-charge-failed',
+      recovery_state: 'requires_payment_update',
+      session_id: 'session-charge-failed',
+      outstanding_balance: chargeFailedSession.billing!.outstanding_balance,
+    });
+
+    renderDetailPage(chargeFailedSession.session_id);
+
+    expect(await screen.findByText('Outstanding balance needs attention')).toBeInTheDocument();
+    expect(screen.getByText('A card on file could not be charged after the session finished.')).toBeInTheDocument();
+    expect(screen.getByText(/Last retry attempt:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/stripe|provider|pm_/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Dinner lands all at once.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resolve outstanding balance' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve outstanding balance' }));
+    await waitFor(() => expect(createRecoverySpy).toHaveBeenCalledWith('session-charge-failed'));
+    expect(openMock).toHaveBeenCalledWith('https://billing.example/recovery/session-charge-failed', '_blank', 'noopener,noreferrer');
+    expect(refreshMock).toHaveBeenCalled();
+    expect(screen.getByText(/Secure payment update opened in a new tab/i)).toBeInTheDocument();
+  });
+
   it('renders structured one-oven guidance on the session detail page when results include resequencing metadata', async () => {
     vi.spyOn(sessionsApi, 'getSessionResults').mockResolvedValue(resequencedResults);
 
@@ -711,6 +787,18 @@ describe('session presentation', () => {
       schedule: {
         ...baseSchedule,
         timeline: [],
+      },
+    });
+    vi.spyOn(billingApi, 'getGenerationRecoveryStatus').mockResolvedValue({
+      session_id: menuSession.session_id,
+      outstanding_balance: {
+        has_outstanding_balance: false,
+        can_retry_charge: false,
+        billing_state: null,
+        reason_code: null,
+        reason: null,
+        retry_attempted_at: null,
+        recovery_action: null,
       },
     });
 
@@ -1035,4 +1123,3 @@ describe('session presentation', () => {
     expect(screen.getByText('Built from your private library so the session reflects a saved dish rather than a new menu brief.')).toBeInTheDocument();
   });
 });
-

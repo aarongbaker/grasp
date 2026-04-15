@@ -1,5 +1,10 @@
 import { type FormEvent, type KeyboardEvent, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  confirmGenerationPaymentMethod,
+  createGenerationSetupSession,
+  getGenerationPaymentMethodStatus,
+} from '../api/billing';
 import { createSession, resolvePlannerReference, runPipeline } from '../api/sessions';
 import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
@@ -9,6 +14,8 @@ import {
   MEAL_TYPE_LABELS,
   OCCASION_LABELS,
   PLANNER_COOKBOOK_MODE_LABELS,
+  type BillingSetupSessionResponse,
+  type CatalogAccessDiagnostics,
   type CreateFreeTextSessionRequest,
   type CreatePlannerAuthoredAnchorSessionRequest,
   type CreatePlannerCatalogCookbookSessionRequest,
@@ -16,7 +23,6 @@ import {
   type CreateSessionRequest,
   type MealType,
   type Occasion,
-  type CatalogAccessDiagnostics,
   type PlannerAuthoredResolutionMatch,
   type PlannerCatalogCookbookReference,
   type PlannerCookbookPlanningMode,
@@ -24,8 +30,9 @@ import {
   type PlannerReferenceKind,
   type PlannerReferenceResolutionResponse,
   type PlannerResolutionMatchStatus,
+  type SessionRunBlockedResponse,
 } from '../types/api';
-import { getErrorMessage } from '../utils/errors';
+import { getErrorMessage, getSessionRunBlockedDetail } from '../utils/errors';
 import styles from './NewSessionPage.module.css';
 
 const mealTypeOptions = Object.entries(MEAL_TYPE_LABELS).map(([value, label]) => ({ value, label }));
@@ -59,6 +66,14 @@ interface PlannerResolutionState {
   selectedMatchId: string;
 }
 
+interface BillingSetupState {
+  blockedRun: SessionRunBlockedResponse | null;
+  setupSession: BillingSetupSessionResponse | null;
+  loading: boolean;
+  confirming: boolean;
+  error: string;
+}
+
 interface CatalogPlannerRemediation {
   eyebrow: string;
   headline: string;
@@ -74,6 +89,14 @@ const idleResolutionState: PlannerResolutionState = {
   response: null,
   error: '',
   selectedMatchId: '',
+};
+
+const idleBillingSetupState: BillingSetupState = {
+  blockedRun: null,
+  setupSession: null,
+  loading: false,
+  confirming: false,
+  error: '',
 };
 
 function getPlannerMatchId(match: PlannerAuthoredResolutionMatch | PlannerCookbookResolutionMatch): string {
@@ -209,6 +232,7 @@ export function NewSessionPage() {
   const catalogHandoffCandidate = (location.state as PlannerCatalogLocationState | null)?.plannerCatalogCookbook;
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [billingSetup, setBillingSetup] = useState<BillingSetupState>(idleBillingSetupState);
 
   const recipeLibrary = pathwayByKey['recipe-library'];
   const catalogPathway = pathwayByKey.catalog;
@@ -282,16 +306,22 @@ export function NewSessionPage() {
     setPlannerCookbookMode('');
   }
 
+  function clearBillingSetup() {
+    setBillingSetup(idleBillingSetupState);
+  }
+
   function handlePlannerAnchorModeChange(value: PlannerAnchorMode) {
     setPlannerAnchorMode(value);
     setPlannerReferenceInput('');
     resetPlannerResolution();
     setError('');
+    clearBillingSetup();
   }
 
   function handlePlannerReferenceInputChange(value: string) {
     setPlannerReferenceInput(value);
     setError('');
+    clearBillingSetup();
     setPlannerResolution((current) => {
       if (current.phase === 'idle' && current.query === '') {
         return current;
@@ -434,9 +464,80 @@ export function NewSessionPage() {
     return request;
   }
 
+  async function resumeBlockedRun(blockedRun: SessionRunBlockedResponse) {
+    const resumedRun = await runPipeline(blockedRun.session_id);
+    if (resumedRun.status !== 'generating') {
+      throw new Error('The session is still waiting on payment setup. Finish saving a card, then try again.');
+    }
+    clearBillingSetup();
+    navigate(`/sessions/${blockedRun.session_id}`);
+  }
+
+  async function handleOpenPaymentSetup() {
+    if (!billingSetup.blockedRun || billingSetup.loading) {
+      return;
+    }
+
+    setBillingSetup((current) => ({
+      ...current,
+      loading: true,
+      error: '',
+    }));
+
+    try {
+      const setupSession = await createGenerationSetupSession(billingSetup.blockedRun.session_id);
+      window.open(setupSession.url, '_blank', 'noopener,noreferrer');
+      setBillingSetup((current) => ({
+        ...current,
+        setupSession,
+        loading: false,
+      }));
+    } catch (err: unknown) {
+      setBillingSetup((current) => ({
+        ...current,
+        loading: false,
+        error: getErrorMessage(err, 'Could not open payment setup right now.'),
+      }));
+    }
+  }
+
+  async function handleConfirmPaymentSetup() {
+    if (!billingSetup.blockedRun || billingSetup.confirming) {
+      return;
+    }
+
+    setBillingSetup((current) => ({
+      ...current,
+      confirming: true,
+      error: '',
+    }));
+
+    try {
+      const confirmedStatus = await confirmGenerationPaymentMethod();
+      if (!confirmedStatus.has_saved_payment_method) {
+        const refreshedStatus = await getGenerationPaymentMethodStatus();
+        if (!refreshedStatus.has_saved_payment_method) {
+          throw new Error('We still cannot confirm a saved card for this account. Finish setup, then try again.');
+        }
+      }
+      await resumeBlockedRun(billingSetup.blockedRun);
+    } catch (err: unknown) {
+      setBillingSetup((current) => ({
+        ...current,
+        confirming: false,
+        error: getErrorMessage(err, 'Could not confirm the saved card yet.'),
+      }));
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (loading) {
+      return;
+    }
+
     setError('');
+    clearBillingSetup();
 
     let request: CreateSessionRequest;
     try {
@@ -449,9 +550,30 @@ export function NewSessionPage() {
     setLoading(true);
     try {
       const session = await createSession(request);
-      await runPipeline(session.session_id);
+      const runResponse = await runPipeline(session.session_id);
+      if (runResponse.status === 'blocked') {
+        setBillingSetup({
+          blockedRun: runResponse,
+          setupSession: null,
+          loading: false,
+          confirming: false,
+          error: '',
+        });
+        return;
+      }
       navigate(`/sessions/${session.session_id}`);
     } catch (err: unknown) {
+      const blockedRun = getSessionRunBlockedDetail(err);
+      if (blockedRun) {
+        setBillingSetup({
+          blockedRun,
+          setupSession: null,
+          loading: false,
+          confirming: false,
+          error: '',
+        });
+        return;
+      }
       setError(getErrorMessage(err, 'Something went wrong — please try again'));
     } finally {
       setLoading(false);
@@ -461,6 +583,7 @@ export function NewSessionPage() {
   const canSubmit = !!freeText.trim() && catalogHandoffStatus !== 'locked' && catalogHandoffStatus !== 'invalid';
   const isPlannerResolutionBusy = plannerResolution.phase === 'resolving';
   const isCookbookModeResolved = plannerResolution.response?.kind === 'cookbook';
+  const isBillingBlocked = billingSetup.blockedRun !== null;
 
   return (
     <div className={styles.page}>
@@ -476,12 +599,50 @@ export function NewSessionPage() {
             </div>
 
             {error && <div className={styles.error}>{error}</div>}
+            {isBillingBlocked && billingSetup.blockedRun && (
+              <div className={styles.billingCard} role="status" aria-live="polite">
+                <p className={styles.resultEyebrow}>Saved card required</p>
+                <p className={styles.resultHeadline}>Finish payment setup to keep this same session moving.</p>
+                <p className={styles.resultText}>{billingSetup.blockedRun.message}</p>
+                <p className={styles.recoveryHint}>
+                  Your dinner brief is already saved on this session. Add a payment method in the secure window, then confirm here to resume generation without recreating the plan.
+                </p>
+                {billingSetup.setupSession && (
+                  <p className={styles.billingMeta}>
+                    Secure setup opened in a new tab. Return here after you finish saving the card.
+                  </p>
+                )}
+                {billingSetup.error && <p className={styles.billingError}>{billingSetup.error}</p>}
+                <div className={styles.billingActions}>
+                  <Button
+                    type="button"
+                    onClick={() => void handleOpenPaymentSetup()}
+                    disabled={billingSetup.loading || billingSetup.confirming}
+                  >
+                    {billingSetup.loading ? 'Opening secure setup…' : 'Add payment method'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleConfirmPaymentSetup()}
+                    disabled={billingSetup.loading || billingSetup.confirming}
+                  >
+                    {billingSetup.confirming ? 'Resuming session…' : 'I added a card — resume this session'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <Textarea
               label="What are you cooking?"
               placeholder="A rustic Italian dinner with handmade pasta, seasonal vegetables, and something decadent for dessert..."
               value={freeText}
-              onChange={(e) => setFreeText(e.target.value)}
+              onChange={(e) => {
+                setFreeText(e.target.value);
+                if (isBillingBlocked) {
+                  clearBillingSetup();
+                }
+              }}
               maxLength={2000}
               required
             />
@@ -787,7 +948,7 @@ export function NewSessionPage() {
         </div>
 
         <div className={styles.actions}>
-          <Button type="submit" disabled={loading || !canSubmit}>
+          <Button type="submit" disabled={loading || !canSubmit || billingSetup.confirming}>
             {loading ? 'Starting...' : 'Start Planning'}
           </Button>
           <Button type="button" variant="secondary" onClick={() => navigate('/')}>

@@ -19,6 +19,10 @@ export type PlannerResolutionMatchStatus = 'no_match' | 'resolved' | 'ambiguous'
 export type CatalogCookbookAccessState = 'included' | 'preview' | 'locked';
 export type CatalogCookbookAudience = 'included' | 'preview' | 'premium';
 export type LibraryAccessState = 'included' | 'locked' | 'unavailable';
+export type BillingActionKind = 'update_payment_method' | 'retry_outstanding_balance';
+export type BillingSetupState = 'requires_action';
+export type BillingRecoveryState = 'requires_payment_update';
+export type OutstandingBalanceBillingState = 'charge_failed' | 'paid' | 'pending' | 'waived' | string;
 
 export interface CatalogAccessDiagnostics {
   subscription_snapshot_id: string | null;
@@ -133,6 +137,68 @@ export interface BillingSessionResponse {
   sync_state: string | null;
   subscription_snapshot_id: string | null;
 }
+
+export interface BillingAction {
+  kind: BillingActionKind;
+  label: string;
+  session_id: string;
+}
+
+export interface BillingSetupStatusResponse {
+  has_saved_payment_method: boolean;
+  payment_method_label: string | null;
+}
+
+export interface BillingSetupSessionResponse {
+  url: string;
+  setup_state: BillingSetupState;
+  payment_method_status: BillingSetupStatusResponse;
+  session_id: string | null;
+  customer_state: string;
+}
+
+export interface SessionOutstandingBalanceSummary {
+  has_outstanding_balance: boolean;
+  can_retry_charge: boolean;
+  billing_state: OutstandingBalanceBillingState | null;
+  reason_code: string | null;
+  reason: string | null;
+  retry_attempted_at: string | null;
+  recovery_action: BillingAction | null;
+}
+
+export interface BillingRecoveryStatusResponse {
+  session_id: string;
+  outstanding_balance: SessionOutstandingBalanceSummary;
+}
+
+export interface BillingRecoverySessionResponse {
+  url: string;
+  recovery_state: BillingRecoveryState;
+  session_id: string;
+  outstanding_balance: SessionOutstandingBalanceSummary;
+}
+
+export interface SessionBillingSummary {
+  outstanding_balance: SessionOutstandingBalanceSummary;
+}
+
+export interface SessionRunAcceptedResponse {
+  session_id: string;
+  status: 'generating';
+  message: string;
+}
+
+export interface SessionRunBlockedResponse {
+  session_id: string;
+  status: 'blocked';
+  reason_code: 'payment_method_required';
+  message: string;
+  requires_payment_method: boolean;
+  next_action: BillingAction;
+}
+
+export type SessionRunResponse = SessionRunAcceptedResponse | SessionRunBlockedResponse;
 
 // Session
 export interface SelectedCookbookRecipe {
@@ -330,6 +396,7 @@ export interface Session {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  billing?: SessionBillingSummary | null;
 }
 
 export interface TokenUsage {
@@ -416,7 +483,6 @@ export interface TimelineEntry {
     size?: string | null;
     label?: string | null;
   } | null;
-  // M018 merged prep and oven features:
   merged_from?: string[];
   allocation?: Record<string, string>;
   oven_temp_f?: number | null;

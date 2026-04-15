@@ -5,6 +5,7 @@ import type {
   PlannerReferenceResolutionResponse,
   Session,
   SessionResults,
+  SessionRunResponse,
 } from '../types/api';
 
 export function listSessions(userId: string): Promise<Session[]> {
@@ -27,8 +28,8 @@ export function createSession(body: CreateSessionRequest): Promise<Session> {
   });
 }
 
-export function runPipeline(sessionId: string): Promise<{ session_id: string; status: string; message: string }> {
-  return apiFetch(`/sessions/${sessionId}/run`, {
+export function runPipeline(sessionId: string): Promise<SessionRunResponse> {
+  return apiFetch<SessionRunResponse>(`/sessions/${sessionId}/run`, {
     method: 'POST',
   });
 }
