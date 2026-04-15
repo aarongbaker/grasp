@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.core.settings import get_settings
 from app.models.authored_recipe import RecipeCookbookRecord
 from app.models.catalog import (
     CatalogCookbookAudience,
@@ -31,7 +32,6 @@ from app.models.catalog import (
     CatalogCookbookOwnershipStatus,
     CatalogCookbookSummary,
     MarketplaceCheckoutResponse,
-    MarketplaceCookbookPublicationListResponse,
     MarketplaceCookbookPublicationStatus,
     MarketplaceCookbookPublicationSummary,
     MarketplacePublicationListResponse,
@@ -491,4 +491,11 @@ async def complete_marketplace_purchase(body: MarketplacePurchaseCompletionReque
         replayed_completion=bundle.replayed_completion,
         catalog_cookbook_id=bundle.catalog_cookbook_id,
         marketplace_cookbook_publication_id=bundle.marketplace_cookbook_publication_id,
+        sale_diagnostics={
+            "checkout_status": bundle.checkout_status,
+            "purchase_state": bundle.purchase_state,
+            "replayed_completion": bundle.replayed_completion,
+            "ownership_recorded": bundle.ownership_recorded,
+            "ownership_granted": bundle.ownership_granted,
+        },
     )

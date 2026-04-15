@@ -16,6 +16,7 @@ Postgres instance. Tests verify HTTP status codes and request validation.
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1030,7 +1031,7 @@ async def test_marketplace_purchase_completion_is_replay_safe_and_grants_ownersh
     )()
     service = AsyncMock(spec=StripeBillingService)
     service.finalize_marketplace_purchase.side_effect = [completion_bundle, replay_bundle]
-    _stub_billing_service(monkeypatch, service)
+    _stub_catalog_billing_service(monkeypatch, service)
 
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -1097,7 +1098,7 @@ async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownershi
             "marketplace_cookbook_publication_id": publication_id,
         },
     )()
-    _stub_billing_service(monkeypatch, service)
+    _stub_catalog_billing_service(monkeypatch, service)
 
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -1118,6 +1119,56 @@ async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownershi
     assert payload["purchase_state"] == "cancelled"
     assert payload["ownership_granted"] is False
     assert payload["ownership_recorded"] is False
+    assert payload["sale_diagnostics"] == {
+        "checkout_status": "cancelled",
+        "purchase_state": "cancelled",
+        "replayed_completion": False,
+        "ownership_recorded": False,
+        "ownership_granted": False,
+    }
+
+
+async def test_marketplace_checkout_requires_ready_seller_payout_state(app_with_overrides, test_user, mock_db, monkeypatch):
+    publication_id = uuid.uuid4()
+    seller_id = uuid.uuid4()
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=publication_id,
+        chef_user_id=seller_id,
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="payout-blocked",
+        title="Payout Blocked",
+        description="Published but seller not ready.",
+        list_price_cents=2400,
+        currency="usd",
+        recipe_count_snapshot=3,
+    )
+    mock_db.seed(MarketplaceCookbookPublicationRecord, publication_id, publication)
+    mock_db.seed(
+        SellerPayoutAccountRecord,
+        uuid.uuid4(),
+        SellerPayoutAccountRecord(
+            seller_payout_account_record_id=uuid.uuid4(),
+            user_id=seller_id,
+            onboarding_status=SellerPayoutOnboardingStatus.INCOMPLETE,
+            charges_enabled=False,
+            payouts_enabled=False,
+            details_submitted=True,
+        ),
+    )
+
+    service = AsyncMock(spec=StripeBillingService)
+    _stub_catalog_billing_service(monkeypatch, service)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            f"/api/v1/catalog/cookbooks/marketplace/publications/{publication_id}/checkout",
+            headers=_auth_headers_for(test_user),
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Seller payout readiness is incomplete for this marketplace cookbook"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

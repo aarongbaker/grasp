@@ -230,3 +230,4 @@ class MarketplacePurchaseCompletionResponse(BaseModel):
     replayed_completion: bool
     catalog_cookbook_id: uuid.UUID
     marketplace_cookbook_publication_id: uuid.UUID
+    sale_diagnostics: dict[str, str | int | bool | None] = Field(default_factory=dict)

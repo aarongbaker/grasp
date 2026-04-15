@@ -212,6 +212,51 @@ async def test_marketplace_revenue_share_is_deterministic_70_30(stripe_service_d
 
 
 @pytest.mark.asyncio
+async def test_create_marketplace_checkout_session_returns_provider_safe_revenue_share_diagnostics(stripe_service_db):
+    service = _service()
+    buyer = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Buyer Diagnostics",
+        email="buyer-diagnostics@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("buyer-diagnostics@test.com"),
+    )
+    chef = UserProfile(
+        user_id=uuid.uuid4(),
+        name="Chef Diagnostics",
+        email="chef-diagnostics@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key("chef-diagnostics@test.com"),
+    )
+    publication = MarketplaceCookbookPublicationRecord(
+        marketplace_cookbook_publication_id=uuid.uuid4(),
+        chef_user_id=chef.user_id,
+        source_cookbook_id=uuid.uuid4(),
+        publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
+        slug="diagnostic-book",
+        title="Diagnostic Book",
+        description="For checkout diagnostics.",
+        list_price_cents=3000,
+        currency="usd",
+        recipe_count_snapshot=4,
+    )
+    stripe_service_db.add(buyer)
+    stripe_service_db.add(chef)
+    stripe_service_db.add(publication)
+    await stripe_service_db.commit()
+
+    bundle = await service.create_marketplace_checkout_session(
+        stripe_service_db,
+        buyer=buyer,
+        publication=publication,
+    )
+
+    assert bundle.checkout_status == "requires_payment"
+    assert bundle.revenue_share.list_price_cents == 3000
+    assert bundle.revenue_share.seller_share_cents == 2100
+    assert bundle.revenue_share.platform_share_cents == 900
+    assert "transfer" not in repr(bundle).lower()
+
+
+@pytest.mark.asyncio
 async def test_finalize_marketplace_purchase_records_exactly_once_ownership_for_completed_checkout(stripe_service_db):
     service = _service()
     buyer = UserProfile(

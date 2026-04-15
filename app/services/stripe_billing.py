@@ -362,7 +362,6 @@ class StripeBillingService:
             list_price_cents=publication.list_price_cents,
             currency=publication.currency,
         )
-        checkout_ref = f"mkt_chk_{publication.marketplace_cookbook_publication_id.hex[:12]}_{buyer.user_id.hex[:8]}"
         return MarketplaceCheckoutBundle(
             checkout_url=f"{self._settings.stripe_checkout_success_url.rstrip('/')}/marketplace/{publication.marketplace_cookbook_publication_id}",
             checkout_status="requires_payment",
