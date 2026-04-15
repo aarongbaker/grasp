@@ -25,6 +25,7 @@ from app.models.catalog import (
     CatalogCookbookDetail,
     CatalogCookbookDetailResponse,
     CatalogCookbookListResponse,
+    CatalogCookbookOwnershipStatus,
     CatalogCookbookSummary,
 )
 from app.models.recipe import Ingredient, RawRecipe, RecipeProvenance
@@ -225,6 +226,11 @@ async def _build_summary(
         user_id=current_user.user_id,
         catalog_cookbook_id=fixture.catalog_cookbook_id,
     )
+    ownership_record = await purchase_service.get_ownership_for_user_and_catalog(
+        db,
+        user_id=current_user.user_id,
+        catalog_cookbook_id=fixture.catalog_cookbook_id,
+    ) if has_durable_purchase_ownership else None
     derived_access = derive_catalog_cookbook_access(
         AccessResolverInput(
             user_id=current_user.user_id,
@@ -248,6 +254,11 @@ async def _build_summary(
         audience=fixture.audience,
         access_state=derived_access.access_state,
         access_state_reason=derived_access.access_state_reason,
+        ownership=CatalogCookbookOwnershipStatus(
+            is_owned=ownership_record is not None,
+            ownership_source=ownership_record.ownership_source if ownership_record is not None else None,
+            access_reason=ownership_record.access_reason if ownership_record is not None else None,
+        ),
         access_diagnostics={
             "subscription_snapshot_id": str(derived_access.diagnostics.subscription_snapshot_id)
             if derived_access.diagnostics and derived_access.diagnostics.subscription_snapshot_id

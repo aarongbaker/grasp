@@ -29,6 +29,19 @@ class AccessResolverDiagnostics(BaseModel):
     provider: str | None = None
 
 
+class CatalogCookbookOwnershipStatus(BaseModel):
+    """App-safe ownership diagnostic surfaced on catalog contracts.
+
+    This stays strictly provider-safe: it communicates whether access is durable
+    because of a completed ownership record without exposing checkout/session/
+    event identifiers or raw provider payloads.
+    """
+
+    is_owned: bool = False
+    ownership_source: str | None = None
+    access_reason: str | None = None
+
+
 class CatalogCookbookAccessState(str, Enum):
     """Derived per-user access state for a platform-managed catalog cookbook."""
 
@@ -57,6 +70,7 @@ class CatalogCookbookSummary(BaseModel):
     audience: CatalogCookbookAudience
     access_state: CatalogCookbookAccessState
     access_state_reason: str = Field(min_length=1, max_length=300)
+    ownership: CatalogCookbookOwnershipStatus = Field(default_factory=CatalogCookbookOwnershipStatus)
     access_diagnostics: AccessResolverDiagnostics | None = None
 
 

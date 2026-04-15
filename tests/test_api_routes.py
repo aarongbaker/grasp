@@ -1501,6 +1501,11 @@ async def test_list_catalog_cookbooks_includes_backend_safe_access_diagnostics(a
     assert len(items) == 3
     included = next(item for item in items if item["catalog_cookbook_id"] == "11111111-1111-1111-1111-111111111111")
     assert included["access_state"] == "included"
+    assert included["ownership"] == {
+        "is_owned": False,
+        "ownership_source": None,
+        "access_reason": None,
+    }
     assert included["access_diagnostics"] == {
         "subscription_snapshot_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "subscription_status": "active",
@@ -1558,6 +1563,11 @@ async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_afte
     premium = next(item for item in resp.json()["items"] if item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333")
     assert premium["access_state"] == "included"
     assert premium["access_state_reason"] == "Previously purchased cookbook access is included"
+    assert premium["ownership"] == {
+        "is_owned": True,
+        "ownership_source": "purchase",
+        "access_reason": "Purchased cookbook access is now included for this chef",
+    }
     assert premium["access_diagnostics"] == {
         "subscription_snapshot_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
         "subscription_status": "cancelled",
@@ -1588,6 +1598,11 @@ async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnos
     item = resp.json()["item"]
     assert item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333"
     assert item["access_state"] == "locked"
+    assert item["ownership"] == {
+        "is_owned": False,
+        "ownership_source": None,
+        "access_reason": None,
+    }
     assert item["access_diagnostics"] == {
         "subscription_snapshot_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         "subscription_status": "cancelled",
@@ -1596,6 +1611,62 @@ async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnos
     }
     assert "provider_customer_ref" not in str(item)
     assert "provider_subscription_ref" not in str(item)
+
+
+async def test_get_catalog_cookbook_detail_surfaces_owned_status_without_provider_refs(app_with_overrides, test_user, mock_db):
+    mock_db.seed(
+        SubscriptionSnapshot,
+        uuid.uuid4(),
+        SubscriptionSnapshot(
+            subscription_snapshot_id=uuid.uuid4(),
+            user_id=test_user.user_id,
+            provider="stripe",
+            status=SubscriptionStatus.CANCELLED,
+            sync_state=SubscriptionSyncState.SYNCED,
+        ),
+    )
+    purchase_record_id = uuid.uuid4()
+    mock_db.seed(
+        CatalogCookbookPurchaseRecord,
+        purchase_record_id,
+        CatalogCookbookPurchaseRecord(
+            catalog_cookbook_purchase_record_id=purchase_record_id,
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            provider="stripe",
+            provider_checkout_ref="cs_owned_detail",
+            provider_completion_ref="evt_owned_detail",
+            purchase_state="completed",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+    mock_db.seed(
+        CatalogCookbookOwnershipRecord,
+        uuid.uuid4(),
+        CatalogCookbookOwnershipRecord(
+            user_id=test_user.user_id,
+            catalog_cookbook_id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+            purchase_record_id=purchase_record_id,
+            ownership_source="purchase",
+            access_reason="Purchased cookbook access is now included for this chef",
+        ),
+    )
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/catalog/cookbooks/33333333-3333-3333-3333-333333333333")
+
+    assert resp.status_code == 200
+    item = resp.json()["item"]
+    assert item["access_state"] == "included"
+    assert item["access_state_reason"] == "Previously purchased cookbook access is included"
+    assert item["ownership"] == {
+        "is_owned": True,
+        "ownership_source": "purchase",
+        "access_reason": "Purchased cookbook access is now included for this chef",
+    }
+    assert "provider_checkout_ref" not in str(item)
+    assert "provider_completion_ref" not in str(item)
 
 
 async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(app_with_overrides, test_user):
