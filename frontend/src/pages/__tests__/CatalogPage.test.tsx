@@ -19,6 +19,11 @@ function buildListResponse(): CatalogCookbookListResponse {
         audience: 'included',
         access_state: 'included',
         access_state_reason: 'Included with your current catalog access.',
+        ownership: {
+          is_owned: false,
+          ownership_source: null,
+          access_reason: null,
+        },
         access_diagnostics: null,
       },
       {
@@ -31,6 +36,11 @@ function buildListResponse(): CatalogCookbookListResponse {
         audience: 'preview',
         access_state: 'preview',
         access_state_reason: 'Preview recipes are open so you can evaluate the collection before unlocking more.',
+        ownership: {
+          is_owned: false,
+          ownership_source: null,
+          access_reason: null,
+        },
         access_diagnostics: null,
       },
       {
@@ -43,6 +53,11 @@ function buildListResponse(): CatalogCookbookListResponse {
         audience: 'premium',
         access_state: 'locked',
         access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+        ownership: {
+          is_owned: false,
+          ownership_source: null,
+          access_reason: null,
+        },
         access_diagnostics: {
           subscription_snapshot_id: 'snapshot-2',
           subscription_status: 'past_due',
@@ -91,7 +106,7 @@ describe('CatalogPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Upgrade access is required before this cookbook can be used in planning.')).toBeInTheDocument();
 
-    const detailLinks = screen.getAllByRole('link', { name: 'View cookbook details' });
+    const detailLinks = screen.getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('/catalog/'));
     expect(detailLinks).toHaveLength(3);
     expect(detailLinks[0]).toHaveAttribute('href', '/catalog/catalog-1');
     expect(screen.getByRole('link', { name: /Open dinner planner/i })).toHaveAttribute('href', '/sessions/new');
@@ -99,6 +114,43 @@ describe('CatalogPage', () => {
     expect(screen.queryByText(/upload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/detected[- ]recipes?/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/recovered from the cookbook collection/i)).not.toBeInTheDocument();
+  });
+
+  it('renders owned cookbook badges and ownership guidance from the API contract', async () => {
+    vi.spyOn(catalogApi, 'listCatalogCookbooks').mockResolvedValue({
+      items: [
+        {
+          catalog_cookbook_id: 'catalog-owned',
+          slug: 'chef-reserve-owned',
+          title: 'Chef Reserve',
+          subtitle: 'Purchased platform lane',
+          cover_image_url: null,
+          recipe_count: 24,
+          audience: 'premium',
+          access_state: 'locked',
+          access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+          ownership: {
+            is_owned: true,
+            ownership_source: 'purchase',
+            access_reason: 'You purchased this cookbook, so access stays available even after subscription changes.',
+          },
+          access_diagnostics: {
+            subscription_snapshot_id: 'snapshot-owned',
+            subscription_status: 'cancelled',
+            sync_state: 'stale',
+            provider: 'stripe',
+          },
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Chef Reserve' })).toBeInTheDocument();
+    expect(screen.getByText('Owned')).toBeInTheDocument();
+    expect(screen.getByText('You purchased this cookbook, so access stays available even after subscription changes.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open your owned cookbook' })).toHaveAttribute('href', '/catalog/catalog-owned');
+    expect(screen.queryByText(/stripe|cancelled|snapshot/i)).not.toBeInTheDocument();
   });
 
   it('accepts diagnostics-bearing catalog payloads without rendering billing inference in the browse UI', async () => {

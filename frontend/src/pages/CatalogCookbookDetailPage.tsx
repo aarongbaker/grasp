@@ -6,8 +6,9 @@ import { Button } from '../components/shared/Button';
 import { Skeleton } from '../components/shared/Skeleton';
 import type {
   CatalogAccessDiagnostics,
-  CatalogCookbookDetail,
   CatalogCookbookAccessState,
+  CatalogCookbookDetail,
+  CatalogCookbookOwnershipStatus,
   PlannerCatalogCookbookReference,
 } from '../types/api';
 import { getErrorMessage } from '../utils/errors';
@@ -48,6 +49,19 @@ function isCatalogAccessDiagnostics(value: unknown): value is CatalogAccessDiagn
   );
 }
 
+function isCatalogCookbookOwnershipStatus(value: unknown): value is CatalogCookbookOwnershipStatus {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const ownership = value as Partial<CatalogCookbookOwnershipStatus>;
+  return (
+    typeof ownership.is_owned === 'boolean' &&
+    (ownership.ownership_source == null || typeof ownership.ownership_source === 'string') &&
+    (ownership.access_reason == null || typeof ownership.access_reason === 'string')
+  );
+}
+
 function isCatalogCookbookDetail(value: unknown): value is CatalogCookbookDetail {
   if (!value || typeof value !== 'object') {
     return false;
@@ -62,6 +76,7 @@ function isCatalogCookbookDetail(value: unknown): value is CatalogCookbookDetail
     typeof item.recipe_count === 'number' &&
     typeof item.access_state === 'string' &&
     typeof item.access_state_reason === 'string' &&
+    isCatalogCookbookOwnershipStatus(item.ownership) &&
     isCatalogAccessDiagnostics(item.access_diagnostics) &&
     typeof item.description === 'string' &&
     Array.isArray(item.sample_recipe_titles) &&
@@ -69,8 +84,12 @@ function isCatalogCookbookDetail(value: unknown): value is CatalogCookbookDetail
   );
 }
 
-function getAccessBadgeLabel(accessState: CatalogCookbookDetail['access_state']): string {
-  switch (accessState) {
+function getAccessBadgeLabel(detail: CatalogCookbookDetail): string {
+  if (detail.ownership.is_owned) {
+    return 'Owned';
+  }
+
+  switch (detail.access_state) {
     case 'included':
       return 'Included';
     case 'preview':
@@ -78,12 +97,29 @@ function getAccessBadgeLabel(accessState: CatalogCookbookDetail['access_state'])
     case 'locked':
       return 'Locked';
     default:
-      return accessState;
+      return detail.access_state;
   }
+}
+
+function getAccessBadgeClass(detail: CatalogCookbookDetail): string {
+  return detail.ownership.is_owned ? styles.access_owned : styles[`access_${detail.access_state}`];
 }
 
 function getAccessRemediation(detail: CatalogCookbookDetail): AccessRemediation {
   const syncFailed = detail.access_diagnostics?.sync_state === 'failed';
+  const ownedReason = detail.ownership.access_reason ?? 'You own this platform cookbook, so access remains available through the owned catalog lane.';
+
+  if (detail.ownership.is_owned) {
+    return {
+      heading: 'Owned in your catalog lane',
+      body: ownedReason,
+      detail: 'This cookbook stays available for planner handoff through durable platform ownership, separate from any private cookbook folders or subscription snapshots.',
+      action: {
+        label: 'Plan from your owned cookbook',
+        to: plannerPathway.to,
+      },
+    };
+  }
 
   if (detail.access_state === 'included') {
     return {
@@ -124,7 +160,7 @@ function getAccessRemediation(detail: CatalogCookbookDetail): AccessRemediation 
   return {
     heading: 'This cookbook is currently locked',
     body: detail.access_state_reason,
-    detail: 'If you still need this cookbook in the planner, review your account access first. Otherwise, return to the catalog and choose an included or preview cookbook.',
+    detail: 'If you still need this cookbook in the planner, review your account access first. Otherwise, return to the catalog and choose an included, preview, or already-owned cookbook.',
     action: {
       label: 'Review account access',
       to: profilePath,
@@ -139,12 +175,17 @@ function getPlannerHandoff(detail: CatalogCookbookDetail): PlannerCatalogCookboo
     title: detail.title,
     access_state: detail.access_state,
     access_state_reason: detail.access_state_reason,
+    ownership: detail.ownership,
     access_diagnostics: detail.access_diagnostics,
   };
 }
 
-function getPlannerLinkLabel(accessState: CatalogCookbookAccessState): string {
-  switch (accessState) {
+function getPlannerLinkLabel(detail: CatalogCookbookDetail): string {
+  if (detail.ownership.is_owned) {
+    return 'Plan from owned catalog cookbook';
+  }
+
+  switch (detail.access_state as CatalogCookbookAccessState) {
     case 'included':
       return 'Plan from included catalog cookbook';
     case 'preview':
@@ -196,6 +237,9 @@ export function CatalogCookbookDetailPage() {
 
   const accessRemediation = useMemo(() => (item ? getAccessRemediation(item) : null), [item]);
   const plannerHandoff = useMemo(() => (item ? getPlannerHandoff(item) : null), [item]);
+  const ownershipCopy = item?.ownership.is_owned
+    ? item.ownership.access_reason ?? 'This cookbook is durably owned through the platform marketplace.'
+    : null;
 
   return (
     <div className={styles.page}>
@@ -226,12 +270,13 @@ export function CatalogCookbookDetailPage() {
               <p className={styles.eyebrow}>Platform catalog detail</p>
               <div className={styles.heroHeaderRow}>
                 <h1 className={styles.title}>{item.title}</h1>
-                <span className={`${styles.accessBadge} ${styles[`access_${item.access_state}`]}`}>
-                  {getAccessBadgeLabel(item.access_state)}
+                <span className={`${styles.accessBadge} ${getAccessBadgeClass(item)}`}>
+                  {getAccessBadgeLabel(item)}
                 </span>
               </div>
               {item.subtitle ? <p className={styles.subtitle}>{item.subtitle}</p> : null}
               <p className={styles.description}>{item.description}</p>
+              {ownershipCopy ? <p className={styles.ownershipText}>{ownershipCopy}</p> : null}
             </div>
 
             <aside className={styles.heroAside} aria-label="Catalog access guidance">
@@ -272,7 +317,7 @@ export function CatalogCookbookDetailPage() {
                 })
               }
             >
-              {plannerHandoff ? getPlannerLinkLabel(plannerHandoff.access_state) : 'Return to dinner planner'}
+              {plannerHandoff && item ? getPlannerLinkLabel(item) : 'Return to dinner planner'}
             </Button>
           </div>
 

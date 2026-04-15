@@ -46,6 +46,11 @@ function buildListResponse(): CatalogCookbookListResponse {
         audience: 'included' satisfies CatalogCookbookAudience,
         access_state: 'included' satisfies CatalogCookbookAccessState,
         access_state_reason: 'Included with the base catalog',
+        ownership: {
+          is_owned: false,
+          ownership_source: null,
+          access_reason: null,
+        },
         access_diagnostics: null,
       },
     ],

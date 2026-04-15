@@ -16,6 +16,7 @@ import {
   PLANNER_COOKBOOK_MODE_LABELS,
   type BillingSetupSessionResponse,
   type CatalogAccessDiagnostics,
+  type CatalogCookbookOwnershipStatus,
   type CreateFreeTextSessionRequest,
   type CreatePlannerAuthoredAnchorSessionRequest,
   type CreatePlannerCatalogCookbookSessionRequest,
@@ -126,6 +127,7 @@ function isPlannerCatalogCookbookReference(value: unknown): value is PlannerCata
   }
 
   const item = value as Partial<PlannerCatalogCookbookReference>;
+  const ownership = item.ownership as Partial<CatalogCookbookOwnershipStatus> | undefined;
   return (
     typeof item.catalog_cookbook_id === 'string' &&
     item.catalog_cookbook_id.length > 0 &&
@@ -133,6 +135,10 @@ function isPlannerCatalogCookbookReference(value: unknown): value is PlannerCata
     typeof item.title === 'string' &&
     (item.access_state === 'included' || item.access_state === 'preview' || item.access_state === 'locked') &&
     typeof item.access_state_reason === 'string' &&
+    !!ownership &&
+    typeof ownership.is_owned === 'boolean' &&
+    (ownership.ownership_source == null || typeof ownership.ownership_source === 'string') &&
+    (ownership.access_reason == null || typeof ownership.access_reason === 'string') &&
     isCatalogAccessDiagnostics(item.access_diagnostics)
   );
 }
@@ -174,6 +180,16 @@ function getCatalogPlannerRemediation(
   }
 
   const syncFailed = plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed';
+
+  if (plannerCatalogCookbook.ownership.is_owned) {
+    return {
+      eyebrow: 'Catalog cookbook owned',
+      headline: plannerCatalogCookbook.title,
+      body: 'This catalog cookbook is durably owned through the platform marketplace, so the planner can keep using it even if subscription access changes later.',
+      hint: plannerCatalogCookbook.ownership.access_reason ?? plannerCatalogCookbook.access_state_reason,
+      links: [links.catalog],
+    };
+  }
 
   if (status === 'included') {
     return {
@@ -394,8 +410,8 @@ export function NewSessionPage() {
     };
 
     if (plannerCatalogCookbook) {
-      if (catalogHandoffStatus === 'locked') {
-        throw new Error('This catalog cookbook is locked. Return to the catalog and choose an included or preview cookbook before starting the plan.');
+      if (catalogHandoffStatus === 'locked' && !plannerCatalogCookbook.ownership.is_owned) {
+        throw new Error('This catalog cookbook is locked. Return to the catalog and choose an included, preview, or owned cookbook before starting the plan.');
       }
       if (catalogHandoffStatus === 'invalid') {
         throw new Error('The catalog cookbook handoff was malformed. Return to the catalog detail page and reopen the planner from there.');
@@ -580,7 +596,7 @@ export function NewSessionPage() {
     }
   }
 
-  const canSubmit = !!freeText.trim() && catalogHandoffStatus !== 'locked' && catalogHandoffStatus !== 'invalid';
+  const canSubmit = !!freeText.trim() && (catalogHandoffStatus !== 'locked' || !!plannerCatalogCookbook?.ownership.is_owned) && catalogHandoffStatus !== 'invalid';
   const isPlannerResolutionBusy = plannerResolution.phase === 'resolving';
   const isCookbookModeResolved = plannerResolution.response?.kind === 'cookbook';
   const isBillingBlocked = billingSetup.blockedRun !== null;
@@ -593,7 +609,7 @@ export function NewSessionPage() {
             <div>
               <h1 className={styles.title}>Plan a Dinner</h1>
               <p className={styles.subtitle}>
-                Describe the meal you want to cook from a fresh dinner brief, a platform catalog cookbook handoff, or one owned recipe or cookbook folder.
+                Describe the meal you want to cook from a fresh dinner brief, a platform catalog cookbook handoff, or one owned recipe or private cookbook folder.
                 GRASP will turn that menu intent into a paced dinner service with timing, equipment flow, and a finished schedule.
               </p>
             </div>
@@ -733,30 +749,34 @@ export function NewSessionPage() {
           <div className={styles.anchorMeta}>
             <span className={styles.anchorMetaLabel}>
               {plannerCatalogCookbook
-                ? catalogHandoffStatus === 'locked'
-                  ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
-                    ? 'The backend kept this catalog cookbook out of planning because account access is still refreshing, so planner submission remains disabled until that state recovers.'
-                    : 'The backend marked this catalog cookbook as locked, so planner submission is intentionally blocked until you choose another catalog cookbook.'
-                  : catalogHandoffStatus === 'preview'
-                    ? 'Preview catalog access is authoritative here. The planner will submit the catalog-backed payload only while this handoff remains valid.'
-                    : 'Included catalog access is authoritative here. The planner will submit the catalog-backed payload without reusing the private cookbook target lane.'
+                ? plannerCatalogCookbook.ownership.is_owned
+                  ? 'Owned catalog access is authoritative here. The planner will submit the catalog-backed payload without switching into the private cookbook target lane.'
+                  : catalogHandoffStatus === 'locked'
+                    ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
+                      ? 'The backend kept this catalog cookbook out of planning because account access is still refreshing, so planner submission remains disabled until that state recovers.'
+                      : 'The backend marked this catalog cookbook as locked, so planner submission is intentionally blocked until you choose another catalog cookbook or open one you already own.'
+                    : catalogHandoffStatus === 'preview'
+                      ? 'Preview catalog access is authoritative here. The planner will submit the catalog-backed payload only while this handoff remains valid.'
+                      : 'Included catalog access is authoritative here. The planner will submit the catalog-backed payload without reusing the private cookbook target lane.'
                 : plannerAnchorMode === 'none'
-                  ? 'No owned reference is required unless you want the planner anchored to one saved recipe or cookbook.'
+                  ? 'No owned private-library reference is required unless you want the planner anchored to one saved recipe or cookbook.'
                   : plannerAnchorMode === 'authored'
                     ? 'Resolve one owned recipe title inline so no-match, ambiguity, and retry states stay visible before session creation.'
-                    : 'Resolve one owned cookbook inline, then choose whether planning stays strict to that shelf or only leans toward it.'}
+                    : 'Resolve one owned private cookbook inline, then choose whether planning stays strict to that shelf or only leans toward it.'}
             </span>
             {plannerCatalogCookbook && (
               <span className={styles.anchorMetaDetail}>
-                {catalogHandoffStatus === 'included'
-                  ? `Catalog lane ready with “${plannerCatalogCookbook.title}”.`
-                  : catalogHandoffStatus === 'preview'
-                    ? `Catalog preview lane ready with “${plannerCatalogCookbook.title}”.`
-                    : catalogHandoffStatus === 'locked'
-                      ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
-                        ? `Catalog lane waiting on refreshed account access for “${plannerCatalogCookbook.title}”.`
-                        : `Catalog lane blocked for “${plannerCatalogCookbook.title}”.`
-                      : 'Catalog lane is waiting for a valid handoff.'}
+                {plannerCatalogCookbook.ownership.is_owned
+                  ? `Owned catalog lane ready with “${plannerCatalogCookbook.title}”.`
+                  : catalogHandoffStatus === 'included'
+                    ? `Catalog lane ready with “${plannerCatalogCookbook.title}”.`
+                    : catalogHandoffStatus === 'preview'
+                      ? `Catalog preview lane ready with “${plannerCatalogCookbook.title}”.`
+                      : catalogHandoffStatus === 'locked'
+                        ? plannerCatalogCookbook.access_diagnostics?.sync_state === 'failed'
+                          ? `Catalog lane waiting on refreshed account access for “${plannerCatalogCookbook.title}”.`
+                          : `Catalog lane blocked for “${plannerCatalogCookbook.title}”.`
+                        : 'Catalog lane is waiting for a valid handoff.'}
               </span>
             )}
             {plannerResolution.phase === 'resolved' && plannerResolution.status === 'resolved' && selectedPlannerMatch && (

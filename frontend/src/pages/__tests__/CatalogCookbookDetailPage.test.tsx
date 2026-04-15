@@ -27,6 +27,11 @@ function buildDetailResponse(
       audience: accessState === 'locked' ? 'premium' : accessState,
       access_state: accessState,
       access_state_reason: reasons[accessState],
+      ownership: {
+        is_owned: false,
+        ownership_source: null,
+        access_reason: null,
+      },
       access_diagnostics: diagnostics ?? {
         subscription_snapshot_id: accessState === 'locked' ? 'snapshot-locked' : 'snapshot-open',
         subscription_status: accessState === 'locked' ? 'past_due' : 'active',
@@ -92,6 +97,29 @@ describe('CatalogCookbookDetailPage', () => {
     await user.click(screen.getByRole('button', { name: 'Plan from preview catalog cookbook' }));
 
     expect(await screen.findByTestId('planner-state')).toBeInTheDocument();
+  });
+
+  it('renders owned cookbook guidance and planner handoff copy from durable ownership fields', async () => {
+    vi.spyOn(catalogApi, 'getCatalogCookbook').mockResolvedValue({
+      item: {
+        ...buildDetailResponse('locked').item,
+        ownership: {
+          is_owned: true,
+          ownership_source: 'purchase',
+          access_reason: 'You purchased this cookbook, so planner access stays available through ownership.',
+        },
+      },
+    });
+
+    renderPage('/catalog/catalog-owned');
+
+    expect(await screen.findByRole('heading', { name: 'Weeknight Foundations' })).toBeInTheDocument();
+    expect(screen.getByText('Owned')).toBeInTheDocument();
+    expect(screen.getByText('Owned in your catalog lane')).toBeInTheDocument();
+    expect(screen.getAllByText('You purchased this cookbook, so planner access stays available through ownership.').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'Plan from your owned cookbook' })).toHaveAttribute('href', '/sessions/new');
+    expect(screen.getByRole('button', { name: 'Plan from owned catalog cookbook' })).toBeInTheDocument();
+    expect(screen.queryByText(/stripe|past_due|snapshot-/i)).not.toBeInTheDocument();
   });
 
   it('accepts diagnostics-bearing detail payloads without surfacing provider or billing state in detail copy', async () => {

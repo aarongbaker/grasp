@@ -4,7 +4,11 @@ import { listCatalogCookbooks } from '../api/catalog';
 import { pathwayByKey } from '../components/layout/pathways';
 import { Button } from '../components/shared/Button';
 import { Skeleton } from '../components/shared/Skeleton';
-import type { CatalogAccessDiagnostics, CatalogCookbookSummary } from '../types/api';
+import type {
+  CatalogAccessDiagnostics,
+  CatalogCookbookOwnershipStatus,
+  CatalogCookbookSummary,
+} from '../types/api';
 import { getErrorMessage } from '../utils/errors';
 import styles from './CatalogPage.module.css';
 
@@ -29,6 +33,19 @@ function isCatalogAccessDiagnostics(value: unknown): value is CatalogAccessDiagn
   );
 }
 
+function isCatalogCookbookOwnershipStatus(value: unknown): value is CatalogCookbookOwnershipStatus {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const ownership = value as Partial<CatalogCookbookOwnershipStatus>;
+  return (
+    typeof ownership.is_owned === 'boolean' &&
+    (ownership.ownership_source == null || typeof ownership.ownership_source === 'string') &&
+    (ownership.access_reason == null || typeof ownership.access_reason === 'string')
+  );
+}
+
 function isCatalogCookbookSummary(value: unknown): value is CatalogCookbookSummary {
   if (!value || typeof value !== 'object') {
     return false;
@@ -43,11 +60,16 @@ function isCatalogCookbookSummary(value: unknown): value is CatalogCookbookSumma
     typeof item.recipe_count === 'number' &&
     typeof item.access_state === 'string' &&
     typeof item.access_state_reason === 'string' &&
+    isCatalogCookbookOwnershipStatus(item.ownership) &&
     isCatalogAccessDiagnostics(item.access_diagnostics)
   );
 }
 
 function getAccessBadgeLabel(summary: CatalogCookbookSummary): string {
+  if (summary.ownership.is_owned) {
+    return 'Owned';
+  }
+
   switch (summary.access_state) {
     case 'included':
       return 'Included';
@@ -58,6 +80,31 @@ function getAccessBadgeLabel(summary: CatalogCookbookSummary): string {
     default:
       return summary.access_state;
   }
+}
+
+function getAccessBadgeClass(summary: CatalogCookbookSummary): string {
+  return summary.ownership.is_owned ? styles.access_owned : styles[`access_${summary.access_state}`];
+}
+
+function getOwnershipCopy(summary: CatalogCookbookSummary): string | null {
+  if (!summary.ownership.is_owned) {
+    return null;
+  }
+
+  return summary.ownership.access_reason ?? 'You already own this platform cookbook, so access stays available even if your subscription changes later.';
+}
+
+function getCatalogActionCopy(summary: CatalogCookbookSummary): string {
+  if (summary.ownership.is_owned) {
+    return 'Open your owned cookbook';
+  }
+  if (summary.access_state === 'locked') {
+    return 'Review access options';
+  }
+  if (summary.access_state === 'preview') {
+    return 'Open preview cookbook';
+  }
+  return 'View cookbook details';
 }
 
 export function CatalogPage() {
@@ -95,7 +142,7 @@ export function CatalogPage() {
           <p className={styles.eyebrow}>Platform catalog</p>
           <h1 className={styles.title}>Browse Cookbook Catalog</h1>
           <p className={styles.subtitle}>
-            Explore featured cookbook collections, trust the platform&apos;s included, preview, and locked access states as-is,
+            Explore featured cookbook collections, trust the platform&apos;s included, preview, locked, and owned access states as-is,
             and step back into dinner planning once you know which lane you want to cook from.
           </p>
         </div>
@@ -111,7 +158,7 @@ export function CatalogPage() {
                 ? 'Waiting on the read-only catalog feed before any cookbook cards render.'
                 : status === 'error'
                   ? 'A fetch or response-shape problem blocked the browse surface before access states could render.'
-                  : 'Access badges and reasons below are rendered from the API payload, not recomputed in the browser.'}
+                  : 'Access badges, ownership guidance, and reasons below are rendered from the API payload, not recomputed in the browser.'}
             </p>
           </div>
 
@@ -165,43 +212,47 @@ export function CatalogPage() {
         </section>
       ) : (
         <section className={styles.catalogGrid} aria-label="Cookbook catalog results">
-          {items.map((item) => (
-            <article key={item.catalog_cookbook_id} className={styles.catalogCard}>
-              {item.cover_image_url ? (
-                <img
-                  src={item.cover_image_url}
-                  alt={`Cover for ${item.title}`}
-                  className={styles.coverImage}
-                />
-              ) : (
-                <div className={styles.coverFallback} aria-hidden="true">
-                  <span>{item.title.slice(0, 1).toUpperCase()}</span>
-                </div>
-              )}
-
-              <div className={styles.cardBody}>
-                <div className={styles.cardHeader}>
-                  <div>
-                    <p className={styles.cardEyebrow}>Cookbook collection</p>
-                    <h2 className={styles.cardTitle}>{item.title}</h2>
-                    {item.subtitle ? <p className={styles.cardSubtitle}>{item.subtitle}</p> : null}
+          {items.map((item) => {
+            const ownershipCopy = getOwnershipCopy(item);
+            return (
+              <article key={item.catalog_cookbook_id} className={styles.catalogCard}>
+                {item.cover_image_url ? (
+                  <img
+                    src={item.cover_image_url}
+                    alt={`Cover for ${item.title}`}
+                    className={styles.coverImage}
+                  />
+                ) : (
+                  <div className={styles.coverFallback} aria-hidden="true">
+                    <span>{item.title.slice(0, 1).toUpperCase()}</span>
                   </div>
-                  <span className={`${styles.accessBadge} ${styles[`access_${item.access_state}`]}`}>
-                    {getAccessBadgeLabel(item)}
-                  </span>
-                </div>
+                )}
 
-                <p className={styles.cardMeta}>{item.recipe_count} recipes</p>
-                <p className={styles.reasonText}>{item.access_state_reason}</p>
+                <div className={styles.cardBody}>
+                  <div className={styles.cardHeader}>
+                    <div>
+                      <p className={styles.cardEyebrow}>Cookbook collection</p>
+                      <h2 className={styles.cardTitle}>{item.title}</h2>
+                      {item.subtitle ? <p className={styles.cardSubtitle}>{item.subtitle}</p> : null}
+                    </div>
+                    <span className={`${styles.accessBadge} ${getAccessBadgeClass(item)}`}>
+                      {getAccessBadgeLabel(item)}
+                    </span>
+                  </div>
 
-                <div className={styles.cardActions}>
-                  <Link to={`/catalog/${item.catalog_cookbook_id}`} className={styles.detailLink}>
-                    View cookbook details
-                  </Link>
+                  <p className={styles.cardMeta}>{item.recipe_count} recipes</p>
+                  <p className={styles.reasonText}>{item.access_state_reason}</p>
+                  {ownershipCopy ? <p className={styles.ownershipText}>{ownershipCopy}</p> : null}
+
+                  <div className={styles.cardActions}>
+                    <Link to={`/catalog/${item.catalog_cookbook_id}`} className={styles.detailLink}>
+                      {getCatalogActionCopy(item)}
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </section>
       )}
     </div>

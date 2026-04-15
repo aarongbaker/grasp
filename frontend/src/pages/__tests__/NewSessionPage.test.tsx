@@ -134,6 +134,11 @@ describe('NewSessionPage', () => {
                 title: 'Weeknight Foundations',
                 access_state: 'included',
                 access_state_reason: 'Included with your current catalog access.',
+                ownership: {
+                  is_owned: true,
+                  ownership_source: 'purchase',
+                  access_reason: 'You purchased this cookbook, so access stays available even after subscription changes.',
+                },
                 access_diagnostics: {
                   subscription_snapshot_id: 'snapshot-1',
                   subscription_status: 'active',
@@ -149,7 +154,7 @@ describe('NewSessionPage', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Catalog cookbook included')).toBeInTheDocument();
+    expect(screen.getByText('Catalog cookbook owned')).toBeInTheDocument();
     expect(screen.getByText('Weeknight Foundations')).toBeInTheDocument();
     expect(screen.queryByLabelText('Planner anchor')).not.toBeInTheDocument();
     expect(screen.queryByText(/pre-existing cookbook recipes/i)).not.toBeInTheDocument();
@@ -180,6 +185,71 @@ describe('NewSessionPage', () => {
     );
   });
 
+  it('allows owned catalog handoffs to submit even when the backend access state is otherwise locked', async () => {
+    const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
+    vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
+      session_id: 'session-123',
+      status: 'generating',
+      message: 'Pipeline enqueued',
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: {
+              plannerCatalogCookbook: {
+                catalog_cookbook_id: 'catalog-owned',
+                slug: 'chef-reserve-owned',
+                title: 'Chef Reserve',
+                access_state: 'locked',
+                access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+                ownership: {
+                  is_owned: true,
+                  ownership_source: 'purchase',
+                  access_reason: 'You purchased this cookbook, so access stays available even after subscription changes.',
+                },
+                access_diagnostics: {
+                  subscription_snapshot_id: 'snapshot-owned',
+                  subscription_status: 'cancelled',
+                  sync_state: 'stale',
+                  provider: 'stripe',
+                },
+              },
+            },
+          },
+        ]}
+      >
+        <NewSessionPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Catalog cookbook owned')).toBeInTheDocument();
+    expect(screen.getByText(/durably owned through the platform marketplace/i)).toBeInTheDocument();
+    expect(screen.getByText(/Owned catalog access is authoritative here/i)).toBeInTheDocument();
+    expect(screen.getByText(/Owned catalog lane ready with “Chef Reserve”\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/stripe|cancelled|stale|snapshot/i)).not.toBeInTheDocument();
+
+    const submitButton = screen.getByRole('button', { name: 'Start Planning' });
+    expect(submitButton).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText('What are you cooking?'), 'Build service from the owned catalog lane');
+    expect(submitButton).toBeEnabled();
+    await userEvent.click(submitButton);
+
+    await waitFor(() =>
+      expect(createSessionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          concept_source: 'planner_catalog_cookbook',
+          planner_catalog_cookbook: {
+            catalog_cookbook_id: 'catalog-owned',
+          },
+        }),
+      ),
+    );
+  });
+
   it('shows preview catalog guidance but still allows planner submission through the catalog lane', async () => {
     const createSessionSpy = vi.spyOn(sessionsApi, 'createSession').mockResolvedValue(createdSession);
     vi.spyOn(sessionsApi, 'runPipeline').mockResolvedValue({
@@ -200,6 +270,11 @@ describe('NewSessionPage', () => {
                 title: 'Spring Pastry',
                 access_state: 'preview',
                 access_state_reason: 'Preview access is available for this catalog cookbook.',
+                ownership: {
+                  is_owned: false,
+                  ownership_source: null,
+                  access_reason: null,
+                },
                 access_diagnostics: {
                   subscription_snapshot_id: 'snapshot-preview',
                   subscription_status: 'active',
@@ -251,6 +326,11 @@ describe('NewSessionPage', () => {
                 title: 'Premium Desserts',
                 access_state: 'locked',
                 access_state_reason: 'Upgrade access is required before this cookbook can be used in planning.',
+                ownership: {
+                  is_owned: false,
+                  ownership_source: null,
+                  access_reason: null,
+                },
                 access_diagnostics: {
                   subscription_snapshot_id: 'snapshot-3',
                   subscription_status: 'past_due',
@@ -291,6 +371,11 @@ describe('NewSessionPage', () => {
                 title: 'Refresh Waiting',
                 access_state: 'locked',
                 access_state_reason: 'Catalog access is temporarily unavailable until your account refresh completes.',
+                ownership: {
+                  is_owned: false,
+                  ownership_source: null,
+                  access_reason: null,
+                },
                 access_diagnostics: {
                   subscription_snapshot_id: 'snapshot-4',
                   subscription_status: 'cancelled',
@@ -329,6 +414,11 @@ describe('NewSessionPage', () => {
               plannerCatalogCookbook: {
                 catalog_cookbook_id: 'catalog-4',
                 title: 'Broken Handoff',
+                ownership: {
+                  is_owned: false,
+                  ownership_source: null,
+                  access_reason: null,
+                },
               },
             },
           },
@@ -357,9 +447,9 @@ describe('NewSessionPage', () => {
     expect(
       screen.getByText(/Keep this route for menu-intent planning\. It stays focused on a single dinner brief and does not switch into/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/a platform catalog cookbook handoff, or one owned recipe or cookbook folder\./i)).toBeInTheDocument();
+    expect(screen.getByText(/a platform catalog cookbook handoff, or one owned recipe or private cookbook folder\./i)).toBeInTheDocument();
     expect(screen.getByLabelText('Dishes')).toHaveValue(3);
-    expect(screen.getByText(/No owned reference is required unless you want the planner anchored/i)).toBeInTheDocument();
+    expect(screen.getByText(/No owned private-library reference is required unless you want the planner anchored/i)).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Planner anchor'), 'authored');
 

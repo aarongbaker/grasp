@@ -31,6 +31,12 @@ export interface CatalogAccessDiagnostics {
   provider: string | null;
 }
 
+export interface CatalogCookbookOwnershipStatus {
+  is_owned: boolean;
+  ownership_source: string | null;
+  access_reason: string | null;
+}
+
 export const TERMINAL_STATUSES: SessionStatus[] = ['complete', 'partial', 'failed', 'cancelled'];
 export const IN_PROGRESS_STATUSES: SessionStatus[] = ['generating', 'enriching', 'validating', 'scheduling'];
 
@@ -233,6 +239,7 @@ export interface PlannerCatalogCookbookReference {
   title: string;
   access_state: CatalogCookbookAccessState;
   access_state_reason: string;
+  ownership: CatalogCookbookOwnershipStatus;
   access_diagnostics: CatalogAccessDiagnostics | null;
 }
 
@@ -612,6 +619,7 @@ export interface CatalogCookbookSummary {
   audience: CatalogCookbookAudience;
   access_state: CatalogCookbookAccessState;
   access_state_reason: string;
+  ownership: CatalogCookbookOwnershipStatus;
   access_diagnostics: CatalogAccessDiagnostics | null;
 }
 
