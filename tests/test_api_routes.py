@@ -1987,20 +1987,20 @@ async def test_marketplace_publication_and_payout_rows_are_queryable_without_tou
     await db_session_for_routes.commit()
 
     stored_payout = (
-        await db_session_for_routes.exec(
+        await db_session_for_routes.execute(
             select(SellerPayoutAccountRecord).where(SellerPayoutAccountRecord.user_id == chef.user_id)
         )
-    ).first()
+    ).scalar_one_or_none()
     stored_publication = (
-        await db_session_for_routes.exec(
+        await db_session_for_routes.execute(
             select(MarketplaceCookbookPublicationRecord).where(
                 MarketplaceCookbookPublicationRecord.chef_user_id == chef.user_id,
                 MarketplaceCookbookPublicationRecord.source_cookbook_id == source_cookbook.cookbook_id,
             )
         )
-    ).first()
-    purchases = (await db_session_for_routes.exec(select(CatalogCookbookPurchaseRecord))).all()
-    ownerships = (await db_session_for_routes.exec(select(CatalogCookbookOwnershipRecord))).all()
+    ).scalar_one_or_none()
+    purchases = (await db_session_for_routes.execute(select(CatalogCookbookPurchaseRecord))).scalars().all()
+    ownerships = (await db_session_for_routes.execute(select(CatalogCookbookOwnershipRecord))).scalars().all()
 
     assert stored_payout is not None
     assert stored_payout.onboarding_status == SellerPayoutOnboardingStatus.ENABLED

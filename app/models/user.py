@@ -17,7 +17,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, String, UniqueConstraint
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from app.models.enums import EquipmentCategory, SessionStatus
@@ -199,6 +199,39 @@ class GenerationBillingProvider(str, Enum):
     STRIPE = "stripe"
 
 
+class GenerationFundingGrantType(str, Enum):
+    """Durable user-owned funding buckets ordered before card fallback."""
+
+    SUBSCRIPTION_CREDIT = "subscription_credit"
+    PREPAID_BALANCE = "prepaid_balance"
+
+
+class GenerationFundingGrantSource(str, Enum):
+    """Why a funding grant exists from the app's point of view."""
+
+    SUBSCRIPTION = "subscription"
+    PACK = "pack"
+    ADMIN = "admin"
+    MIGRATION = "migration"
+
+
+class GenerationFundingGrantState(str, Enum):
+    """Lifecycle for a funding grant."""
+
+    ACTIVE = "active"
+    EXHAUSTED = "exhausted"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class GenerationFundingLedgerEntryKind(str, Enum):
+    """Ledger movements for funding grants and per-session settlement."""
+
+    CREDIT = "credit"
+    DEBIT = "debit"
+    ADJUSTMENT = "adjustment"
+
+
 class UserProfile(SQLModel, table=True):
     __tablename__ = "user_profiles"
 
@@ -234,6 +267,7 @@ class UserProfile(SQLModel, table=True):
     generation_payment_method_required: bool = Field(default=False)
     has_saved_generation_payment_method: bool = Field(default=False)
     default_generation_payment_method_label: Optional[str] = Field(default=None, max_length=120)
+    monthly_free_generations_remaining: int = Field(default=0, ge=0)
 
     kitchen_config_id: Optional[uuid.UUID] = Field(default=None, foreign_key="kitchen_configs.kitchen_config_id")
 
@@ -251,6 +285,8 @@ class UserProfile(SQLModel, table=True):
     subscription_snapshots: list["SubscriptionSnapshot"] = Relationship(back_populates="user")
     entitlement_grants: list["UserEntitlementGrant"] = Relationship(back_populates="user")
     generation_billing_records: list["GenerationBillingRecord"] = Relationship(back_populates="user")
+    generation_funding_grants: list["GenerationFundingGrant"] = Relationship(back_populates="user")
+    generation_funding_ledger_entries: list["GenerationFundingLedgerEntry"] = Relationship(back_populates="user")
     catalog_purchase_records: list["CatalogCookbookPurchaseRecord"] = Relationship(back_populates="user")
     catalog_cookbook_ownerships: list["CatalogCookbookOwnershipRecord"] = Relationship(back_populates="user")
     seller_payout_accounts: list["SellerPayoutAccountRecord"] = Relationship(back_populates="user")
@@ -300,17 +336,43 @@ class UserEntitlementGrant(SQLModel, table=True):
     user: Optional[UserProfile] = Relationship(back_populates="entitlement_grants")
 
 
+class GenerationFundingGrant(SQLModel, table=True):
+    __tablename__ = "generation_funding_grants"
+
+    generation_funding_grant_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+
+    grant_type: GenerationFundingGrantType
+    source: GenerationFundingGrantSource
+    grant_state: GenerationFundingGrantState = Field(default=GenerationFundingGrantState.ACTIVE)
+    amount: int = Field(default=0, ge=0)
+    remaining_amount: int = Field(default=0, ge=0)
+    currency: str = Field(default="generation", min_length=1, max_length=20)
+    priority_bucket: int = Field(default=0, ge=0)
+    cycle_key: Optional[str] = Field(default=None, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=200)
+    funding_metadata: dict = Field(default_factory=dict, sa_column=Column("metadata", JSON))
+    expires_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="generation_funding_grants")
+    ledger_entries: list["GenerationFundingLedgerEntry"] = Relationship(back_populates="funding_grant")
+
+
 class GenerationBillingRecord(SQLModel, table=True):
     __tablename__ = "generation_billing_records"
 
     generation_billing_record_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     session_id: uuid.UUID = Field(foreign_key="sessions.session_id", unique=True, index=True)
     user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    funding_grant_id: Optional[uuid.UUID] = Field(default=None, foreign_key="generation_funding_grants.generation_funding_grant_id", index=True)
 
     session_status: SessionStatus = Field(sa_column=Column(String, nullable=False))
     billing_state: GenerationBillingState = Field(default=GenerationBillingState.READY)
     provider: GenerationBillingProvider = Field(default=GenerationBillingProvider.APP)
 
+    billing_source_type: Optional[str] = Field(default=None, max_length=50)
     provider_charge_ref: Optional[str] = Field(default=None, max_length=255)
     provider_error_code: Optional[str] = Field(default=None, max_length=100)
     provider_error_message: Optional[str] = Field(default=None, max_length=500)
@@ -327,6 +389,34 @@ class GenerationBillingRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     user: Optional[UserProfile] = Relationship(back_populates="generation_billing_records")
+    funding_grant: Optional[GenerationFundingGrant] = Relationship()
+    funding_entries: list["GenerationFundingLedgerEntry"] = Relationship(back_populates="billing_record")
+
+
+class GenerationFundingLedgerEntry(SQLModel, table=True):
+    __tablename__ = "generation_funding_ledger_entries"
+
+    generation_funding_ledger_entry_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
+    session_id: Optional[uuid.UUID] = Field(default=None, foreign_key="sessions.session_id", index=True)
+    generation_billing_record_id: Optional[uuid.UUID] = Field(
+        default=None,
+        foreign_key="generation_billing_records.generation_billing_record_id",
+        index=True,
+    )
+    funding_grant_id: Optional[uuid.UUID] = Field(default=None, foreign_key="generation_funding_grants.generation_funding_grant_id", index=True)
+
+    entry_kind: GenerationFundingLedgerEntryKind
+    funding_source_type: str = Field(min_length=1, max_length=50)
+    amount: int = Field(default=0)
+    balance_after: Optional[int] = None
+    description: Optional[str] = Field(default=None, max_length=200)
+    entry_metadata: dict = Field(default_factory=dict, sa_column=Column("metadata", JSON))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    user: Optional[UserProfile] = Relationship(back_populates="generation_funding_ledger_entries")
+    funding_grant: Optional[GenerationFundingGrant] = Relationship(back_populates="ledger_entries")
+    billing_record: Optional[GenerationBillingRecord] = Relationship(back_populates="funding_entries")
 
 
 class CatalogCookbookPurchaseRecord(SQLModel, table=True):
@@ -412,6 +502,9 @@ class MarketplaceCookbookPublicationRecord(SQLModel, table=True):
     """
 
     __tablename__ = "marketplace_cookbook_publications"
+    __table_args__ = (
+        UniqueConstraint("chef_user_id", "source_cookbook_id", name="uq_marketplace_publications_chef_source"),
+    )
 
     marketplace_cookbook_publication_id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     chef_user_id: uuid.UUID = Field(foreign_key="user_profiles.user_id", index=True)
@@ -434,4 +527,3 @@ class MarketplaceCookbookPublicationRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     chef: Optional[UserProfile] = Relationship(back_populates="marketplace_cookbook_publications")
-

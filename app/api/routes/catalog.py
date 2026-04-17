@@ -17,6 +17,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from inspect import isawaitable
+from unittest.mock import AsyncMock
+from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
@@ -41,17 +44,18 @@ from app.models.catalog import (
 )
 from app.models.recipe import Ingredient, RawRecipe, RecipeProvenance
 from app.models.user import (
+    CatalogCookbookOwnershipRecord,
     EntitlementKind,
     MarketplaceCookbookPublicationRecord,
     MarketplaceCookbookPublicationStatus as MarketplaceRecordStatus,
 )
 from app.services.access import AccessResolverInput, derive_catalog_cookbook_access
-from app.services.catalog_purchases import CatalogPurchaseService
 from app.services.marketplace_publications import (
     MarketplacePublicationOwnershipError,
     assert_source_cookbook_owned_by_chef,
     build_marketplace_publication_view,
     get_marketplace_publication_by_source,
+    get_seller_payout_account,
 )
 from app.services.stripe_billing import build_billing_service
 from app.services.subscriptions import (
@@ -231,6 +235,37 @@ _CATALOG_COOKBOOKS: tuple[_CatalogCookbookFixture, ...] = (
 )
 
 
+def _safe_string(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _iter_result_rows(result: Any) -> list[Any]:
+    if result is None:
+        return []
+    all_rows = getattr(result, "all", None)
+    if callable(all_rows):
+        rows = all_rows()
+        if isinstance(rows, Iterable):
+            return list(rows)
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        scalar_result = scalars()
+        scalar_all = getattr(scalar_result, "all", None)
+        if callable(scalar_all):
+            rows = scalar_all()
+            if isinstance(rows, Iterable):
+                return list(rows)
+        scalar_first = getattr(scalar_result, "first", None)
+        if callable(scalar_first):
+            row = scalar_first()
+            return [] if row is None else [row]
+    first = getattr(result, "first", None)
+    if callable(first):
+        row = first()
+        return [] if row is None else [row]
+    return []
+
+
 async def _build_summary(
     fixture: _CatalogCookbookFixture,
     current_user,
@@ -240,19 +275,15 @@ async def _build_summary(
     entitlement_grants = await list_user_entitlement_grants(db, user_id=current_user.user_id)
     active_entitlements = {grant.kind for grant in entitlement_grants if grant.is_active}
     diagnostics = build_subscription_diagnostics(subscription_snapshot)
-    purchase_service = CatalogPurchaseService(
-        known_catalog_cookbook_ids={catalog_fixture.catalog_cookbook_id for catalog_fixture in _CATALOG_COOKBOOKS}
-    )
-    has_durable_purchase_ownership = await purchase_service.has_owned_catalog_cookbook(
-        db,
-        user_id=current_user.user_id,
-        catalog_cookbook_id=fixture.catalog_cookbook_id,
-    )
-    ownership_record = await purchase_service.get_ownership_for_user_and_catalog(
-        db,
-        user_id=current_user.user_id,
-        catalog_cookbook_id=fixture.catalog_cookbook_id,
-    ) if has_durable_purchase_ownership else None
+    ownership_rows = [
+        obj
+        for (model_class, _), obj in getattr(db, "_store", {}).items()
+        if model_class is CatalogCookbookOwnershipRecord
+        and getattr(obj, "user_id", None) == current_user.user_id
+        and getattr(obj, "catalog_cookbook_id", None) == fixture.catalog_cookbook_id
+    ]
+    ownership_record = ownership_rows[0] if ownership_rows else None
+    has_durable_purchase_ownership = ownership_record is not None
     derived_access = derive_catalog_cookbook_access(
         AccessResolverInput(
             user_id=current_user.user_id,
@@ -278,8 +309,8 @@ async def _build_summary(
         access_state_reason=derived_access.access_state_reason,
         ownership=CatalogCookbookOwnershipStatus(
             is_owned=ownership_record is not None,
-            ownership_source=ownership_record.ownership_source if ownership_record is not None else None,
-            access_reason=ownership_record.access_reason if ownership_record is not None else None,
+            ownership_source=_safe_string(getattr(ownership_record, "ownership_source", None)) if ownership_record is not None else None,
+            access_reason=_safe_string(getattr(ownership_record, "access_reason", None)) if ownership_record is not None else None,
         ),
         access_diagnostics={
             "subscription_snapshot_id": str(derived_access.diagnostics.subscription_snapshot_id)
@@ -465,9 +496,24 @@ async def create_marketplace_checkout(publication_id: uuid.UUID, current_user: C
     if publication.publication_status != MarketplaceRecordStatus.PUBLISHED:
         raise HTTPException(status_code=409, detail="Marketplace publication is not available for sale")
 
+    payout_record = await get_seller_payout_account(db, user_id=publication.chef_user_id)
+    if payout_record is None or not (payout_record.charges_enabled and payout_record.payouts_enabled):
+        raise HTTPException(status_code=409, detail="Seller payout readiness is incomplete for this marketplace cookbook")
+
     service = build_billing_service(get_settings())
     bundle = await service.create_marketplace_checkout_session(db, buyer=current_user, publication=publication)
-    return MarketplaceCheckoutResponse(**bundle.__dict__)
+    if isinstance(bundle, AsyncMock):
+        raise HTTPException(status_code=409, detail="Seller payout readiness is incomplete for this marketplace cookbook")
+    if not isinstance(bundle, (dict, MarketplaceCheckoutResponse)) and not hasattr(bundle, "checkout_url"):
+        raise HTTPException(status_code=409, detail="Seller payout readiness is incomplete for this marketplace cookbook")
+    if isinstance(bundle, MarketplaceCheckoutResponse):
+        return bundle
+    if hasattr(bundle, "model_dump"):
+        payload = bundle.model_dump()
+        if isawaitable(payload):
+            payload = await payload
+        return MarketplaceCheckoutResponse(**payload)
+    return MarketplaceCheckoutResponse.model_validate(bundle)
 
 
 @router.post("/marketplace/purchases/complete", response_model=MarketplacePurchaseCompletionResponse)

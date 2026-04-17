@@ -4,7 +4,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
@@ -53,11 +53,12 @@ async def stripe_service_db():
 
     settings = get_settings()
     engine = create_async_engine(settings.test_database_url, echo=False, future=True, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
-    async with AsyncSession(engine, expire_on_commit=False) as session:
+    async with session_factory() as session:
         yield session
         await session.rollback()
 
@@ -268,8 +269,8 @@ async def test_finalize_marketplace_purchase_records_exactly_once_ownership_for_
     chef = UserProfile(
         user_id=uuid.uuid4(),
         name="Seller Chef",
-        email="seller-chef@test.com",
-        rag_owner_key=UserProfile.build_rag_owner_key("seller-chef@test.com"),
+        email=f"seller-chef-{uuid.uuid4()}@test.com",
+        rag_owner_key=UserProfile.build_rag_owner_key(f"seller-chef-{uuid.uuid4()}@test.com"),
     )
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=uuid.uuid4(),
