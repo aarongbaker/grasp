@@ -18,6 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field as PydanticField, field_validator, model_validator
 from sqlalchemy import JSON, String, UniqueConstraint
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from app.models.enums import EquipmentCategory, SessionStatus
@@ -93,6 +94,25 @@ class KitchenConfig(SQLModel, table=True):
 
     # One-to-one back-reference to the owning UserProfile
     user: Optional["UserProfile"] = Relationship(back_populates="kitchen_config")
+
+    @field_validator("burners", mode="before")
+    @classmethod
+    def _coerce_burners_to_jsonable(cls, value):
+        if value is None:
+            return []
+        coerced = []
+        for burner in value:
+            if isinstance(burner, BurnerDescriptor):
+                coerced.append(burner)
+            elif isinstance(burner, dict):
+                coerced.append(BurnerDescriptor.model_validate(burner))
+            else:
+                model_dump = getattr(burner, "model_dump", None)
+                if callable(model_dump):
+                    coerced.append(BurnerDescriptor.model_validate(model_dump()))
+                else:
+                    coerced.append(BurnerDescriptor.model_validate(burner))
+        return coerced
 
     @model_validator(mode="after")
     def _validate_burner_count(self):
@@ -511,6 +531,23 @@ class MarketplaceCookbookPublicationRecord(SQLModel, table=True):
     source_cookbook_id: uuid.UUID = Field(foreign_key="recipe_cookbooks.cookbook_id", index=True)
 
     publication_status: MarketplaceCookbookPublicationStatus = Field(default=MarketplaceCookbookPublicationStatus.DRAFT)
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: Optional[str] = Field(default=None, max_length=300)
+    description: str = Field(min_length=1, max_length=4000)
+    slug: str = Field(min_length=1, max_length=120, index=True)
+    cover_image_url: Optional[str] = Field(default=None, max_length=500)
+    list_price_cents: int = Field(ge=0)
+    currency: str = Field(default="usd", min_length=3, max_length=3)
+    recipe_count_snapshot: int = Field(default=0, ge=0)
+    publication_notes: Optional[str] = Field(default=None, max_length=500)
+    publication_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    published_at: Optional[datetime] = None
+    unpublished_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    chef: Optional[UserProfile] = Relationship(back_populates="marketplace_cookbook_publications")
+
     title: str = Field(min_length=1, max_length=200)
     subtitle: Optional[str] = Field(default=None, max_length=300)
     description: str = Field(min_length=1, max_length=4000)

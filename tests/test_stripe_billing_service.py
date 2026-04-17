@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
+from app.models.authored_recipe import RecipeCookbookRecord
 from app.models.catalog import MarketplaceCookbookPublicationStatus
 from app.models.session import Session
 from app.models.user import (
@@ -227,10 +228,16 @@ async def test_create_marketplace_checkout_session_returns_provider_safe_revenue
         email="chef-diagnostics@test.com",
         rag_owner_key=UserProfile.build_rag_owner_key("chef-diagnostics@test.com"),
     )
+    source_cookbook = RecipeCookbookRecord(
+        cookbook_id=uuid.uuid4(),
+        user_id=chef.user_id,
+        name="Diagnostic Source",
+        description="Diagnostic source cookbook.",
+    )
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=uuid.uuid4(),
         chef_user_id=chef.user_id,
-        source_cookbook_id=uuid.uuid4(),
+        source_cookbook_id=source_cookbook.cookbook_id,
         publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
         slug="diagnostic-book",
         title="Diagnostic Book",
@@ -241,6 +248,8 @@ async def test_create_marketplace_checkout_session_returns_provider_safe_revenue
     )
     stripe_service_db.add(buyer)
     stripe_service_db.add(chef)
+    await stripe_service_db.commit()
+    stripe_service_db.add(source_cookbook)
     stripe_service_db.add(publication)
     await stripe_service_db.commit()
 
@@ -272,10 +281,16 @@ async def test_finalize_marketplace_purchase_records_exactly_once_ownership_for_
         email=f"seller-chef-{uuid.uuid4()}@test.com",
         rag_owner_key=UserProfile.build_rag_owner_key(f"seller-chef-{uuid.uuid4()}@test.com"),
     )
+    source_cookbook = RecipeCookbookRecord(
+        cookbook_id=uuid.uuid4(),
+        user_id=chef.user_id,
+        name="Seller Source",
+        description="Seller source cookbook.",
+    )
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=uuid.uuid4(),
         chef_user_id=chef.user_id,
-        source_cookbook_id=uuid.uuid4(),
+        source_cookbook_id=source_cookbook.cookbook_id,
         publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
         slug="seller-book",
         title="Seller Book",
@@ -286,6 +301,8 @@ async def test_finalize_marketplace_purchase_records_exactly_once_ownership_for_
     )
     stripe_service_db.add(buyer)
     stripe_service_db.add(chef)
+    await stripe_service_db.flush()
+    stripe_service_db.add(source_cookbook)
     stripe_service_db.add(publication)
     await stripe_service_db.commit()
 
@@ -328,10 +345,16 @@ async def test_finalize_marketplace_purchase_does_not_grant_ownership_for_cancel
         email="seller-chef-two@test.com",
         rag_owner_key=UserProfile.build_rag_owner_key("seller-chef-two@test.com"),
     )
+    source_cookbook = RecipeCookbookRecord(
+        cookbook_id=uuid.uuid4(),
+        user_id=chef.user_id,
+        name="Seller Source Two",
+        description="Seller source cookbook two.",
+    )
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=uuid.uuid4(),
         chef_user_id=chef.user_id,
-        source_cookbook_id=uuid.uuid4(),
+        source_cookbook_id=source_cookbook.cookbook_id,
         publication_status=MarketplaceCookbookPublicationStatus.PUBLISHED,
         slug="seller-book-two",
         title="Seller Book Two",
@@ -342,6 +365,8 @@ async def test_finalize_marketplace_purchase_does_not_grant_ownership_for_cancel
     )
     stripe_service_db.add(buyer)
     stripe_service_db.add(chef)
+    await stripe_service_db.flush()
+    stripe_service_db.add(source_cookbook)
     stripe_service_db.add(publication)
     await stripe_service_db.commit()
 
@@ -357,5 +382,8 @@ async def test_finalize_marketplace_purchase_does_not_grant_ownership_for_cancel
     assert outcome.purchase_state == "cancelled"
     assert outcome.ownership_granted is False
     assert outcome.ownership_recorded is False
+
+
+False
 
 

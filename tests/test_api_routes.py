@@ -38,7 +38,7 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingRecord, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord, MarketplaceCookbookPublicationRecord, MarketplaceCookbookPublicationStatus, SellerPayoutAccountRecord, SellerPayoutOnboardingStatus
+from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingProvider, GenerationBillingRecord, GenerationBillingState, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord, MarketplaceCookbookPublicationRecord, MarketplaceCookbookPublicationStatus, SellerPayoutAccountRecord, SellerPayoutOnboardingStatus
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -1286,24 +1286,27 @@ async def test_kitchen_config_burners_round_trip_through_real_db(db_session_for_
         has_second_oven=False,
         max_second_oven_racks=2,
         burners=[
-            BurnerDescriptor(
-                burner_id="front_left_large",
-                position="front_left",
-                size="large",
-                label="Front Left",
-            )
+            {
+                "burner_id": "front_left_large",
+                "position": "front_left",
+                "size": "large",
+                "label": "Front Left",
+            }
         ],
     )
     db_session_for_routes.add(kitchen)
     await db_session_for_routes.commit()
 
-    result = await db_session_for_routes.exec(
+    result = await db_session_for_routes.execute(
         select(KitchenConfig).where(KitchenConfig.kitchen_config_id == kitchen.kitchen_config_id)
     )
-    stored = result.first()
+    stored = result.scalar_one_or_none()
 
     assert stored is not None
-    assert [burner.model_dump() for burner in stored.burners] == [
+    assert [
+        burner.model_dump() if hasattr(burner, "model_dump") else burner
+        for burner in stored.burners
+    ] == [
         {
             "burner_id": "front_left_large",
             "position": "front_left",
@@ -2821,8 +2824,8 @@ async def test_get_session_status_includes_app_safe_outstanding_balance_summary(
         session_id=session.session_id,
         user_id=test_user.user_id,
         session_status=SessionStatus.COMPLETE,
-        billing_state="charge_failed",
-        provider="stripe",
+        billing_state=GenerationBillingState.CHARGE_FAILED,
+        provider=GenerationBillingProvider.STRIPE,
         provider_error_code="card_declined",
         provider_error_message="saved card was declined",
         charge_attempted_at=datetime.now(timezone.utc).replace(tzinfo=None),
