@@ -24,12 +24,9 @@ rate limit is multiplied by worker count in that case.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from app.core.logging import setup_logging
 
@@ -214,54 +211,13 @@ app.add_middleware(
 
 
 # ── Rate Limiting ────────────────────────────────────────────────────────────
-def _redis_is_reachable(redis_url: str) -> bool:
-    """Quick TCP check to see if Redis is accepting connections.
+# Limiter construction and 429 handler live in app/core/rate_limit.py so that
+# route modules can import the same limiter instance (avoiding in-memory
+# duplicates that are invisible to app.state.limiter).
+from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 
-    Used at startup to decide whether to use Redis-backed or in-memory
-    rate limiting. In-memory limits are not shared across workers, so
-    production deployments should always have Redis reachable.
-    Timeout is short (2s) to not delay startup on network issues.
-    """
-    import socket
-    from urllib.parse import urlparse
-
-    try:
-        parsed = urlparse(redis_url)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 6379
-        sock = socket.create_connection((host, port), timeout=2)
-        sock.close()
-        return True
-    except OSError:
-        return False
-
-
-# Build the limiter with Redis if available, fall back to in-memory.
-# The limiter is stored on app.state so routes can access it via request.app.state.limiter.
-# SlowAPI reads the limiter from app.state automatically when @limiter.limit() is used.
-if _redis_is_reachable(_settings.redis_url):
-    limiter = Limiter(key_func=get_remote_address, storage_uri=_settings.redis_url)
-    logger.info("Rate limiter using Redis at %s", _settings.redis_url)
-else:
-    limiter = Limiter(key_func=get_remote_address)  # in-memory fallback
-    logger.warning(
-        "Redis not reachable at %s. Rate limiter using in-memory storage — limits will not be shared across workers.",
-        _settings.redis_url,
-    )
 app.state.limiter = limiter
-
-
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    """Convert SlowAPI's RateLimitExceeded into a JSON 429 response.
-
-    Without this handler, SlowAPI returns a plain-text 429 which breaks
-    frontend clients that expect JSON errors.
-    """
-    return JSONResponse(
-        status_code=429,
-        content={"detail": f"Rate limit exceeded: {exc.detail}"},
-    )
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 
 # ── Register routers ──────────────────────────────────────────────────────────

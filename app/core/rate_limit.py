@@ -20,10 +20,18 @@ create_session_limit(key) to determine the limit string for each request,
 after user_identity_or_ip_key(request) has already determined the bucket key.
 """
 
+import logging
+import socket
+from urllib.parse import urlparse
+
 from fastapi import Request
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.auth import _decode_jwt
+from app.core.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Prefixes distinguish authenticated user buckets from IP buckets in the
 # Redis key namespace. Without prefixes, a user_id that happens to look like
@@ -69,6 +77,51 @@ def user_identity_or_ip_key(request: Request) -> str:
                 return f"{AUTHENTICATED_USER_PREFIX}{sub.strip()}"
 
     return f"{UNAUTHENTICATED_IP_PREFIX}{get_remote_address(request)}"
+
+
+def _redis_is_reachable(redis_url: str) -> bool:
+    """Quick TCP check to see if Redis is accepting connections.
+
+    Used at startup to decide whether to use Redis-backed or in-memory
+    rate limiting. In-memory limits are not shared across workers, so
+    production deployments should always have Redis reachable.
+    Timeout is short (2s) to not delay startup on network issues.
+    """
+    try:
+        parsed = urlparse(redis_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        sock = socket.create_connection((host, port), timeout=2)
+        sock.close()
+        return True
+    except OSError:
+        return False
+
+
+# Build the shared limiter with Redis if available, fall back to in-memory.
+# Exported so route modules can bind decorators to the same instance as
+# app.state.limiter (set in app/main.py).
+_settings = get_settings()
+if _redis_is_reachable(_settings.redis_url):
+    limiter = Limiter(key_func=get_remote_address, storage_uri=_settings.redis_url)
+    logger.info("Rate limiter using Redis at %s", _settings.redis_url)
+else:
+    limiter = Limiter(key_func=get_remote_address)  # in-memory fallback
+    logger.warning(
+        "Redis not reachable at %s. Rate limiter using in-memory storage — limits will not be shared across workers.",
+        _settings.redis_url,
+    )
+
+
+async def rate_limit_exceeded_handler(request, exc):
+    """Convert SlowAPI's RateLimitExceeded into a JSON 429 response.
+
+    Without this handler, SlowAPI returns a plain-text 429 which breaks
+    frontend clients that expect JSON errors.
+    """
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=429, content={"detail": f"Rate limit exceeded: {exc.detail}"})
 
 
 def create_session_limit(key: str) -> str:
