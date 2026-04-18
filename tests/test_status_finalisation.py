@@ -102,6 +102,122 @@ async def test_finalise_session_preserves_cancelled_status(test_db_session, test
 
 
 @pytest.mark.asyncio
+async def test_finalise_session_preserves_complete_status(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    completed_at = datetime(2026, 4, 10, 9, 0, 0)
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.COMPLETE,
+        concept_json={"free_text": "already complete"},
+        schedule_summary="Original summary",
+        completed_at=completed_at,
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    await finalise_session(
+        session_id,
+        {
+            "schedule": _schedule_payload("Should not overwrite"),
+            "validated_recipes": [],
+            "errors": [],
+        },
+        test_db_session,
+    )
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.execute(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).scalars().all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.COMPLETE
+    assert refreshed.schedule_summary == "Original summary"
+    assert refreshed.completed_at == completed_at
+    assert ledger_rows == []
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_preserves_partial_status(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    completed_at = datetime(2026, 4, 10, 10, 0, 0)
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.PARTIAL,
+        concept_json={"free_text": "already partial"},
+        schedule_summary="Partial original",
+        error_summary="enricher: dropped dessert",
+        completed_at=completed_at,
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    await finalise_session(
+        session_id,
+        {
+            "schedule": _schedule_payload("Should not overwrite"),
+            "validated_recipes": [],
+            "errors": [],
+        },
+        test_db_session,
+    )
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.execute(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).scalars().all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.PARTIAL
+    assert refreshed.schedule_summary == "Partial original"
+    assert refreshed.error_summary == "enricher: dropped dessert"
+    assert refreshed.completed_at == completed_at
+    assert ledger_rows == []
+
+
+@pytest.mark.asyncio
+async def test_finalise_session_preserves_failed_status(test_db_session, test_user_id):
+    session_id = uuid.uuid4()
+    completed_at = datetime(2026, 4, 10, 11, 0, 0)
+    session = Session(
+        session_id=session_id,
+        user_id=test_user_id,
+        status=SessionStatus.FAILED,
+        concept_json={"free_text": "already failed"},
+        error_summary="renderer: boom",
+        completed_at=completed_at,
+    )
+    test_db_session.add(session)
+    await test_db_session.commit()
+
+    await finalise_session(
+        session_id,
+        {
+            "schedule": _schedule_payload("Should not overwrite"),
+            "validated_recipes": [],
+            "errors": [],
+        },
+        test_db_session,
+    )
+
+    refreshed = await test_db_session.get(Session, session_id)
+    ledger_rows = (
+        await test_db_session.execute(
+            select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
+        )
+    ).scalars().all()
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.FAILED
+    assert refreshed.error_summary == "renderer: boom"
+    assert refreshed.completed_at == completed_at
+    assert ledger_rows == []
+
+
+@pytest.mark.asyncio
 async def test_finalise_session_persists_terminal_payload_for_uncancelled_session(test_db_session, test_user_id):
     session_id = uuid.uuid4()
     session = Session(

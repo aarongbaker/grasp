@@ -78,10 +78,20 @@ async def finalise_session(
     if not result:
         return
 
-    # Cancellation guard: if the cancel route wrote CANCELLED while the pipeline
-    # was still running, respect the cancellation and don't overwrite it.
-    # The pipeline's final_state is discarded in this case.
-    if result.status == SessionStatus.CANCELLED:
+    # Terminal guard: if this session already has a terminal status (COMPLETE,
+    # PARTIAL, FAILED, or CANCELLED), a second finalise call must not overwrite
+    # it or create a second billing record.  The most common case is CANCELLED —
+    # written by the cancel route while the pipeline was still running — but a
+    # replayed or redelivered Celery task could race against any terminal state.
+    # Use set membership rather than .is_terminal because SQLModel may return
+    # the status column as a plain str rather than the SessionStatus enum instance.
+    _TERMINAL = {
+        SessionStatus.COMPLETE,
+        SessionStatus.PARTIAL,
+        SessionStatus.FAILED,
+        SessionStatus.CANCELLED,
+    }
+    if result.status in _TERMINAL:
         await db.rollback()
         return
 
