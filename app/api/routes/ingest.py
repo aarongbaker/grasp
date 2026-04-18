@@ -45,15 +45,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from sqlalchemy import delete
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
+from app.core.rate_limit import limiter
 from app.models.enums import ChunkType, IngestionStatus
 from app.models.ingestion import BookRecord, IngestionJob
-
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/ingest")
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB — generous for full cookbooks

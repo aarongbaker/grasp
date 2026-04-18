@@ -32,15 +32,12 @@ import bcrypt
 import jwt
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlmodel import select
 
 from app.core.deps import DBSession
+from app.core.rate_limit import limiter
 from app.core.settings import get_settings
 from app.models.user import UserProfile
-
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/auth")
 
 

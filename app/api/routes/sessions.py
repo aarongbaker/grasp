@@ -25,14 +25,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import asc, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession as SAAsyncSession
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
-from app.core.rate_limit import create_session_limit, user_identity_or_ip_key
+from app.core.rate_limit import create_session_limit, limiter, user_identity_or_ip_key
 from app.models.authored_recipe import AuthoredRecipeRecord, RecipeCookbookRecord
 from app.models.catalog import CatalogCookbookAccessState
 from app.models.enums import MealType, Occasion, SessionStatus
@@ -64,7 +62,6 @@ from app.models.scheduling import NaturalLanguageSchedule
 from app.api.routes.catalog import resolve_catalog_cookbook_access
 from app.services.generation_billing import GenerationBillingService
 
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
 
 
