@@ -193,3 +193,13 @@ async def test_hybrid_rate_limit_uses_ip_fallback_when_no_authenticated_identity
         resp = await ac.post("/sessions")
         assert resp.status_code == 429
         assert "Rate limit exceeded" in resp.json()["detail"]
+
+
+def test_shared_limiter_export_is_limiter_instance():
+    """Prove the shared control-plane exports are correctly shaped."""
+    from app.core.rate_limit import _redis_is_reachable, limiter, rate_limit_exceeded_handler
+    from slowapi import Limiter as _Limiter
+
+    assert isinstance(limiter, _Limiter)
+    assert callable(rate_limit_exceeded_handler)
+    assert callable(_redis_is_reachable)

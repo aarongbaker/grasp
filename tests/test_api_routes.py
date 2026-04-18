@@ -68,7 +68,6 @@ from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
 def _create_test_app() -> FastAPI:
     """Create a FastAPI app with routes but no lifespan (no external deps)."""
-    from app.api.routes import sessions as sessions_routes
     from app.api.routes.authored_recipes import router as authored_recipes_router
     from app.api.routes.billing import router as billing_router
     from app.api.routes.catalog import router as catalog_router
@@ -76,9 +75,10 @@ def _create_test_app() -> FastAPI:
     from app.api.routes.recipe_cookbooks import router as recipe_cookbooks_router
     from app.api.routes.sessions import router as sessions_router
     from app.api.routes.users import router as users_router
+    from app.core.rate_limit import limiter as shared_limiter
 
     app = FastAPI()
-    app.state.limiter = sessions_routes.limiter
+    app.state.limiter = shared_limiter
 
     @app.exception_handler(RateLimitExceeded)
     async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -459,11 +459,11 @@ def authored_recipe_payload(test_user):
 
 @pytest.fixture(autouse=True)
 def reset_session_route_limiter():
-    from app.api.routes.sessions import limiter as sessions_limiter
+    from app.core.rate_limit import limiter as shared_limiter
 
-    sessions_limiter._storage.reset()
+    shared_limiter._storage.reset()
     yield
-    sessions_limiter._storage.reset()
+    shared_limiter._storage.reset()
 
 
 def _auth_headers_for(user: UserProfile) -> dict[str, str]:
@@ -1614,6 +1614,13 @@ async def test_create_session_rate_limit_isolated_by_authenticated_user(mock_db)
         assert other_user.status_code == 201
 
     app.dependency_overrides.clear()
+
+
+def test_shared_limiter_is_app_state_limiter():
+    from app.core.rate_limit import limiter
+
+    app = _create_test_app()
+    assert app.state.limiter is limiter
 
 
 async def test_main_app_does_not_mount_ingest_routes():
