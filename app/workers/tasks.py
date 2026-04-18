@@ -74,7 +74,7 @@ async def _run_pipeline_async(session_id: str, user_id: str):
     from app.core.status import finalise_session
     from app.graph.graph import build_grasp_graph
     from app.models.errors import NodeError
-    from app.models.enums import ErrorType
+    from app.models.enums import ErrorType, SessionStatus
     from app.models.pipeline import build_session_initial_state
     from app.models.session import Session
     from app.models.user import Equipment, KitchenConfig, UserProfile
@@ -93,6 +93,19 @@ async def _run_pipeline_async(session_id: str, user_id: str):
             # enqueue and task execution (uncommon but possible).
             session = await db.get(Session, uuid.UUID(session_id))
             if not session:
+                return
+
+            # Replay guard: skip re-execution if this session already reached a
+            # terminal state. A redelivered or replayed Celery task must never
+            # re-run costly generation for a session that has already completed,
+            # partially completed, failed, or been cancelled.
+            if session.status in {
+                SessionStatus.COMPLETE,
+                SessionStatus.PARTIAL,
+                SessionStatus.FAILED,
+                SessionStatus.CANCELLED,
+            }:
+                await engine.dispose()
                 return
 
             user = await db.get(UserProfile, uuid.UUID(user_id))
