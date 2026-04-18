@@ -139,6 +139,7 @@ class MockDBSession:
         self.exec_result = None
         self.execute_side_effect = None
         self.committed = False
+        self.rollback_count = 0
 
     def add(self, obj):
         model_class = obj.__class__
@@ -2873,6 +2874,120 @@ async def test_run_pipeline_returns_blocked_response_without_mutating_session_st
     assert stored_session is not None
     assert stored_session.status == SessionStatus.PENDING
     assert delayed_calls == []
+
+
+async def test_run_pipeline_persists_generating_only_after_accepted_enqueue(app_with_overrides, mock_db, test_user, monkeypatch):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    delayed_calls: list[tuple[str, str]] = []
+
+    class _FakeTaskResult:
+        id = "celery-test-task"
+
+    class _FakePipelineTask:
+        def delay(self, session_id: str, user_id: str):
+            delayed_calls.append((session_id, user_id))
+            return _FakeTaskResult()
+
+    monkeypatch.setattr("app.workers.tasks.run_grasp_pipeline", _FakePipelineTask())
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 202
+    assert resp.json() == {
+        "session_id": str(session.session_id),
+        "status": "generating",
+        "message": "Pipeline enqueued",
+    }
+    stored_session = await mock_db.get(Session, session.session_id)
+    assert stored_session is not None
+    assert stored_session.status == SessionStatus.GENERATING
+    assert stored_session.started_at is not None
+    assert stored_session.celery_task_id == "celery-test-task"
+    assert stored_session.error_summary is None
+    assert delayed_calls == [(str(session.session_id), str(test_user.user_id))]
+    assert mock_db.committed is True
+    assert mock_db.rollback_count == 0
+
+
+async def test_run_pipeline_restores_pending_when_enqueue_fails_before_acceptance(
+    app_with_overrides, mock_db, test_user, monkeypatch
+):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    class _FakePipelineTask:
+        def delay(self, session_id: str, user_id: str):
+            raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr("app.workers.tasks.run_grasp_pipeline", _FakePipelineTask())
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "Pipeline kickoff failed before execution was accepted. Please retry."
+    stored_session = await mock_db.get(Session, session.session_id)
+    assert stored_session is not None
+    assert stored_session.status == SessionStatus.PENDING
+    assert stored_session.started_at is None
+    assert stored_session.celery_task_id is None
+    assert stored_session.error_summary == "Pipeline kickoff failed before execution was accepted. Please retry."
+    assert mock_db.committed is True
+    assert mock_db.rollback_count == 0
+
+
+async def test_run_pipeline_restores_pending_when_kickoff_persistence_fails_after_acceptance(
+    app_with_overrides, mock_db, test_user, monkeypatch
+):
+    session = Session(user_id=test_user.user_id, status=SessionStatus.PENDING, concept_json={})
+    mock_db.seed(Session, session.session_id, session)
+
+    class _FakeTaskResult:
+        id = "celery-test-task"
+
+    class _FakePipelineTask:
+        def delay(self, session_id: str, user_id: str):
+            return _FakeTaskResult()
+
+    revoke = MagicMock()
+    mock_db.commit_side_effects = [RuntimeError("db commit failed"), None]
+
+    original_commit = mock_db.commit
+
+    async def _commit_with_failure_once():
+        side_effects = getattr(mock_db, "commit_side_effects", [])
+        if side_effects:
+            next_effect = side_effects.pop(0)
+            if next_effect is not None:
+                mock_db.committed = True
+                raise next_effect
+        await original_commit()
+
+    mock_db.commit = _commit_with_failure_once
+
+    monkeypatch.setattr("app.workers.tasks.run_grasp_pipeline", _FakePipelineTask())
+    monkeypatch.setattr("app.workers.celery_app.celery_app.control.revoke", revoke)
+
+    transport = ASGITransport(app=app_with_overrides)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/v1/sessions/{session.session_id}/run")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "Pipeline kickoff failed before execution was accepted. Please retry."
+    stored_session = await mock_db.get(Session, session.session_id)
+    assert stored_session is not None
+    assert stored_session.status == SessionStatus.PENDING
+    assert stored_session.started_at is None
+    assert stored_session.celery_task_id is None
+    assert stored_session.error_summary == "Pipeline kickoff failed before execution was accepted. Please retry."
+    revoke.assert_called_once_with("celery-test-task", terminate=True, signal="SIGTERM")
+    assert mock_db.rollback_count == 1
+    assert mock_db.committed is True
 
 
 async def test_get_session_status_includes_app_safe_outstanding_balance_summary(app_with_overrides, mock_db, test_user):
