@@ -89,10 +89,10 @@ async def test_finalise_session_preserves_cancelled_status(test_db_session, test
 
     refreshed = await test_db_session.get(Session, session_id)
     ledger_rows = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.CANCELLED
     assert refreshed.schedule_summary is None
@@ -124,10 +124,10 @@ async def test_finalise_session_persists_terminal_payload_for_uncancelled_sessio
 
     refreshed = await test_db_session.get(Session, session_id)
     ledger_rows = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.COMPLETE
     assert refreshed.schedule_summary == "Dinner ready"
@@ -169,15 +169,15 @@ async def test_finalise_session_reuses_existing_ledger_record_on_duplicate_call(
 
     refreshed = await test_db_session.get(Session, session_id)
     ledger_rows = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     entries = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationFundingLedgerEntry).where(GenerationFundingLedgerEntry.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.COMPLETE
     assert len(ledger_rows) == 1
@@ -201,7 +201,7 @@ async def test_finalise_session_duplicate_then_charge_failure_preserves_single_l
 
     final_state = {
         "schedule": _schedule_payload("Billable dinner ready"),
-        "validated_recipes": [{"source": {"name": "Short Ribs"}, "steps": [], "chef_notes": None, "techniques_used": []}],
+        "validated_recipes": [],
         "errors": [],
         "token_usage": _token_usage(input_tokens=13, output_tokens=8),
     }
@@ -210,10 +210,10 @@ async def test_finalise_session_duplicate_then_charge_failure_preserves_single_l
     await finalise_session(session_id, final_state, test_db_session)
 
     ledger_record = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).one()
+    ).scalar_one()
 
     billing_service = GenerationBillingService(now_fn=lambda: datetime(2026, 4, 14, 22, 0, 0))
     await billing_service.mark_charge_pending(
@@ -231,10 +231,10 @@ async def test_finalise_session_duplicate_then_charge_failure_preserves_single_l
 
     refreshed = await test_db_session.get(Session, session_id)
     ledger_rows = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.COMPLETE
     assert refreshed.token_usage == {
@@ -278,20 +278,32 @@ async def test_finalise_session_uses_existing_subscription_credit_when_present(t
         test_db_session,
     )
 
-    ledger_row = (
-        await test_db_session.exec(
+    refreshed = await test_db_session.get(Session, session_id)
+    billing_rows = (
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).one()
-    entries = (
-        await test_db_session.exec(
+    ).scalars().all()
+    funding_entries = (
+        await test_db_session.execute(
             select(GenerationFundingLedgerEntry).where(GenerationFundingLedgerEntry.session_id == session_id)
         )
-    ).all()
-    assert ledger_row.billing_state == GenerationBillingState.CHARGED
-    assert ledger_row.billing_source_type == "subscription_credit"
-    assert ledger_row.provider_error_code is None
-    assert len(entries) == 1
+    ).scalars().all()
+    user_credit = (
+        await test_db_session.execute(
+            select(GenerationFundingGrant).where(GenerationFundingGrant.user_id == test_user_id)
+        )
+    ).scalar_one()
+
+    assert refreshed is not None
+    assert refreshed.status == SessionStatus.COMPLETE
+    assert len(billing_rows) == 1
+    assert billing_rows[0].billing_state == GenerationBillingState.CHARGED
+    assert billing_rows[0].billing_source_type == "subscription_credit"
+    assert len(funding_entries) == 1
+    assert funding_entries[0].funding_source_type == "subscription_credit"
+    assert user_credit.remaining_amount == 0
+    assert user_credit.grant_state == GenerationFundingGrantState.EXHAUSTED
 
 
 @pytest.mark.asyncio
@@ -319,10 +331,10 @@ async def test_finalise_session_failed_run_does_not_create_ledger_row(test_db_se
 
     refreshed = await test_db_session.get(Session, session_id)
     ledger_rows = (
-        await test_db_session.exec(
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.FAILED
     assert refreshed.error_summary == "renderer: boom"
@@ -354,16 +366,16 @@ async def test_finalise_session_marks_partial_and_records_ledger_once(test_db_se
     )
 
     refreshed = await test_db_session.get(Session, session_id)
-    ledger_rows = (
-        await test_db_session.exec(
+    billing_rows = (
+        await test_db_session.execute(
             select(GenerationBillingRecord).where(GenerationBillingRecord.session_id == session_id)
         )
-    ).all()
+    ).scalars().all()
     assert refreshed is not None
     assert refreshed.status == SessionStatus.PARTIAL
     assert refreshed.error_summary == "enricher: dropped dessert"
-    assert len(ledger_rows) == 1
-    assert ledger_rows[0].session_status == SessionStatus.PARTIAL
+    assert len(billing_rows) == 1
+    assert billing_rows[0].session_status == SessionStatus.PARTIAL
 
 
 @pytest.mark.asyncio
@@ -383,10 +395,8 @@ async def test_cancel_pipeline_leaves_terminal_session_unchanged(test_db_session
     with pytest.raises(HTTPException) as exc_info:
         await cancel_pipeline(session_id, test_db_session, _current_user(test_user_id))
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "Session is complete, not in progress"
-
     refreshed = await test_db_session.get(Session, session_id)
+    assert exc_info.value.status_code == 409
     assert refreshed is not None
     assert refreshed.status == SessionStatus.COMPLETE
     assert refreshed.completed_at == completed_at

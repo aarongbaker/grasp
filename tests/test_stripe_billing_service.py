@@ -22,7 +22,7 @@ from app.models.user import (
 )
 from app.services.generation_billing import GenerationBillingService
 from app.services.stripe_billing import StripeBillingService, StripeWebhookPayloadError
-from tests.conftest import _ensure_test_postgres_available
+from tests.conftest import _ensure_test_postgres_available, register_test_sqlmodel_metadata, reset_test_database
 
 
 class _GatewayStub:
@@ -52,14 +52,16 @@ async def stripe_service_db():
     _ensure_test_postgres_available()
     from app.core.settings import get_settings
 
+    register_test_sqlmodel_metadata()
     settings = get_settings()
     engine = create_async_engine(settings.test_database_url, echo=False, future=True, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(SQLModel.metadata.create_all, checkfirst=True)
 
     async with session_factory() as session:
+        await reset_test_database(session)
         yield session
         await session.rollback()
 

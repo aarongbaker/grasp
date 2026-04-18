@@ -51,10 +51,12 @@ class Session(SQLModel, table=True):
     # Denormalized from NaturalLanguageSchedule on completion.
     # summary: stored for list views — avoids loading the full result_schedule blob.
     # total_duration_minutes: displayed in session cards without deserializing schedule.
-    # error_summary: single-sentence dropped-recipe explanation for PARTIAL status.
+    # error_summary: single-sentence user-visible diagnostic for recoverable kickoff
+    # failures or partial outcomes. POST /run may set this while leaving the
+    # session PENDING so the row stays truthfully retryable.
     schedule_summary: Optional[str] = None
     total_duration_minutes: Optional[int] = None
-    error_summary: Optional[str] = None  # populated on PARTIAL outcome
+    error_summary: Optional[str] = None
 
     # Full pipeline results persisted by finalise_session() for fast detail reads.
     # Storing here avoids hitting the LangGraph checkpoint on every GET /sessions/{id}.

@@ -32,6 +32,7 @@ import uuid
 import psycopg
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
@@ -50,6 +51,43 @@ def _ensure_test_postgres_available() -> None:
             return
     except psycopg.Error:
         pytest.skip(TEST_DB_SKIP_REASON)
+
+
+def register_test_sqlmodel_metadata() -> None:
+    """Import table modules so SQLModel.metadata is complete for test schema work."""
+    import app.models.authored_recipe  # noqa: F401
+    import app.models.ingestion  # noqa: F401
+    import app.models.invite  # noqa: F401
+    import app.models.session  # noqa: F401
+    import app.models.user  # noqa: F401
+
+
+async def reset_test_database(session: AsyncSession, *, include_restart_identity: bool = False) -> None:
+    """Clear the shared Postgres test DB in one ordered statement.
+
+    One TRUNCATE statement avoids the per-table deadlocks seen when multiple test
+    modules each issue their own CASCADE truncations against the same database.
+    """
+    suffix = " RESTART IDENTITY CASCADE" if include_restart_identity else " CASCADE"
+    await session.execute(
+        text(
+            "TRUNCATE TABLE "
+            "catalog_cookbook_ownership_records, "
+            "catalog_cookbook_purchase_records, "
+            "marketplace_cookbook_publications, "
+            "seller_payout_account_records, "
+            "user_entitlement_grants, "
+            "subscription_snapshots, "
+            "recipe_cookbooks, "
+            "generation_funding_ledger_entries, "
+            "generation_billing_records, "
+            "generation_funding_grants, "
+            "sessions, "
+            "user_profiles"
+            f"{suffix}"
+        )
+    )
+    await session.commit()
 
 
 # ── Enricher mock control ────────────────────────────────────────────────────
@@ -309,11 +347,10 @@ async def test_db_engine():
     engine = create_async_engine(settings.test_database_url, echo=False, poolclass=NullPool)
 
     # Import the active SQLModel table models to register metadata
-    import app.models.session  # noqa: F401
-    import app.models.user  # noqa: F401
+    register_test_sqlmodel_metadata()
 
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(SQLModel.metadata.create_all, checkfirst=True)
 
     yield engine
 

@@ -547,20 +547,3 @@ class MarketplaceCookbookPublicationRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     chef: Optional[UserProfile] = Relationship(back_populates="marketplace_cookbook_publications")
-
-    title: str = Field(min_length=1, max_length=200)
-    subtitle: Optional[str] = Field(default=None, max_length=300)
-    description: str = Field(min_length=1, max_length=4000)
-    slug: str = Field(min_length=1, max_length=120, index=True)
-    cover_image_url: Optional[str] = Field(default=None, max_length=500)
-    list_price_cents: int = Field(ge=0)
-    currency: str = Field(default="usd", min_length=3, max_length=3)
-    recipe_count_snapshot: int = Field(default=0, ge=0)
-    publication_notes: Optional[str] = Field(default=None, max_length=500)
-    publication_metadata: dict = Field(default_factory=dict, sa_column=Column(JSON))
-    published_at: Optional[datetime] = None
-    unpublished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-
-    chef: Optional[UserProfile] = Relationship(back_populates="marketplace_cookbook_publications")

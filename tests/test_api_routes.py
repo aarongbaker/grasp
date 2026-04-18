@@ -38,7 +38,26 @@ from app.models.recipe import RecipeProvenance
 from app.models.enums import ChunkType, IngestionStatus, SessionStatus
 from app.models.ingestion import BookRecord, CookbookChunk, IngestionJob
 from app.models.session import Session
-from app.models.user import BurnerDescriptor, Equipment, KitchenConfig, UserEntitlementGrant, EntitlementKind, SubscriptionSnapshot, SubscriptionStatus, SubscriptionSyncState, UserProfile, GenerationBillingProvider, GenerationBillingRecord, GenerationBillingState, CatalogCookbookOwnershipRecord, CatalogCookbookPurchaseRecord, MarketplaceCookbookPublicationRecord, MarketplaceCookbookPublicationStatus, SellerPayoutAccountRecord, SellerPayoutOnboardingStatus
+from app.models.user import (
+    BurnerDescriptor,
+    Equipment,
+    KitchenConfig,
+    UserEntitlementGrant,
+    EntitlementKind,
+    SubscriptionSnapshot,
+    SubscriptionStatus,
+    SubscriptionSyncState,
+    UserProfile,
+    GenerationBillingProvider,
+    GenerationBillingRecord,
+    GenerationBillingState,
+    CatalogCookbookOwnershipRecord,
+    CatalogCookbookPurchaseRecord,
+    MarketplaceCookbookPublicationRecord,
+    MarketplaceCookbookPublicationStatus,
+    SellerPayoutAccountRecord,
+    SellerPayoutOnboardingStatus,
+)
 from tests.conftest import _ensure_test_postgres_available
 from tests.fixtures.recipes import ENRICHED_SHORT_RIBS
 
@@ -137,7 +156,7 @@ class MockDBSession:
         pass
 
     async def rollback(self):
-        pass
+        self.rollback_count += 1
 
     async def refresh(self, obj):
         # Simulate assigning a UUID if not already set
@@ -165,7 +184,7 @@ class MockDBSession:
     async def execute(self, stmt):
         if self.execute_side_effect is not None:
             raise self.execute_side_effect
-        return MagicMock()
+        return await self.exec(stmt)
 
     async def delete(self, obj):
         model_class = obj.__class__
@@ -194,6 +213,17 @@ class MockDBSession:
         statement_text = str(stmt)
         lowered_text = statement_text.lower()
         where_criteria = getattr(stmt, "_where_criteria", ())
+
+        def _build_result(rows):
+            mock_result = MagicMock()
+            mock_result.first.return_value = rows[0] if rows else None
+            mock_result.all.return_value = rows
+            mock_result.scalar_one_or_none.return_value = rows[0] if rows else None
+            scalars_result = MagicMock()
+            scalars_result.first.return_value = rows[0] if rows else None
+            scalars_result.all.return_value = rows
+            mock_result.scalars.return_value = scalars_result
+            return mock_result
 
         def _extract_uuid_filter():
             for criterion in where_criteria:
@@ -233,10 +263,7 @@ class MockDBSession:
                 and (name_filter is None or name_filter in obj.title.lower())
             ]
             rows.sort(key=lambda record: record.updated_at, reverse=True)
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from recipe_cookbooks" in lowered_text:
             user_id = _extract_uuid_filter()
@@ -249,10 +276,7 @@ class MockDBSession:
                 and (name_filter is None or name_filter in obj.name.lower())
             ]
             rows.sort(key=lambda record: (record.updated_at, record.name), reverse=True)
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from subscription_snapshots" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -263,10 +287,7 @@ class MockDBSession:
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             rows.sort(key=lambda record: (record.updated_at, record.created_at), reverse=True)
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from user_entitlement_grants" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -277,10 +298,7 @@ class MockDBSession:
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
             rows.sort(key=lambda record: record.created_at, reverse=True)
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from equipment" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -290,10 +308,7 @@ class MockDBSession:
                 if model_class is Equipment
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from sessions" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -303,10 +318,7 @@ class MockDBSession:
                 if model_class is Session
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from generation_billing_records" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -316,10 +328,7 @@ class MockDBSession:
                 if model_class is GenerationBillingRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from catalog_cookbook_ownership_records" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -329,10 +338,7 @@ class MockDBSession:
                 if model_class is CatalogCookbookOwnershipRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from catalog_cookbook_purchase_records" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -342,10 +348,7 @@ class MockDBSession:
                 if model_class is CatalogCookbookPurchaseRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from seller_payout_account_records" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -355,10 +358,7 @@ class MockDBSession:
                 if model_class is SellerPayoutAccountRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from marketplace_cookbook_publications" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -368,10 +368,7 @@ class MockDBSession:
                 if model_class is MarketplaceCookbookPublicationRecord
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
         if "from user_profiles" in lowered_text:
             uuid_filters = _extract_uuid_filters()
@@ -381,15 +378,9 @@ class MockDBSession:
                 if model_class is UserProfile
                 and all(getattr(obj, field_name) == value for field_name, value in uuid_filters.items())
             ]
-            mock_result = MagicMock()
-            mock_result.first.return_value = rows[0] if rows else None
-            mock_result.all.return_value = rows
-            return mock_result
+            return _build_result(rows)
 
-        mock_result = MagicMock()
-        mock_result.first.return_value = None
-        mock_result.all.return_value = []
-        return mock_result
+        return _build_result([])
 
 
 @pytest.fixture
@@ -510,7 +501,9 @@ async def test_get_profile_includes_provider_agnostic_library_access_summary(app
     assert response.status_code == 200
     payload = response.json()
     assert payload["library_access"]["state"] == "locked"
-    assert payload["library_access"]["reason"] == "Your current subscription no longer includes cookbook library access."
+    assert (
+        payload["library_access"]["reason"] == "Your current subscription no longer includes cookbook library access."
+    )
     assert payload["library_access"]["has_catalog_access"] is False
     assert payload["library_access"]["billing_state_changed"] is True
     assert payload["library_access"]["access_diagnostics"]["subscription_status"] == "active"
@@ -519,7 +512,9 @@ async def test_get_profile_includes_provider_agnostic_library_access_summary(app
     assert "provider_subscription_ref" not in str(payload["library_access"])
 
 
-async def test_get_profile_marks_library_access_included_for_explicit_entitlement(app_with_overrides, test_user, mock_db):
+async def test_get_profile_marks_library_access_included_for_explicit_entitlement(
+    app_with_overrides, test_user, mock_db
+):
     kitchen = KitchenConfig(kitchen_config_id=uuid.uuid4(), burners=[])
     test_user.kitchen_config = kitchen
     test_user.equipment = []
@@ -574,7 +569,10 @@ async def test_get_profile_marks_library_access_unavailable_when_sync_failed(app
     assert response.status_code == 200
     payload = response.json()
     assert payload["library_access"]["state"] == "unavailable"
-    assert payload["library_access"]["reason"] == "Cookbook library access is temporarily unavailable because your subscription state could not be refreshed."
+    assert (
+        payload["library_access"]["reason"]
+        == "Cookbook library access is temporarily unavailable because your subscription state could not be refreshed."
+    )
     assert payload["library_access"]["access_diagnostics"]["sync_state"] == "failed"
 
 
@@ -642,7 +640,9 @@ async def test_billing_portal_returns_redirect_url_and_snapshot_metadata(app_wit
     }
 
 
-async def test_generation_billing_setup_route_returns_app_safe_saved_card_contract(app_with_overrides, test_user, monkeypatch):
+async def test_generation_billing_setup_route_returns_app_safe_saved_card_contract(
+    app_with_overrides, test_user, monkeypatch
+):
     service = AsyncMock(spec=StripeBillingService)
     service.create_generation_setup_session.return_value = type(
         "SetupBundle",
@@ -672,7 +672,9 @@ async def test_generation_billing_setup_route_returns_app_safe_saved_card_contra
     assert "provider_customer_ref" not in str(payload)
 
 
-async def test_generation_billing_recovery_route_returns_app_safe_outstanding_balance_contract(app_with_overrides, test_user, monkeypatch):
+async def test_generation_billing_recovery_route_returns_app_safe_outstanding_balance_contract(
+    app_with_overrides, test_user, monkeypatch
+):
     session_id = uuid.uuid4()
     service = AsyncMock(spec=StripeBillingService)
     service.create_generation_recovery_session.return_value = type(
@@ -757,7 +759,9 @@ async def test_billing_webhook_syncs_subscription_state_and_entitlement(app_with
     }
 
 
-async def test_billing_webhook_subscription_event_falls_back_to_existing_subscription_snapshot_linkage(app_with_overrides, test_user, monkeypatch):
+async def test_billing_webhook_subscription_event_falls_back_to_existing_subscription_snapshot_linkage(
+    app_with_overrides, test_user, monkeypatch
+):
     snapshot_id = uuid.uuid4()
     synced_snapshot = SubscriptionSnapshot(
         subscription_snapshot_id=snapshot_id,
@@ -801,7 +805,9 @@ async def test_billing_webhook_subscription_event_falls_back_to_existing_subscri
     }
 
 
-async def test_billing_webhook_subscription_event_falls_back_to_existing_customer_snapshot_linkage(app_with_overrides, test_user, monkeypatch):
+async def test_billing_webhook_subscription_event_falls_back_to_existing_customer_snapshot_linkage(
+    app_with_overrides, test_user, monkeypatch
+):
     snapshot_id = uuid.uuid4()
     synced_snapshot = SubscriptionSnapshot(
         subscription_snapshot_id=snapshot_id,
@@ -845,7 +851,9 @@ async def test_billing_webhook_subscription_event_falls_back_to_existing_custome
     }
 
 
-async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_state(app_with_overrides, test_user, mock_db, monkeypatch):
+async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_state(
+    app_with_overrides, test_user, mock_db, monkeypatch
+):
     failed_snapshot = SubscriptionSnapshot(
         subscription_snapshot_id=uuid.uuid4(),
         user_id=test_user.user_id,
@@ -855,9 +863,9 @@ async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_st
         sync_error_code="stripe_signature_invalid",
     )
     service = AsyncMock(spec=StripeBillingService)
-    service.handle_webhook.side_effect = __import__("app.services.stripe_billing", fromlist=["StripeSignatureError"]).StripeSignatureError(
-        "Invalid Stripe signature"
-    )
+    service.handle_webhook.side_effect = __import__(
+        "app.services.stripe_billing", fromlist=["StripeSignatureError"]
+    ).StripeSignatureError("Invalid Stripe signature")
     service.record_webhook_failure.return_value = failed_snapshot
     _stub_billing_service(monkeypatch, service)
 
@@ -889,7 +897,9 @@ async def test_billing_webhook_rejects_invalid_signature_and_persists_failure_st
     assert mock_db.committed is True
 
 
-async def test_billing_webhook_rejects_replayed_events_and_surfaces_snapshot_context(app_with_overrides, test_user, mock_db, monkeypatch):
+async def test_billing_webhook_rejects_replayed_events_and_surfaces_snapshot_context(
+    app_with_overrides, test_user, mock_db, monkeypatch
+):
     replay_snapshot = SubscriptionSnapshot(
         subscription_snapshot_id=uuid.uuid4(),
         user_id=test_user.user_id,
@@ -958,7 +968,9 @@ async def test_get_seller_payout_readiness_redacts_provider_refs(app_with_overri
     assert "provider_snapshot" not in str(payload)
 
 
-async def test_create_marketplace_publication_rejects_cross_user_source_cookbook(app_with_overrides, test_user, mock_db):
+async def test_create_marketplace_publication_rejects_cross_user_source_cookbook(
+    app_with_overrides, test_user, mock_db
+):
     foreign_cookbook = RecipeCookbookRecord(
         cookbook_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -987,7 +999,9 @@ async def test_create_marketplace_publication_rejects_cross_user_source_cookbook
     assert "owned by the publishing chef" in response.json()["detail"]
 
 
-async def test_marketplace_purchase_completion_is_replay_safe_and_grants_ownership_once(app_with_overrides, test_user, mock_db, monkeypatch):
+async def test_marketplace_purchase_completion_is_replay_safe_and_grants_ownership_once(
+    app_with_overrides, test_user, mock_db, monkeypatch
+):
     publication_id = uuid.uuid4()
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=publication_id,
@@ -1068,7 +1082,9 @@ async def test_marketplace_purchase_completion_is_replay_safe_and_grants_ownersh
     assert second.json()["replayed_completion"] is True
 
 
-async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownership(app_with_overrides, test_user, mock_db, monkeypatch):
+async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownership(
+    app_with_overrides, test_user, mock_db, monkeypatch
+):
     publication_id = uuid.uuid4()
     publication = MarketplaceCookbookPublicationRecord(
         marketplace_cookbook_publication_id=publication_id,
@@ -1128,7 +1144,9 @@ async def test_marketplace_purchase_completion_cancelled_does_not_grant_ownershi
     }
 
 
-async def test_marketplace_checkout_requires_ready_seller_payout_state(app_with_overrides, test_user, mock_db, monkeypatch):
+async def test_marketplace_checkout_requires_ready_seller_payout_state(
+    app_with_overrides, test_user, mock_db, monkeypatch
+):
     publication_id = uuid.uuid4()
     seller_id = uuid.uuid4()
     publication = MarketplaceCookbookPublicationRecord(
@@ -1303,10 +1321,7 @@ async def test_kitchen_config_burners_round_trip_through_real_db(db_session_for_
     stored = result.scalar_one_or_none()
 
     assert stored is not None
-    assert [
-        burner.model_dump() if hasattr(burner, "model_dump") else burner
-        for burner in stored.burners
-    ] == [
+    assert [burner.model_dump() if hasattr(burner, "model_dump") else burner for burner in stored.burners] == [
         {
             "burner_id": "front_left_large",
             "position": "front_left",
@@ -1433,7 +1448,9 @@ async def test_add_equipment_returns_201_and_persists_row(app_with_overrides, te
     assert data["unlocks_techniques"] == ["laminated_dough", "meringue"]
 
     result = await mock_db.exec(
-        select(Equipment).where(Equipment.equipment_id == uuid.UUID(data["equipment_id"]), Equipment.user_id == test_user.user_id)
+        select(Equipment).where(
+            Equipment.equipment_id == uuid.UUID(data["equipment_id"]), Equipment.user_id == test_user.user_id
+        )
     )
     equipment = result.first()
     assert equipment is not None
@@ -1484,7 +1501,9 @@ async def test_delete_equipment_returns_204_and_removes_row(app_with_overrides, 
     assert resp.status_code == 204
 
     result = await mock_db.exec(
-        select(Equipment).where(Equipment.equipment_id == equipment.equipment_id, Equipment.user_id == test_user.user_id)
+        select(Equipment).where(
+            Equipment.equipment_id == equipment.equipment_id, Equipment.user_id == test_user.user_id
+        )
     )
     assert result.first() is None
 
@@ -1787,7 +1806,9 @@ async def test_list_catalog_cookbooks_includes_backend_safe_access_diagnostics(a
     }
 
 
-async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_after_subscription_cancellation(app_with_overrides, test_user, mock_db):
+async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_after_subscription_cancellation(
+    app_with_overrides, test_user, mock_db
+):
     mock_db.seed(
         SubscriptionSnapshot,
         uuid.uuid4(),
@@ -1833,7 +1854,9 @@ async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_afte
         resp = await ac.get("/api/v1/catalog/cookbooks")
 
     assert resp.status_code == 200
-    premium = next(item for item in resp.json()["items"] if item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333")
+    premium = next(
+        item for item in resp.json()["items"] if item["catalog_cookbook_id"] == "33333333-3333-3333-3333-333333333333"
+    )
     assert premium["access_state"] == "included"
     assert premium["access_state_reason"] == "Previously purchased cookbook access is included"
     assert premium["ownership"] == {
@@ -1850,7 +1873,9 @@ async def test_list_catalog_cookbooks_marks_purchased_premium_item_included_afte
     assert "provider_completion_ref" not in str(premium)
 
 
-async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnostics(app_with_overrides, test_user, mock_db):
+async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnostics(
+    app_with_overrides, test_user, mock_db
+):
     mock_db.seed(
         SubscriptionSnapshot,
         uuid.uuid4(),
@@ -1886,7 +1911,9 @@ async def test_get_catalog_cookbook_detail_preserves_backend_safe_access_diagnos
     assert "provider_subscription_ref" not in str(item)
 
 
-async def test_get_catalog_cookbook_detail_surfaces_owned_status_without_provider_refs(app_with_overrides, test_user, mock_db):
+async def test_get_catalog_cookbook_detail_surfaces_owned_status_without_provider_refs(
+    app_with_overrides, test_user, mock_db
+):
     mock_db.seed(
         SubscriptionSnapshot,
         uuid.uuid4(),
@@ -1943,7 +1970,9 @@ async def test_get_catalog_cookbook_detail_surfaces_owned_status_without_provide
 
 
 @pytest.mark.asyncio
-async def test_marketplace_publication_and_payout_rows_are_queryable_without_touching_catalog_purchase_rows(db_session_for_routes):
+async def test_marketplace_publication_and_payout_rows_are_queryable_without_touching_catalog_purchase_rows(
+    db_session_for_routes,
+):
     chef_email = f"marketplace-chef-{uuid.uuid4()}@example.com"
     chef = UserProfile(
         user_id=uuid.uuid4(),
@@ -2002,8 +2031,24 @@ async def test_marketplace_publication_and_payout_rows_are_queryable_without_tou
             )
         )
     ).scalar_one_or_none()
-    purchases = (await db_session_for_routes.execute(select(CatalogCookbookPurchaseRecord))).scalars().all()
-    ownerships = (await db_session_for_routes.execute(select(CatalogCookbookOwnershipRecord))).scalars().all()
+    purchases = (
+        (
+            await db_session_for_routes.execute(
+                select(CatalogCookbookPurchaseRecord).where(CatalogCookbookPurchaseRecord.user_id == chef.user_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ownerships = (
+        (
+            await db_session_for_routes.execute(
+                select(CatalogCookbookOwnershipRecord).where(CatalogCookbookOwnershipRecord.user_id == chef.user_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert stored_payout is not None
     assert stored_payout.onboarding_status == SellerPayoutOnboardingStatus.ENABLED
@@ -2043,7 +2088,9 @@ async def test_create_session_with_planner_catalog_cookbook_locked_returns_403(a
     assert resp.json()["detail"] == "Upgrade required for this catalog cookbook"
 
 
-async def test_create_session_with_planner_catalog_cookbook_owned_purchase_allows_access(app_with_overrides, test_user, mock_db):
+async def test_create_session_with_planner_catalog_cookbook_owned_purchase_allows_access(
+    app_with_overrides, test_user, mock_db
+):
     mock_db.seed(
         SubscriptionSnapshot,
         uuid.uuid4(),
@@ -2788,11 +2835,25 @@ async def test_run_pipeline_rejects_non_pending_session(app_with_overrides, mock
     assert "already" in resp.json()["detail"]
 
 
-async def test_run_pipeline_returns_blocked_response_without_mutating_session_status(app_with_overrides, mock_db, test_user):
+async def test_run_pipeline_returns_blocked_response_without_mutating_session_status(
+    app_with_overrides, mock_db, test_user, monkeypatch
+):
     test_user.generation_payment_method_required = True
     test_user.has_saved_generation_payment_method = False
     session = Session(user_id=test_user.user_id, status=SessionStatus.PENDING, concept_json={})
     mock_db.seed(Session, session.session_id, session)
+
+    delayed_calls: list[tuple[str, str]] = []
+
+    class _FakeTask:
+        id = "celery-test-task"
+
+    class _FakePipelineTask:
+        def delay(self, session_id: str, user_id: str):
+            delayed_calls.append((session_id, user_id))
+            return _FakeTask()
+
+    monkeypatch.setattr("app.workers.tasks.run_grasp_pipeline", _FakePipelineTask())
 
     transport = ASGITransport(app=app_with_overrides)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -2811,6 +2872,7 @@ async def test_run_pipeline_returns_blocked_response_without_mutating_session_st
     stored_session = await mock_db.get(Session, session.session_id)
     assert stored_session is not None
     assert stored_session.status == SessionStatus.PENDING
+    assert delayed_calls == []
 
 
 async def test_get_session_status_includes_app_safe_outstanding_balance_summary(app_with_overrides, mock_db, test_user):
@@ -3006,7 +3068,11 @@ async def test_get_session_results_fallback_returns_checkpoint_provenance(app_wi
     assert data["recipes"][0]["source"]["source"]["provenance"] == checkpoint_recipe["source"]["source"]["provenance"]
     assert data["recipes"][0]["source"]["rag_sources"] == []
     assert data["errors"] == [{"node_name": "validator", "message": "kept for parity", "recoverable": True}]
-async def test_get_session_results_fast_path_preserves_explicit_schedule_metadata(app_with_overrides, mock_db, test_user):
+
+
+async def test_get_session_results_fast_path_preserves_explicit_schedule_metadata(
+    app_with_overrides, mock_db, test_user
+):
     session = Session(
         user_id=test_user.user_id,
         status=SessionStatus.COMPLETE,
@@ -3058,7 +3124,9 @@ async def test_get_session_results_fast_path_preserves_explicit_schedule_metadat
     }
 
 
-async def test_get_session_results_fallback_preserves_explicit_schedule_metadata(app_with_overrides, mock_db, test_user):
+async def test_get_session_results_fallback_preserves_explicit_schedule_metadata(
+    app_with_overrides, mock_db, test_user
+):
     session = Session(
         user_id=test_user.user_id,
         status=SessionStatus.COMPLETE,
@@ -3203,7 +3271,9 @@ async def test_list_catalog_cookbooks_derives_locked_and_preview_states(app_with
     assert "Upgrade required" in items_by_slug["chef-tasting-menus"]["access_state_reason"]
 
 
-async def test_get_catalog_cookbook_returns_detail_shape_and_preserves_private_lane_separation(app_with_overrides, mock_db, test_user):
+async def test_get_catalog_cookbook_returns_detail_shape_and_preserves_private_lane_separation(
+    app_with_overrides, mock_db, test_user
+):
     private_cookbook = RecipeCookbookRecord(
         user_id=test_user.user_id,
         name="Private Cookbook",
@@ -3262,7 +3332,9 @@ async def test_create_authored_recipe_201(app_with_overrides, authored_recipe_pa
     assert "concept_json" not in data
 
 
-async def test_create_authored_recipe_with_cookbook_metadata(app_with_overrides, mock_db, test_user, authored_recipe_payload):
+async def test_create_authored_recipe_with_cookbook_metadata(
+    app_with_overrides, mock_db, test_user, authored_recipe_payload
+):
     cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Desserts", description="Sweet course ideas")
     mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
     payload = dict(authored_recipe_payload)
@@ -3290,7 +3362,9 @@ async def test_create_authored_recipe_rejects_missing_cookbook(app_with_override
     assert resp.json()["detail"] == "Cookbook not found"
 
 
-async def test_create_authored_recipe_rejects_other_users_cookbook(app_with_overrides, mock_db, authored_recipe_payload):
+async def test_create_authored_recipe_rejects_other_users_cookbook(
+    app_with_overrides, mock_db, authored_recipe_payload
+):
     cookbook = RecipeCookbookRecord(user_id=uuid.uuid4(), name="Hidden", description="Not yours")
     mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
     payload = dict(authored_recipe_payload)
@@ -3447,7 +3521,9 @@ async def test_get_authored_recipe_requires_ownership(app_with_overrides, mock_d
     assert resp.json()["detail"] == "Access denied"
 
 
-async def test_get_authored_recipe_returns_full_contract_shape(app_with_overrides, mock_db, test_user, authored_recipe_payload):
+async def test_get_authored_recipe_returns_full_contract_shape(
+    app_with_overrides, mock_db, test_user, authored_recipe_payload
+):
     cookbook = RecipeCookbookRecord(user_id=test_user.user_id, name="Desserts", description="Sweet endings")
     mock_db.seed(RecipeCookbookRecord, cookbook.cookbook_id, cookbook)
 
@@ -3633,16 +3709,10 @@ async def test_create_authored_recipe_422_preserves_validation_detail(app_with_o
 # ─────────────────────────────────────────────────────────────────────────────
 # Route inventory
 # ─────────────────────────────────────────────────────────────────────────────
-# Route inventory
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_route_contract_app_excludes_ingest_surface(app_with_overrides):
-    route_paths = {
-        route.path
-        for route in app_with_overrides.routes
-        if getattr(route, "path", None)
-    }
+    route_paths = {route.path for route in app_with_overrides.routes if getattr(route, "path", None)}
 
     assert "/api/v1/ingest" not in route_paths
     assert not any(path.startswith("/api/v1/ingest/") for path in route_paths)

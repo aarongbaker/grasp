@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from fastapi import HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession as SAAsyncSession
 
 from app.models.catalog import CookbookRevenueShare
 from app.models.pipeline import SessionOutstandingBalanceSummary
@@ -34,6 +35,13 @@ from app.services.catalog_purchases import CatalogPurchaseOutcome, CatalogPurcha
 from app.services.generation_billing import GenerationBillingService
 
 logger = logging.getLogger(__name__)
+
+
+def _session_exec(db: AsyncSession | SAAsyncSession, statement):
+    exec_method = getattr(db, "exec", None)
+    if callable(exec_method):
+        return exec_method(statement)
+    return db.execute(statement)
 
 STRIPE_PROVIDER = "stripe"
 _PREMIUM_PLAN_CODE = "stripe:catalog-premium"
@@ -293,12 +301,13 @@ class StripeBillingService:
         user: UserProfile,
         session_id: uuid.UUID | None = None,
     ) -> BillingSetupBundle:
+        had_customer_ref = bool(user.stripe_customer_id)
         customer_ref = await self._ensure_customer_ref(db, user=user)
         portal = await self._gateway.create_billing_portal_session(
             customer=customer_ref,
             return_url=self._settings.stripe_portal_return_url,
         )
-        customer_state = "existing" if user.stripe_customer_id else "created"
+        customer_state = "existing" if had_customer_ref else "created"
         return BillingSetupBundle(
             url=portal["url"],
             customer_state=customer_state,
@@ -531,8 +540,11 @@ class StripeBillingService:
         return session
 
     async def _get_or_create_seller_payout_account(self, db: AsyncSession, *, user: UserProfile) -> SellerPayoutAccountRecord:
-        result = await db.exec(select(SellerPayoutAccountRecord).where(SellerPayoutAccountRecord.user_id == user.user_id))
-        record = result.first()
+        result = await _session_exec(
+            db,
+            select(SellerPayoutAccountRecord).where(SellerPayoutAccountRecord.user_id == user.user_id),
+        )
+        record = result.scalars().first()
         if record is not None:
             return record
         record = SellerPayoutAccountRecord(
@@ -727,12 +739,13 @@ class StripeBillingService:
         return snapshot.provider_customer_ref or customer["id"]
 
     async def _get_latest_snapshot(self, db: AsyncSession, *, user_id: uuid.UUID) -> SubscriptionSnapshot | None:
-        result = await db.exec(
+        result = await _session_exec(
+            db,
             select(SubscriptionSnapshot)
             .where(SubscriptionSnapshot.user_id == user_id)
-            .order_by(SubscriptionSnapshot.updated_at.desc(), SubscriptionSnapshot.created_at.desc())
+            .order_by(SubscriptionSnapshot.updated_at.desc(), SubscriptionSnapshot.created_at.desc()),
         )
-        return result.first()
+        return result.scalars().first()
 
     async def _find_snapshot_by_provider_subscription_ref(
         self,
@@ -740,12 +753,13 @@ class StripeBillingService:
         *,
         provider_subscription_ref: str,
     ) -> SubscriptionSnapshot | None:
-        result = await db.exec(
+        result = await _session_exec(
+            db,
             select(SubscriptionSnapshot).where(
                 SubscriptionSnapshot.provider_subscription_ref == provider_subscription_ref
-            )
+            ),
         )
-        return result.first()
+        return result.scalar_one_or_none()
 
     async def _find_snapshot_by_provider_customer_ref(
         self,
@@ -753,12 +767,13 @@ class StripeBillingService:
         *,
         provider_customer_ref: str,
     ) -> SubscriptionSnapshot | None:
-        result = await db.exec(
+        result = await _session_exec(
+            db,
             select(SubscriptionSnapshot)
             .where(SubscriptionSnapshot.provider_customer_ref == provider_customer_ref)
-            .order_by(SubscriptionSnapshot.updated_at.desc(), SubscriptionSnapshot.created_at.desc())
+            .order_by(SubscriptionSnapshot.updated_at.desc(), SubscriptionSnapshot.created_at.desc()),
         )
-        return result.first()
+        return result.scalars().first()
 
     async def _upsert_snapshot(
         self,
@@ -811,14 +826,15 @@ class StripeBillingService:
         active: bool,
         current_period_ends_at: datetime | None,
     ) -> UserEntitlementGrant:
-        result = await db.exec(
+        result = await _session_exec(
+            db,
             select(UserEntitlementGrant).where(
                 UserEntitlementGrant.user_id == user_id,
                 UserEntitlementGrant.kind == EntitlementKind.CATALOG_PREMIUM,
                 UserEntitlementGrant.source == STRIPE_PROVIDER,
-            )
+            ),
         )
-        grant = result.first()
+        grant = result.scalars().first()
         now = self._now_fn()
         if grant is None:
             grant = UserEntitlementGrant(

@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import asc, desc, func
+from sqlalchemy.ext.asyncio import AsyncSession as SAAsyncSession
 from sqlmodel import select
 
 from app.core.deps import CurrentUser, DBSession
@@ -67,6 +68,13 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/sessions")
 
 
+def _session_exec(db: DBSession | SAAsyncSession, statement):
+    exec_method = getattr(db, "exec", None)
+    if callable(exec_method):
+        return exec_method(statement)
+    return db.execute(statement)
+
+
 def _session_status(value: SessionStatus | str) -> SessionStatus:
     """Coerce a raw status value to SessionStatus enum.
 
@@ -101,10 +109,7 @@ async def _resolve_planner_reference_matches(
             .order_by(desc(AuthoredRecipeRecord.updated_at), asc(AuthoredRecipeRecord.title))  # type: ignore[arg-type]
         )
         records = (await db.exec(stmt)).all()
-        matches = [
-            PlannerAuthoredResolutionMatch(recipe_id=record.recipe_id, title=record.title)
-            for record in records
-        ]
+        matches = [PlannerAuthoredResolutionMatch(recipe_id=record.recipe_id, title=record.title) for record in records]
     else:
         stmt = (
             select(RecipeCookbookRecord)
@@ -232,7 +237,9 @@ async def _resolve_planner_catalog_cookbook(
     }
 
 
-def _build_outstanding_balance_response(*, session: Session, outstanding_balance: SessionOutstandingBalanceSummary) -> SessionDetailResponse:
+def _build_outstanding_balance_response(
+    *, session: Session, outstanding_balance: SessionOutstandingBalanceSummary
+) -> SessionDetailResponse:
     return SessionDetailResponse(
         session_id=session.session_id,
         user_id=session.user_id,
@@ -318,7 +325,9 @@ async def create_session(request: Request, body: CreateSessionRequest, db: DBSes
     return session
 
 
-@router.post("/{session_id}/run", status_code=202, response_model=SessionRunAcceptedResponse | SessionRunBlockedResponse)
+@router.post(
+    "/{session_id}/run", status_code=202, response_model=SessionRunAcceptedResponse | SessionRunBlockedResponse
+)
 @limiter.limit("5/minute")
 async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, current_user: CurrentUser):
     session = await db.get(Session, session_id)
@@ -346,17 +355,50 @@ async def run_pipeline(request: Request, session_id: uuid.UUID, db: DBSession, c
             },
         )
 
-    session.status = SessionStatus.GENERATING
-    session.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    db.add(session)
-    await db.commit()
-
     from app.workers.tasks import run_grasp_pipeline
 
-    result = run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))  # type: ignore[attr-defined]
+    kickoff_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    kickoff_failure_summary = "Pipeline kickoff failed before execution was accepted. Please retry."
+
+    # Broker acceptance is the causal boundary for durable GENERATING. We only
+    # write GENERATING/started_at/celery_task_id as one logical transition after
+    # Celery returns an accepted task id. If enqueue fails, keep the row retryable
+    # as PENDING with a user-visible error_summary instead of stranding GENERATING.
+    try:
+        result = run_grasp_pipeline.delay(str(session_id), str(current_user.user_id))  # type: ignore[attr-defined]
+    except Exception as exc:
+        session.status = SessionStatus.PENDING
+        session.started_at = None
+        session.celery_task_id = None
+        session.error_summary = kickoff_failure_summary
+        db.add(session)
+        await db.commit()
+        raise HTTPException(status_code=503, detail=kickoff_failure_summary) from exc
+
+    session.status = SessionStatus.GENERATING
+    session.started_at = kickoff_started_at
     session.celery_task_id = result.id
+    session.error_summary = None
     db.add(session)
-    await db.commit()
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        try:
+            from app.workers.celery_app import celery_app
+
+            celery_app.control.revoke(result.id, terminate=True, signal="SIGTERM")
+        except Exception:
+            pass
+
+        session.status = SessionStatus.PENDING
+        session.started_at = None
+        session.celery_task_id = None
+        session.error_summary = kickoff_failure_summary
+        db.add(session)
+        await db.rollback()
+        await db.commit()
+        raise HTTPException(status_code=503, detail=kickoff_failure_summary) from exc
 
     return SessionRunAcceptedResponse(
         session_id=session_id,
@@ -373,8 +415,8 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
         .execution_options(populate_existing=True)
         .with_for_update()
     )
-    result = await db.exec(stmt)
-    session = result.first()
+    result = await _session_exec(db, stmt)
+    session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user_id != current_user.user_id:
@@ -428,7 +470,13 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
     outstanding_summary = SessionOutstandingBalanceSummary(
         has_outstanding_balance=outstanding.has_outstanding_balance,
         can_retry_charge=outstanding.can_retry_charge,
-        billing_state=(outstanding.billing_state.value if hasattr(outstanding.billing_state, "value") else outstanding.billing_state) if outstanding.billing_state else None,
+        billing_state=(
+            outstanding.billing_state.value
+            if hasattr(outstanding.billing_state, "value")
+            else outstanding.billing_state
+        )
+        if outstanding.billing_state
+        else None,
         reason_code=outstanding.reason_code,
         reason=outstanding.reason,
         retry_attempted_at=outstanding.retry_attempted_at,
@@ -436,7 +484,9 @@ async def get_session_status(session_id: uuid.UUID, db: DBSession, current_user:
             "kind": "retry_outstanding_balance",
             "label": "Resolve outstanding balance",
             "session_id": session.session_id,
-        } if outstanding.can_retry_charge else None,
+        }
+        if outstanding.can_retry_charge
+        else None,
     )
 
     session_status = _session_status(session.status)
