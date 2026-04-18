@@ -12,7 +12,7 @@ Keeping them separate avoids driver confusion and connection pool collisions.
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Sentinel value for development. The lifespan hook raises RuntimeError if this
@@ -97,7 +97,18 @@ class Settings(BaseSettings):
 
     # ── Pipeline ──────────────────────────────────────────────────────────────
     celery_task_timeout: int = 600   # seconds before Celery raises SoftTimeLimitExceeded
-    celery_worker_concurrency: int = 4  # Celery worker pool size
+    celery_worker_concurrency: int = 1  # solo worker only; higher concurrency is unsupported
+
+    @model_validator(mode="after")
+    def validate_celery_worker_contract(self) -> "Settings":
+        # GRASP's worker memory/correctness budget assumes exactly one in-flight pipeline.
+        # Reject conflicting env/config early so runtime imports cannot silently drift to prefork/4.
+        if self.celery_worker_concurrency != 1:
+            raise ValueError(
+                "CELERY_WORKER_CONCURRENCY must be 1 because the checked-in worker contract is "
+                "--pool=solo --concurrency=1"
+            )
+        return self
 
     # Test flag: set to "1" to simulate a dag_builder crash for checkpoint resume test.
     # Preserved here so tests can set it via os.environ without importing the node.

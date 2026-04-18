@@ -340,7 +340,7 @@ def generator_ft_mode():
     _generator_ft_mode = False
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def test_db_engine():
     """Session-scoped test DB engine. Creates all SQLModel tables once."""
     _ensure_test_postgres_available()

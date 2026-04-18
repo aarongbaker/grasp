@@ -1,9 +1,11 @@
+import importlib
+import sys
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from app.core.settings import Settings
+from app.core.settings import Settings, get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,9 +109,34 @@ def test_deploy_docs_reference_frontend_api_base_env() -> None:
 def test_celery_app_makes_worker_startup_retry_explicit() -> None:
     from app.workers.celery_app import celery_app
 
+    assert celery_app.conf.worker_pool == "solo"
+    assert celery_app.conf.worker_concurrency == 1
     assert celery_app.conf.broker_connection_retry is True
     assert celery_app.conf.broker_connection_retry_on_startup is True
     assert celery_app.conf.task_max_retries == 0
+
+
+def test_settings_reject_conflicting_celery_worker_concurrency() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="CELERY_WORKER_CONCURRENCY must be 1 because the checked-in worker contract is "
+        "--pool=solo --concurrency=1",
+    ):
+        Settings(_env_file=None, celery_worker_concurrency=4)
+
+
+def test_celery_app_import_fails_fast_when_env_conflicts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CELERY_WORKER_CONCURRENCY", "4")
+    get_settings.cache_clear()
+    sys.modules.pop("app.workers.celery_app", None)
+
+    with pytest.raises(ValidationError, match="CELERY_WORKER_CONCURRENCY must be 1"):
+        importlib.import_module("app.workers.celery_app")
+
+    monkeypatch.delenv("CELERY_WORKER_CONCURRENCY", raising=False)
+    get_settings.cache_clear()
+    sys.modules.pop("app.workers.celery_app", None)
+    importlib.import_module("app.workers.celery_app")
 
 
 def test_fresh_db_migrations_guard_missing_sessionstatus_enum() -> None:

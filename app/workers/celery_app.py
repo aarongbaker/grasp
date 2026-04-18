@@ -32,9 +32,26 @@ that waste API credits and potentially produce worse results.
 
 from celery import Celery
 
-from app.core.settings import get_settings
+from app.core.settings import Settings, get_settings
 
-settings = get_settings()
+
+class CeleryWorkerConfigurationError(RuntimeError):
+    """Raised when repository-managed worker settings drift from the required solo/1 contract."""
+
+
+
+def load_worker_settings() -> Settings:
+    settings = get_settings()
+    if settings.celery_worker_concurrency != 1:
+        raise CeleryWorkerConfigurationError(
+            "Celery worker concurrency drift detected: "
+            f"expected 1, got {settings.celery_worker_concurrency}. "
+            "The checked-in worker contract is --pool=solo --concurrency=1."
+        )
+    return settings
+
+
+settings = load_worker_settings()
 
 celery_app = Celery(
     "grasp",
@@ -54,9 +71,11 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 
-    # Worker pool size — controlled by settings so different environments
-    # can adjust without code changes (e.g. larger machines in production).
-    worker_concurrency=settings.celery_worker_concurrency,
+    # Authoritative worker contract: one solo process only.
+    # The settings layer rejects conflicting env values so imports fail fast instead of
+    # silently falling back to Celery defaults like prefork/4.
+    worker_pool="solo",
+    worker_concurrency=1,
 
     # Soft time limit: after this many seconds, Celery raises SoftTimeLimitExceeded
     # inside the task. The task can catch this to do cleanup before being killed.
