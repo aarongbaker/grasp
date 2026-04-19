@@ -120,19 +120,19 @@ def upgrade() -> None:
         sa.UniqueConstraint("session_id", name="uq_generation_funding_ledger_entries_session_id"),
     )
     op.create_index(
-        "ix_generation_funding_ledger_entries_user_id",
+        "ix_gf_ledger_entries_user_id",
         "generation_funding_ledger_entries",
         ["user_id"],
         unique=False,
     )
     op.create_index(
-        "ix_generation_funding_ledger_entries_generation_billing_record_id",
+        "ix_gf_ledger_entries_gbr_id",
         "generation_funding_ledger_entries",
         ["generation_billing_record_id"],
         unique=False,
     )
     op.create_index(
-        "ix_generation_funding_ledger_entries_funding_grant_id",
+        "ix_gf_ledger_entries_funding_grant_id",
         "generation_funding_ledger_entries",
         ["funding_grant_id"],
         unique=False,
@@ -140,9 +140,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_generation_funding_ledger_entries_funding_grant_id", table_name="generation_funding_ledger_entries")
-    op.drop_index("ix_generation_funding_ledger_entries_generation_billing_record_id", table_name="generation_funding_ledger_entries")
-    op.drop_index("ix_generation_funding_ledger_entries_user_id", table_name="generation_funding_ledger_entries")
+    op.drop_index("ix_gf_ledger_entries_funding_grant_id", table_name="generation_funding_ledger_entries")
+    op.drop_index("ix_gf_ledger_entries_gbr_id", table_name="generation_funding_ledger_entries")
+    op.drop_index("ix_gf_ledger_entries_user_id", table_name="generation_funding_ledger_entries")
     op.drop_table("generation_funding_ledger_entries")
 
     op.drop_index("ix_generation_billing_records_funding_grant_id", table_name="generation_billing_records")
