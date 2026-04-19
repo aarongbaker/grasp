@@ -1,7 +1,7 @@
 """add generation funding ledger
 
-Revision ID: 1f4d2c8b9a01_generation_funding_ledger
-Revises: 1776217588_generation_billing_ledger
+Revision ID: 1f4d2c8b9a01
+Revises: 1776217588a
 Create Date: 2026-04-17 19:12:00.000000
 """
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "1f4d2c8b9a01_generation_funding_ledger"
-down_revision = "1776217588_generation_billing_ledger"
+revision = "1f4d2c8b9a01"
+down_revision = "1776217588a"
 branch_labels = None
 depends_on = None
 

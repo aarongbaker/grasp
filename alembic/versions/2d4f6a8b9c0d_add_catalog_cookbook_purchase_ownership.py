@@ -1,7 +1,7 @@
 """add catalog cookbook purchase ownership tables
 
 Revision ID: 2d4f6a8b9c0d
-Revises: 1776217588_generation_billing_ledger
+Revises: 1776217588a
 Create Date: 2026-04-14 22:20:00.000000
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "2d4f6a8b9c0d"
-down_revision = "1776217588_generation_billing_ledger"
+down_revision = "1776217588a"
 branch_labels = None
 depends_on = None
 

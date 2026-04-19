@@ -1,6 +1,6 @@
 """add generation billing ledger table
 
-Revision ID: 1776217588_generation_billing_ledger
+Revision ID: 1776217588a
 Revises: 9b1d7e6c4a2f
 Create Date: 2026-04-14 21:46:28.000000
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "1776217588_generation_billing_ledger"
+revision = "1776217588a"
 down_revision = "9b1d7e6c4a2f"
 branch_labels = None
 depends_on = None
