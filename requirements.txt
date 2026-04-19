@@ -26,7 +26,7 @@ anthropic==0.84.0
 openai==2.26.0
 
 # ── Vector Store ──────────────────────────────────────────────────────────────
-pinecone==4.1.0                 # pinecone v4 client — upsert API changed from v2
+pinecone==4.1.0                 # legacy ingestion only — not loaded in production image
 
 # ── Graph / Scheduling ────────────────────────────────────────────────────────
 networkx==3.3                   # DAG construction and cycle detection

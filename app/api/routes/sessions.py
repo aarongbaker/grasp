@@ -412,7 +412,7 @@ async def cancel_pipeline(session_id: uuid.UUID, db: DBSession, current_user: Cu
         .execution_options(populate_existing=True)
         .with_for_update()
     )
-    result = await _session_exec(db, stmt)
+    result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")

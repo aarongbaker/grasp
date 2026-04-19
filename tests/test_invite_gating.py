@@ -16,6 +16,7 @@ from app.api.routes.users import router as users_router
 from app.core.settings import Settings
 from app.db.session import get_session
 from app.models.invite import Invite
+from app.models.user import UserProfile
 
 
 @pytest.fixture

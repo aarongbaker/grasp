@@ -41,4 +41,4 @@ EXPOSE 8000
 
 # API server (default)
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-# Celery worker: docker run <image> celery -A app.workers.celery_app worker --concurrency=1 --pool=solo
+# Celery worker: docker run <image> celery -A app.workers.celery_app worker --pool=solo --concurrency=1

@@ -18,7 +18,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from inspect import isawaitable
-from unittest.mock import AsyncMock
 from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException, status
@@ -502,8 +501,6 @@ async def create_marketplace_checkout(publication_id: uuid.UUID, current_user: C
 
     service = build_billing_service(get_settings())
     bundle = await service.create_marketplace_checkout_session(db, buyer=current_user, publication=publication)
-    if isinstance(bundle, AsyncMock):
-        raise HTTPException(status_code=409, detail="Seller payout readiness is incomplete for this marketplace cookbook")
     if not isinstance(bundle, (dict, MarketplaceCheckoutResponse)) and not hasattr(bundle, "checkout_url"):
         raise HTTPException(status_code=409, detail="Seller payout readiness is incomplete for this marketplace cookbook")
     if isinstance(bundle, MarketplaceCheckoutResponse):

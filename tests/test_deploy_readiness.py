@@ -151,3 +151,10 @@ def test_fresh_db_migrations_guard_missing_sessionstatus_enum() -> None:
     assert "ALTER TYPE sessionstatus ADD VALUE IF NOT EXISTS 'CANCELLED'" in add_celery_migration
     assert "IF EXISTS (" in fix_case_migration
     assert "typname = 'sessionstatus'" in fix_case_migration
+
+
+def test_ingest_route_not_mounted_in_production_app() -> None:
+    """Ingest route is legacy/internal infrastructure — must not be publicly mounted."""
+    main_source = (REPO_ROOT / "app" / "main.py").read_text()
+    assert "ingest_router" not in main_source
+    assert "routes.ingest" not in main_source

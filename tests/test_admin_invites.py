@@ -1,5 +1,6 @@
 """Tests for admin invite issuance contract."""
 
+import uuid
 from unittest.mock import MagicMock
 
 import pytest

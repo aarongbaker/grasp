@@ -28,9 +28,6 @@ langchain-openai==1.1.10
 anthropic==0.84.0
 openai==2.26.0
 
-# ── Vector Store ──────────────────────────────────────────────────────────────
-pinecone==4.1.0                 # pinecone v4 client — upsert API changed from v2
-
 # ── Graph / Scheduling ────────────────────────────────────────────────────────
 networkx==3.3                   # DAG construction and cycle detection
 ingredient-parser-nlp==2.6.0    # imports as `ingredient_parser` for deterministic ingredient normalization in enricher

@@ -36,6 +36,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.api.routes.auth import _build_access_token
 from app.core.settings import get_settings
@@ -368,7 +369,7 @@ async def test_db_session(test_db_engine):
         echo=False,
         poolclass=NullPool,
     )
-    session = AsyncSession(engine, expire_on_commit=False)
+    session = SQLModelAsyncSession(engine, expire_on_commit=False)
     try:
         yield session
     finally:
